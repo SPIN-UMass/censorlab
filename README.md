@@ -1,5 +1,4 @@
-# Censorlab
-As far as I know, the only dependency is a rust toolchain (current stable)
+# CensorLab: A Generic Testbed for Censorship Emulation
 
 # About
 
