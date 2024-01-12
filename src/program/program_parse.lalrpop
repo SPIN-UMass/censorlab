@@ -1,0 +1,141 @@
+use crate::program::program::{
+    field::{
+        env::Field as EnvField, ip::Field as IpField, ip::V4Field as Ipv4Field,
+        ip::V6Field as Ipv6Field, tcp::Field as TcpField, tcp::Flag as TcpFlag,
+        udp::Field as UdpField, Field,
+    },
+    Action, ComparisonOperator, Condition, Input, Line, LogicOperator, Operation, Operator,
+    Program, Register, RegisterType,
+};
+use std::str::FromStr;
+
+grammar;
+
+pub Line: Line = {
+  "if" <condition: Condition> ":" <operation: Operation>  => Line { condition: Some(condition), operation },
+  <operation: Operation>  => Line { condition: None, operation }
+}
+Condition: Condition = {
+  <lhs: Input> <operator: Operator> <rhs: Input> => Condition { lhs, operator, rhs }
+}
+
+Input: Input = {
+  "field:" <f: Field> => Input::Field(f),
+  <r: Register> => Input::Register(r),
+  <f: Float> => Input::Float(f),
+  <i: Integer> => Input::Int(i),
+  "True" => Input::Bool(true),
+  "False" => Input::Bool(false),
+};
+
+Register: Register = {
+  "reg:" <ty: RegisterType> "." <index: Usize> => Register { ty, index },
+}
+
+RegisterType: RegisterType = {
+  "f" => RegisterType::Float,
+  "i" => RegisterType::Int,
+  "b" => RegisterType::Bool,
+}
+
+pub Field: Field = {
+  "env.num_packets" => Field::Env(EnvField::NumPackets),
+  "timestamp" => Field::Timestamp,
+  "ip.header_len" => Field::Ip(IpField::HeaderLen),
+  "ip.total_len" => Field::Ip(IpField::TotalLen),
+  "ip.hop_limit" => Field::Ip(IpField::HopLimit),
+  "ip4.dscp" => Field::Ip(IpField::V4(Ipv4Field::Dscp)),
+  "ip4.ecn" => Field::Ip(IpField::V4(Ipv4Field::Ecn)),
+  "ip4.ident" => Field::Ip(IpField::V4(Ipv4Field::Ident)),
+  "ip4.dont_frag" => Field::Ip(IpField::V4(Ipv4Field::DontFrag)),
+  "ip4.more_frags" => Field::Ip(IpField::V4(Ipv4Field::MoreFrags)),
+  "ip4.frag_offset" => Field::Ip(IpField::V4(Ipv4Field::FragOffset)),
+  "ip4.checksum" => Field::Ip(IpField::V4(Ipv4Field::Checksum)),
+  "ip6.traffic_class" => Field::Ip(IpField::V6(Ipv6Field::TrafficClass)),
+  "ip6.flow_label" => Field::Ip(IpField::V6(Ipv6Field::FlowLabel)),
+  "ip6.payload_len" => Field::Ip(IpField::V6(Ipv6Field::PayloadLen)),
+  "tcp.seq" => Field::Tcp(TcpField::Seq),
+  "tcp.ack" => Field::Tcp(TcpField::Ack),
+  "tcp.flag.fin" => Field::Tcp(TcpField::Flag(TcpFlag::Fin)),
+  "tcp.flag.syn" => Field::Tcp(TcpField::Flag(TcpFlag::Syn)),
+  "tcp.flag.rst" => Field::Tcp(TcpField::Flag(TcpFlag::Rst)),
+  "tcp.flag.psh" => Field::Tcp(TcpField::Flag(TcpFlag::Psh)),
+  "tcp.flag.ack" => Field::Tcp(TcpField::Flag(TcpFlag::Ack)),
+  "tcp.flag.urg" => Field::Tcp(TcpField::Flag(TcpFlag::Urg)),
+  "tcp.flag.ece" => Field::Tcp(TcpField::Flag(TcpFlag::Ece)),
+  "tcp.flag.cwr" => Field::Tcp(TcpField::Flag(TcpFlag::Cwr)),
+  "tcp.flag.ns" => Field::Tcp(TcpField::Flag(TcpFlag::Ns)),
+  "tcp.len" => Field::Tcp(TcpField::Length),
+  "tcp.header.len" => Field::Tcp(TcpField::HeaderLength),
+  "tcp.payload.len" => Field::Tcp(TcpField::PayloadLength),
+  "tcp.urgent_at" => Field::Tcp(TcpField::UrgentAt),
+  "tcp.window_len" => Field::Tcp(TcpField::WindowLength),
+  "udp.length" => Field::Udp(UdpField::Length),
+  "udp.checksum" => Field::Udp(UdpField::Checksum),
+  "transport.payload.entropy" => Field::PayloadEntropy,
+}
+
+Float : f64 = {
+  "-" <s:r"[0-9]+\.[0-9]+"> => f64::from_str(s).unwrap(),
+  <s:r"[0-9]+\.[0-9]+"> => f64::from_str(s).unwrap()
+}
+
+Integer: i64 = {
+  "-" <s:r"[0-9]+"> => i64::from_str(s).unwrap(),
+  <s:r"[0-9]+"> => i64::from_str(s).unwrap()
+}
+
+Usize: usize = <s:r"[0-9]+"> => usize::from_str(s).unwrap();
+
+pub Operator: Operator = {
+  "lt" => Operator::Comparison(ComparisonOperator::Less), 
+  "<" => Operator::Comparison(ComparisonOperator::Less), 
+  "le" => Operator::Comparison(ComparisonOperator::LessEqual), 
+  "<=" => Operator::Comparison(ComparisonOperator::LessEqual), 
+  "ne" => Operator::Comparison(ComparisonOperator::NotEqual), 
+  "!=" => Operator::Comparison(ComparisonOperator::NotEqual), 
+  "eq" => Operator::Comparison(ComparisonOperator::Equal),
+  "==" => Operator::Comparison(ComparisonOperator::Equal),
+  "gt" => Operator::Comparison(ComparisonOperator::Greater), 
+  ">" => Operator::Comparison(ComparisonOperator::Greater), 
+  "ge" => Operator::Comparison(ComparisonOperator::GreaterEqual),
+  ">=" => Operator::Comparison(ComparisonOperator::GreaterEqual),
+  "op_and" => Operator::Logic(LogicOperator::And),
+  "and" => Operator::Logic(LogicOperator::And),
+  "&&" => Operator::Logic(LogicOperator::And),
+  "op_or" => Operator::Logic(LogicOperator::Or),
+  "or" => Operator::Logic(LogicOperator::Or),
+  "||" => Operator::Logic(LogicOperator::Or),
+  "op_xor" => Operator::Logic(LogicOperator::Xor),
+  "xor" => Operator::Logic(LogicOperator::Xor),
+  "^" => Operator::Logic(LogicOperator::Xor),
+  "op_nand" => Operator::Logic(LogicOperator::Nand),
+  "nand" => Operator::Logic(LogicOperator::Nand),
+  "op_nor" => Operator::Logic(LogicOperator::Nor),
+  "nor" => Operator::Logic(LogicOperator::Nor),
+  "op_xnor" => Operator::Logic(LogicOperator::Xnor),
+  "xnor" => Operator::Logic(LogicOperator::Xnor),
+}
+
+Operation: Operation = {
+  "COPY"   <from: Input> "->" <to: Register> => Operation::Copy{from, to},
+  "ADD"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Add{lhs, rhs, out},
+  "SUB"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Sub{lhs, rhs, out},
+  "MUL"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Mul{lhs, rhs, out},
+  "DIV"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Div{lhs, rhs, out},
+  "MOD"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Mod{lhs, rhs, out},
+  "AND"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::And{lhs, rhs, out},
+  "OR"     <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Or{ lhs, rhs, out},
+  "XOR"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Xor{lhs, rhs, out},
+  "RETURN" <action: Action> => Operation::Return(action), 
+  "NOOP" => Operation::Noop,
+  "MODEL" => Operation::Model,
+}
+pub Action: Action = {
+  "allow" => Action::Allow,  
+  "ALLOW" => Action::Allow,  
+  "allow_all" => Action::AllowAll, 
+  "ALLOW_ALL" => Action::AllowAll, 
+  "terminate" => Action::TerminateAll, 
+  "TERMINATE" => Action::TerminateAll, 
+}

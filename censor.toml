@@ -1,0 +1,107 @@
+# This is the config file for censorlab
+# It is configured per-layer
+# The most important part of this config file is the `actions`
+# An action can be any of
+# * None   - This is the default action. This means no action is taken and censorlab continues to process the packet
+#            through subsequent layers if applicable.
+#            By default if no action is taken, wire mode will process and forward the packet, while tap mode will process and Ignore
+#            the packet.
+# * Ignore - This means the packet is immediately forwarded or Ignored without further analysis. 
+# * Drop   - This means the packet is immediately Dropped without further analysis. Only allowed in wire mode
+# * Reset  - Sends a TCP RST in both directions. The original content of the packet is not forwarded in wire mode.
+#            Only allowed in IP and TCP sections. If specified in an IP section and the underlying traffic is not TCP, this has
+#            the same behavior as "None"
+[execution]
+# Python or CensorLang
+mode = "Python"
+# Optional, script to load at startup
+script = "censor-scripts/cl-python/shadowsocks_ml.py"
+[ethernet]
+# What to do if we come across a packet with an unknown ethertype
+# i.e. not IP or ARP
+# unknown = "None"
+# Allowlist of MAC addresses
+[ethernet.allowlist]
+# Mac address list
+list = []
+# What to do if a MAC address isn't in the allowlist
+# action = "None"
+[ethernet.blocklist]
+# Mac address list
+# list = [ "aa:bb:cc:dd:ee:ff" ]
+list = []
+# What to do if a MAC address is in the blocklist
+# action = "None"
+
+[arp]
+# What to do with arp traffic
+# action = "None"
+
+[ip]
+# What to do if we come across a packet with an unknown ip next header
+# i.e. not tcp/udp/icmp
+# unknown = "None"
+[ip.blocklist]
+# Addresses to block
+list = [ "192.168.31.1" ] 
+# What to do if address is in the blocklist 
+action = "Reset"
+# Allowlist of IP addresses
+[ip.allowlist]
+# Addresses to allow
+list = []
+# What to do if address isn't in the allowlist
+# action = "None"
+
+[icmp]
+# What to do with icmp traffic
+# action = "None"
+
+[tcp]
+[tcp.port_allowlist]
+# List of ports
+list = []
+# What to do if the port is not in this list
+# action = "None"
+[tcp.port_blocklist]
+# List of ports
+list = []
+# What to do if the port is in this list
+# action = "None"
+[tcp.ip_port_allowlist]
+# List of ip-port pairs
+list = []
+# What to do if the ip-port pair is not in this list
+# action = "None"
+[tcp.ip_port_blocklist]
+# List of ip-port pairs
+list = []
+# What to do if the ip-port pair is in this list
+# action = "None"
+
+
+[udp]
+[udp.port_allowlist]
+# List of ports
+list = []
+# What to do if the port is not in this list
+# action = "None"
+[udp.port_blocklist]
+# List of ports
+list = []
+# What to do if the port is in this list
+# action = "None"
+[udp.ip_port_allowlist]
+# List of ip-port pairs
+list = []
+# What to do if the ip-port pair is not in this list
+# action = "None"
+[udp.ip_port_blocklist]
+# List of ip-port pairs
+list = []
+# What to do if the ip-port pair is in this list
+# action = "None"
+
+[models.foobar]
+path = "models/poison_test/poisoned.onnx.ml"
+
