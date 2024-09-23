@@ -342,16 +342,16 @@ impl Censor {
     }
     /// Run the censor
     pub async fn run(self, cmd: args::SubCmd) -> Result<(), CensorError> {
+        // Hand the sender to our thread
+        let sender = self.sender.clone();
         // First store whether the subcommand is pcap
         let threads = if matches!(&cmd, &args::SubCmd::Pcap { .. }) {
             None
         } else {
-            // Hand the sender to our thread
-            let sender = self.sender.clone();
             // Start a thread that receives ipc messages
             let ipc_thread = tokio::task::spawn(ipc_thread(self.ipc_port, sender.clone()));
             // Start a second thread that handles interrupts
-            let sigint_thread = tokio::task::spawn(signal_handler_thread(sender));
+            let sigint_thread = tokio::task::spawn(signal_handler_thread(sender.clone()));
             Some((ipc_thread, sigint_thread))
         };
         // Run the subcommand
@@ -359,12 +359,10 @@ impl Censor {
         let cmd_result = self.run_subcmd(cmd).await;
         if let Some((ipc_thread, sigint_thread)) = threads {
             // If command resulted in an error, kill the ipc thread
-            if cmd_result.is_err() {
-                debug!("Command ended in error, killing the IPC thread");
-                ipc_thread.abort();
-                debug!("Command ended in error, killing the SIGINT thread");
-                sigint_thread.abort();
-            }
+            debug!("killing the IPC thread");
+            ipc_thread.abort();
+            debug!("killing the SIGINT thread");
+            sigint_thread.abort();
             debug!("Waiting for the IPC thread to die");
             // Join the IPC thread
             match ipc_thread.await {
@@ -1106,7 +1104,7 @@ async fn signal_handler_thread(
     sender: UnboundedSender<crate::ipc::Message>,
 ) -> Result<(), SignalHandlerThreadError> {
     // Handle signals
-    let mut signal_handler = signal(SignalKind::hangup())?;
+    let mut signal_handler = signal(SignalKind::interrupt())?;
     loop {
         if let Some(()) = signal_handler.recv().await {
             error!("Received SIGINT. shutting down");

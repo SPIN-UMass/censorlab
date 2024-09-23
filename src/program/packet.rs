@@ -495,6 +495,14 @@ pub mod rust_packet {
     #[pyclass]
     impl IpPacket {
         #[pygetset]
+        fn src(&self) -> String {
+            self.0.src().to_string()
+        }
+        #[pygetset]
+        fn dst(&self) -> String {
+            self.0.dst().to_string()
+        }
+        #[pygetset]
         fn header_len(&self) -> usize {
             self.0.header_len
         }
@@ -706,12 +714,345 @@ pub mod rust_packet {
 #[pymodule]
 pub mod rust_dns {
     use crate::application::dns;
-    use rustpython_vm::builtins::PyBytesRef;
-    use rustpython_vm::VirtualMachine;
+    use dns_parser::{Class, Header, Packet, QueryClass, QueryType};
+    use rustpython_vm::convert::ToPyObject;
+    use rustpython_vm::{
+        builtins::PyByteArray, builtins::PyBytesRef, builtins::PyList, builtins::PyListRef,
+        builtins::PyStrRef, builtins::PyTuple, convert::IntoPyException, convert::ToPyResult,
+        pyclass, PyObjectRef, PyPayload, PyResult, VirtualMachine,
+    };
+    use std::io;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[pyfunction]
-    fn parse(bytes: PyBytesRef, _vm: &VirtualMachine) -> i32 {
-        dns::parse_dns(bytes.as_ref());
-        0
+    fn parse(bytes: PyBytesRef, vm: &VirtualMachine) -> PyResult<DnsPacket> {
+        let bytes = bytes.as_ref();
+        // Parse packet as dns
+        let dns = dns::parse_dns(bytes)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
+        Ok(DnsPacket {
+            header: dns.header,
+            questions: dns.questions.into_iter().map(Question::from).collect(),
+            answers: dns.answers.into_iter().map(ResourceRecord::from).collect(),
+            nameservers: dns
+                .nameservers
+                .into_iter()
+                .map(ResourceRecord::from)
+                .collect(),
+            additional: dns
+                .additional
+                .into_iter()
+                .map(ResourceRecord::from)
+                .collect(),
+            opt: dns.opt.map(|o| Record::from(o)),
+        })
+    }
+    #[pyattr]
+    #[pyclass(module = "rust", name = "DnsPacket")]
+    #[derive(Debug, PyPayload)]
+    pub struct DnsPacket {
+        header: Header,
+        questions: Vec<Question>,
+        answers: Vec<ResourceRecord>,
+        nameservers: Vec<ResourceRecord>,
+        additional: Vec<ResourceRecord>,
+        opt: Option<Record>,
+    }
+    #[pyclass]
+    impl DnsPacket {
+        #[pygetset]
+        fn id(&self) -> u16 {
+            self.header.id
+        }
+        #[pygetset]
+        fn query(&self) -> bool {
+            self.header.query
+        }
+        #[pygetset]
+        fn opcode(&self) -> String {
+            format!("{:?}", self.header.opcode)
+        }
+        #[pygetset]
+        fn authoritative(&self) -> bool {
+            self.header.authoritative
+        }
+        #[pygetset]
+        fn truncated(&self) -> bool {
+            self.header.truncated
+        }
+        #[pygetset]
+        fn recursion_desired(&self) -> bool {
+            self.header.recursion_desired
+        }
+        #[pygetset]
+        fn recursion_available(&self) -> bool {
+            self.header.recursion_available
+        }
+        #[pygetset]
+        fn authenticated_data(&self) -> bool {
+            self.header.authenticated_data
+        }
+        #[pygetset]
+        fn checking_disabled(&self) -> bool {
+            self.header.checking_disabled
+        }
+        #[pygetset]
+        fn response_code(&self) -> String {
+            self.header.response_code.to_string()
+        }
+
+        #[pygetset]
+        fn questions(&self, vm: &VirtualMachine) -> Vec<PyObjectRef> {
+            self.questions
+                .iter()
+                .cloned()
+                .map(|q| q.to_pyobject(vm))
+                .collect()
+        }
+        #[pygetset]
+        fn answers(&self, vm: &VirtualMachine) -> Vec<PyObjectRef> {
+            self.answers
+                .iter()
+                .cloned()
+                .map(|q| q.to_pyobject(vm))
+                .collect()
+        }
+        #[pygetset]
+        fn nameservers(&self, vm: &VirtualMachine) -> Vec<PyObjectRef> {
+            self.nameservers
+                .iter()
+                .cloned()
+                .map(|q| q.to_pyobject(vm))
+                .collect()
+        }
+        #[pygetset]
+        fn additional(&self, vm: &VirtualMachine) -> Vec<PyObjectRef> {
+            self.additional
+                .iter()
+                .cloned()
+                .map(|q| q.to_pyobject(vm))
+                .collect()
+        }
+        #[pygetset]
+        fn opt(&self) -> Option<Record> {
+            self.opt.clone()
+        }
+    }
+
+    #[pyattr]
+    #[pyclass(module = "rust", name = "Question")]
+    #[derive(Clone, Debug, PyPayload)]
+    struct Question {
+        qname: String,
+        prefer_unicast: bool,
+        qtype: QueryType,
+        qclass: QueryClass,
+    }
+    #[pyclass]
+    impl Question {
+        #[pygetset]
+        fn qname(&self) -> String {
+            self.qname.clone()
+        }
+        #[pygetset]
+        fn prefer_unicast(&self) -> bool {
+            self.prefer_unicast
+        }
+        #[pygetset]
+        fn qtype(&self) -> String {
+            format!("{:?}", self.qtype)
+        }
+        #[pygetset]
+        fn qclass(&self) -> String {
+            format!("{:?}", self.qclass)
+        }
+    }
+    impl<'a> From<dns_parser::Question<'a>> for Question {
+        fn from(q: dns_parser::Question<'a>) -> Self {
+            Self {
+                qname: q.qname.to_string(),
+                prefer_unicast: q.prefer_unicast,
+                qtype: q.qtype,
+                qclass: q.qclass,
+            }
+        }
+    }
+    #[pyattr]
+    #[pyclass(module = "rust", name = "ResourceRecord")]
+    #[derive(Clone, Debug, PyPayload)]
+    struct ResourceRecord {
+        name: String,
+        multicast_unique: bool,
+        cls: Class,
+        ttl: u32,
+        data: RData,
+    }
+    #[pyclass]
+    impl ResourceRecord {
+        #[pygetset]
+        fn name(&self) -> String {
+            self.name.clone()
+        }
+        #[pygetset]
+        fn multicast_unique(&self) -> bool {
+            self.multicast_unique
+        }
+        #[pygetset]
+        fn cls(&self) -> String {
+            format!("{:?}", self.cls)
+        }
+        #[pygetset]
+        fn ttl(&self) -> u32 {
+            self.ttl
+        }
+        #[pygetset]
+        fn data(&self, vm: &VirtualMachine) -> PyObjectRef {
+            self.data.to_pyobject(vm)
+        }
+    }
+    impl<'a> From<dns_parser::ResourceRecord<'a>> for ResourceRecord {
+        fn from(r: dns_parser::ResourceRecord<'a>) -> Self {
+            Self {
+                name: r.name.to_string(),
+                multicast_unique: r.multicast_unique,
+
+                cls: r.cls,
+                ttl: r.ttl,
+                data: RData::from(r.data),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    enum RData {
+        A(Ipv4Addr),
+        AAAA(Ipv6Addr),
+        CNAME(String),
+        MX {
+            preference: u16,
+            exchange: String,
+        },
+        NS(String),
+        PTR(String),
+        SOA {
+            primary_ns: String,
+            mailbox: String,
+            serial: u32,
+            refresh: u32,
+            retry: u32,
+            expire: u32,
+            minimum_ttl: u32,
+        },
+        SRV {
+            priority: u16,
+            weight: u16,
+            port: u16,
+            target: String,
+        },
+        TXT(Vec<Vec<u8>>),
+        Unknown,
+    }
+    impl ToPyObject for &RData {
+        fn to_pyobject(self, vm: &VirtualMachine) -> PyObjectRef {
+            use RData::*;
+            match self {
+                A(a) => ("A", a.to_string()).to_pyobject(vm),
+                AAAA(aaaa) => ("AAAA", aaaa.to_string()).to_pyobject(vm),
+                CNAME(cname) => ("CNAME", cname).to_pyobject(vm),
+                MX {
+                    preference,
+                    exchange,
+                } => ("MX", *preference, exchange).to_pyobject(vm),
+                NS(ns) => ("NS", ns).to_pyobject(vm),
+                PTR(ptr) => ("PTR", ptr).to_pyobject(vm),
+                SOA {
+                    primary_ns,
+                    mailbox,
+                    serial,
+                    refresh,
+                    retry,
+                    expire,
+                    minimum_ttl,
+                } => PyTuple::new_ref(
+                    vec![
+                        "SOA".to_pyobject(vm),
+                        primary_ns.to_pyobject(vm),
+                        mailbox.to_pyobject(vm),
+                        serial.to_pyobject(vm),
+                        refresh.to_pyobject(vm),
+                        retry.to_pyobject(vm),
+                        expire.to_pyobject(vm),
+                        minimum_ttl.to_pyobject(vm),
+                    ],
+                    &vm.ctx,
+                )
+                .into(),
+                SRV {
+                    priority,
+                    weight,
+                    port,
+                    target,
+                } => ("SRV", *priority, *weight, *port, target).to_pyobject(vm),
+                // TODO: fix this
+                TXT(txt) => ("TXT", "CURRENTLY NOT SUPPORTED").to_pyobject(vm),
+                Unknown => ("UNKNOWN",).to_pyobject(vm),
+            }
+        }
+    }
+    impl<'a> From<dns_parser::RData<'a>> for RData {
+        fn from(r: dns_parser::RData<'a>) -> Self {
+            use dns_parser::RData::*;
+            match r {
+                A(a) => RData::A(a.0),
+                AAAA(aaaa) => RData::AAAA(aaaa.0),
+                CNAME(cname) => RData::CNAME(cname.0.to_string()),
+                MX(mx) => RData::MX {
+                    preference: mx.preference,
+                    exchange: mx.exchange.to_string(),
+                },
+                NS(ns) => RData::NS(ns.to_string()),
+                PTR(ptr) => RData::PTR(ptr.0.to_string()),
+                SOA(soa) => RData::SOA {
+                    primary_ns: soa.primary_ns.to_string(),
+                    mailbox: soa.mailbox.to_string(),
+                    serial: soa.serial,
+                    refresh: soa.refresh,
+                    retry: soa.retry,
+                    expire: soa.expire,
+                    minimum_ttl: soa.minimum_ttl,
+                },
+                SRV(srv) => RData::SRV {
+                    priority: srv.priority,
+                    weight: srv.weight,
+                    port: srv.port,
+                    target: srv.target.to_string(),
+                },
+                TXT(recs) => RData::TXT(recs.iter().map(|rec| rec.to_vec()).collect()),
+                Unknown(_) => RData::Unknown,
+            }
+        }
+    }
+    #[pyattr]
+    #[pyclass(module = "rust", name = "Record")]
+    #[derive(Clone, Debug, PyPayload)]
+    struct Record {
+        pub udp: u16,
+        pub extrcode: u8,
+        pub version: u8,
+        pub flags: u16,
+        pub data: RData,
+    }
+    #[pyclass]
+    impl Record {}
+    impl<'a> From<dns_parser::rdata::opt::Record<'a>> for Record {
+        fn from(r: dns_parser::rdata::opt::Record<'a>) -> Self {
+            Record {
+                udp: r.udp,
+                extrcode: r.extrcode,
+                version: r.version,
+                flags: r.flags,
+                data: RData::from(r.data),
+            }
+        }
     }
 }
