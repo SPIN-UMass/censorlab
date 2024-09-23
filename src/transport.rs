@@ -2,6 +2,7 @@ use crate::censor::{Action, Direction, IpPair};
 use crate::model::onnx::Model;
 use crate::model::ModelThreadMessage;
 use crate::program::env::ProgramEnv;
+use crate::program::packet::rust_dns;
 use crate::program::packet::rust_packet::{self, Model as PythonModel, Packet as PythonPacket};
 use crate::program::packet::{Packet, TransportProtocol};
 use onnxruntime::environment::Environment;
@@ -95,8 +96,10 @@ pub enum TransportStateInitError {
     CouldNotFindModelInput { name: String },
     #[error("Could not find output named probabilities with dimensions 1xN for model {name}")]
     CouldNotFindModelOutput { name: String },
+    #[error("Failed to load script: {0}")]
+    ReadScript(io::Error),
     #[error("Failed to load model file: {0}")]
-    ModelLoad(#[from] io::Error),
+    ModelLoad(io::Error),
 }
 
 // Consts related to variables
@@ -127,26 +130,30 @@ impl TransportState {
     ) -> Result<Self, TransportStateInitError> {
         // Initialize interpreter settings
         let mut settings: Settings = Default::default();
-        settings.no_sig_int = true;
-        // settings.stdio_unbuffered = true;
         //settings.isolated = true;
-        // Want to make sure nothing is passed
-        settings.argv = Vec::new();
+        // Don't have the python subprograms implement sigint
+        settings.install_signal_handlers = false;
         // TODO: have this configurable via config
         settings.hash_seed = Some(1337);
+        // Want to make sure nothing is passed
+        settings.argv = Vec::new();
+        // settings.stdio_unbuffered = true;
         // -OO optimization
         settings.optimize = 2;
         // Initialize the interpreter
         let vm = vm::Interpreter::with_init(settings, |vm| {
             // Import the native rust module used to define the packet interface
             vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
+            // Import the native rust module used for dns parsing
+            vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
         });
         let (code, process) = if let Some(script_path) = execution_config.script {
-            let source = std::fs::read_to_string(script_path).unwrap();
+            let source = std::fs::read_to_string(script_path)
+                .map_err(TransportStateInitError::ReadScript)?;
             // Do some initialization tasks, eventually returning the compiled code object
             vm.enter(move |vm| {
                 // Import the native module so types work
-                vm.import("rust", None, 0)?;
+                vm.import("rust", 0)?;
                 let source = &source;
                 // Compile the given source code
                 let code = vm
@@ -166,7 +173,7 @@ impl TransportState {
         } else {
             vm.enter(move |vm| {
                 // Import the native module so types work
-                vm.import("rust", None, 0)?;
+                vm.import("rust", 0)?;
                 let source = "";
                 // Compile the given source code
                 let code = vm

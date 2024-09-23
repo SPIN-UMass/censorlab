@@ -1,24 +1,22 @@
 mod nfq;
 mod pcap;
+#[cfg(feature = "wire")]
 mod wire;
 
 use crate::censor::nfq::NfqModeError;
 use crate::censor::pcap::PcapModeError;
+#[cfg(feature = "wire")]
 use crate::censor::wire::WireError;
 use crate::config::ethernet::MACAddress;
 use crate::config::{Config, List};
 use crate::ipc::{ipc_thread, ModelThreadError};
-use crate::model::onnx::{Model, ModelLoadError};
+use crate::model::onnx::ModelLoadError;
 use crate::model::ModelThreadMessage;
-use std::sync::mpsc;
-
 use crate::program::packet::Packet;
 use crate::transport::{TransportState, TransportStateInitError};
 use bitvec::prelude::*;
 use core::ops::{Index, IndexMut};
-use onnxruntime::environment::Environment;
 use onnxruntime::error::OrtError;
-use onnxruntime::GraphOptimizationLevel;
 use serde::{de, Deserialize, Deserializer};
 use smoltcp::phy::{Device, RawSocket};
 use smoltcp::wire::Error as SmoltcpError;
@@ -30,19 +28,20 @@ use smoltcp::wire::{
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt;
-
 use std::hash::Hash;
+use std::io;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::slice::SliceIndex;
 use std::str::FromStr;
+use std::sync::mpsc;
 use std::time::Instant;
 use thiserror::Error;
+use tokio::signal::unix::{signal, Signal, SignalKind};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinError;
-use tracing::info;
-use tracing::{debug, error, info_span, warn};
+use tracing::{debug, error, info, info_span, warn};
 
 /// Used for fast access to a list of every port for examples such as udp port filtering
 pub type PortVec = BitArr!(for 65536, in u64, Msb0);
@@ -53,6 +52,7 @@ pub mod args {
     /// Censorlab is a framework for simulating censors
     #[derive(Debug, Parser)]
     pub enum SubCmd {
+        #[cfg(feature = "wire")]
         /// In this mode, the censor acts as an intermediary between 2 interfaces, typically a WAN
         /// and client.
         /// It is capable of dropping and modifying packets
@@ -129,6 +129,7 @@ pub enum CensorInitError {
 /// Error running the censor
 #[derive(Debug, Error)]
 pub enum CensorError {
+    #[cfg(feature = "wire")]
     #[error("Error running censor in wire mode: {0}")]
     Wire(#[from] WireError),
     #[error("Error running censor in pcap mode: {0}")]
@@ -145,10 +146,13 @@ pub enum CensorError {
 /// For example, the wire censor is aware of traffic direction and can give that without having to
 /// calculate it, while the tap censor cannot
 enum Context<'a> {
+    #[cfg(feature = "wire")]
     Wire(&'a wire::Context),
     Pcap(&'a pcap::Context),
     Nfq(&'a nfq::Context),
 }
+
+#[cfg(feature = "wire")]
 impl<'a> From<&'a mut wire::Context> for Context<'a> {
     fn from(ctx: &'a mut wire::Context) -> Self {
         Context::Wire(ctx)
@@ -339,23 +343,27 @@ impl Censor {
     /// Run the censor
     pub async fn run(self, cmd: args::SubCmd) -> Result<(), CensorError> {
         // First store whether the subcommand is pcap
-        let ipc_thread = if matches!(&cmd, &args::SubCmd::Pcap { .. }) {
+        let threads = if matches!(&cmd, &args::SubCmd::Pcap { .. }) {
             None
         } else {
             // Hand the sender to our thread
             let sender = self.sender.clone();
             // Start a thread that receives ipc messages
-            let ipc_thread = tokio::task::spawn(ipc_thread(self.ipc_port, sender));
-            Some(ipc_thread)
+            let ipc_thread = tokio::task::spawn(ipc_thread(self.ipc_port, sender.clone()));
+            // Start a second thread that handles interrupts
+            let sigint_thread = tokio::task::spawn(signal_handler_thread(sender));
+            Some((ipc_thread, sigint_thread))
         };
         // Run the subcommand
         // Don't immediately throw the error because we want to let the ipc thread die
         let cmd_result = self.run_subcmd(cmd).await;
-        if let Some(ipc_thread) = ipc_thread {
+        if let Some((ipc_thread, sigint_thread)) = threads {
             // If command resulted in an error, kill the ipc thread
             if cmd_result.is_err() {
                 debug!("Command ended in error, killing the IPC thread");
-                ipc_thread.abort()
+                ipc_thread.abort();
+                debug!("Command ended in error, killing the SIGINT thread");
+                sigint_thread.abort();
             }
             debug!("Waiting for the IPC thread to die");
             // Join the IPC thread
@@ -367,6 +375,12 @@ impl Censor {
                     }
                 }
             }
+            // Join the signal thread
+            if let Err(err) = sigint_thread.await {
+                if !err.is_cancelled() {
+                    Err(err)?
+                }
+            }
         }
         cmd_result
     }
@@ -374,6 +388,7 @@ impl Censor {
     async fn run_subcmd(self, cmd: args::SubCmd) -> Result<(), CensorError> {
         // Run the subcommand
         match cmd {
+            #[cfg(feature = "wire")]
             args::SubCmd::Wire { args } => self.run_wire(args)?,
             args::SubCmd::Pcap { args } => self.run_pcap(args)?,
             args::SubCmd::Nfq { args } => self.run_nfq(args).await?,
@@ -473,6 +488,7 @@ impl Censor {
         // Figure out our direction
         let direction = match censor_ctx {
             // For wire mode we always know the direction
+            #[cfg(feature = "wire")]
             Context::Wire(ctx) => ctx.direction,
             // For pcap/nfq mode we infer it using a client IP
             Context::Pcap(pcap::Context { client_ip })
@@ -519,6 +535,7 @@ impl Censor {
         // Figure out our direction
         let direction = match censor_ctx {
             // For wire mode we always know the direction
+            #[cfg(feature = "wire")]
             Context::Wire(ctx) => ctx.direction,
             // For pcap/nfq mode we infer it using a client IP
             Context::Pcap(pcap::Context { client_ip })
@@ -1083,4 +1100,28 @@ pub enum HandleIpcError {
     Shutdown,
     #[error("Error building model")]
     Ort(#[from] OrtError),
+}
+
+async fn signal_handler_thread(
+    sender: UnboundedSender<crate::ipc::Message>,
+) -> Result<(), SignalHandlerThreadError> {
+    // Handle signals
+    let mut signal_handler = signal(SignalKind::hangup())?;
+    loop {
+        if let Some(()) = signal_handler.recv().await {
+            error!("Received SIGINT. shutting down");
+            sender.send(crate::ipc::Message::Shutdown)?;
+        } else {
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SignalHandlerThreadError {
+    #[error("Error setting up signal handler: {0}")]
+    Init(#[from] io::Error),
+    #[error("Error sending shutdown to ipc")]
+    Ipc(#[from] SendError<crate::ipc::Message>),
 }

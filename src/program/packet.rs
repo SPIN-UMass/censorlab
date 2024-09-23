@@ -444,16 +444,24 @@ pub mod rust_packet {
         }
         #[pygetset]
         fn tcp(&self) -> Option<TcpPacket> {
-            if let TransportMetadataExtra::Tcp(ref tcp_metadata) = self.0.transport.extra {
-                Some(TcpPacket(tcp_metadata.clone()))
+            if let TransportMetadataExtra::Tcp(ref metadata) = self.0.transport.extra {
+                Some(TcpPacket {
+                    src: self.0.transport.src,
+                    dst: self.0.transport.dst,
+                    data: metadata.clone(),
+                })
             } else {
                 None
             }
         }
         #[pygetset]
         fn udp(&self) -> Option<UdpPacket> {
-            if let TransportMetadataExtra::Udp(ref tcp_metadata) = self.0.transport.extra {
-                Some(UdpPacket(tcp_metadata.clone()))
+            if let TransportMetadataExtra::Udp(ref metadata) = self.0.transport.extra {
+                Some(UdpPacket {
+                    src: self.0.transport.src,
+                    dst: self.0.transport.dst,
+                    data: metadata.clone(),
+                })
             } else {
                 None
             }
@@ -473,6 +481,10 @@ pub mod rust_packet {
         #[pygetset]
         fn payload_avg_popcount(&self) -> f64 {
             self.0.payload_average_popcount()
+        }
+        #[pymethod]
+        fn __str__(&self) -> String {
+            format!("{:?}", self)
         }
     }
 
@@ -501,34 +513,49 @@ pub mod rust_packet {
     #[pyattr]
     #[pyclass(module = "rust", name = "TcpPacket")]
     #[derive(Debug, PyPayload)]
-    pub struct TcpPacket(pub TcpMetadata);
+    pub struct TcpPacket {
+        pub src: u16,
+        pub dst: u16,
+        pub data: TcpMetadata,
+    }
     #[pyclass]
     impl TcpPacket {
-        //TODO: src and dst port
+        #[pygetset]
+        fn src(&self) -> u16 {
+            self.src
+        }
+        #[pygetset]
+        fn dst(&self) -> u16 {
+            self.dst
+        }
+        #[pymethod]
+        fn uses_port(&self, port: u16) -> bool {
+            self.src == port || self.dst == port
+        }
         #[pygetset]
         fn seq(&self) -> i32 {
-            self.0.seq.0
+            self.data.seq.0
         }
         #[pygetset]
         fn ack(&self) -> i32 {
-            self.0.ack.0
+            self.data.ack.0
         }
         #[pygetset]
         fn header_len(&self) -> u8 {
-            self.0.header_len
+            self.data.header_len
         }
         #[pygetset]
         fn urgent_at(&self) -> u16 {
-            self.0.urgent_at
+            self.data.urgent_at
         }
         #[pygetset]
         fn window_len(&self) -> u16 {
-            self.0.window_len
+            self.data.window_len
         }
         // TODO: flags
         #[pygetset]
         fn flags(&self) -> TcpFlags {
-            TcpFlags(self.0.flags.clone())
+            TcpFlags(self.data.flags.clone())
         }
     }
     #[pyattr]
@@ -578,17 +605,32 @@ pub mod rust_packet {
     #[pyattr]
     #[pyclass(module = "rust", name = "UdpPacket")]
     #[derive(Debug, PyPayload)]
-    pub struct UdpPacket(pub UdpMetadata);
+    pub struct UdpPacket {
+        pub src: u16,
+        pub dst: u16,
+        pub data: UdpMetadata,
+    }
     #[pyclass]
     impl UdpPacket {
-        //TODO: src and dst port
+        #[pygetset]
+        fn src(&self) -> u16 {
+            self.src
+        }
+        #[pygetset]
+        fn dst(&self) -> u16 {
+            self.dst
+        }
+        #[pymethod]
+        fn uses_port(&self, port: u16) -> bool {
+            self.src == port || self.dst == port
+        }
         #[pygetset]
         fn length(&self) -> u16 {
-            self.0.length
+            self.data.length
         }
         #[pygetset]
         fn checksum(&self) -> u16 {
-            self.0.checksum
+            self.data.checksum
         }
     }
     #[pyfunction]
@@ -658,5 +700,18 @@ pub mod rust_packet {
             let out: Vec<PyObjectRef> = out.into_iter().map(|f| f.to_pyobject(vm)).collect();
             Ok(PyList::new_ref(out, &vm.ctx))
         }
+    }
+}
+
+#[pymodule]
+pub mod rust_dns {
+    use crate::application::dns;
+    use rustpython_vm::builtins::PyBytesRef;
+    use rustpython_vm::VirtualMachine;
+
+    #[pyfunction]
+    fn parse(bytes: PyBytesRef, _vm: &VirtualMachine) -> i32 {
+        dns::parse_dns(bytes.as_ref());
+        0
     }
 }

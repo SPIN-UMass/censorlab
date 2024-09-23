@@ -36,19 +36,30 @@ pub struct Config {
 }
 #[derive(Debug, Error)]
 /// Error loading config
-enum ConfigLoadError {
+pub enum ConfigLoadError {
     #[error("Failed to read config file")]
     Read(#[from] io::Error),
+    #[error("Config path doesnt have a parent")]
+    NoParent,
     #[error("Failed to parse config file")]
     Parse(#[from] toml::de::Error),
 }
 impl Config {
     /// Load the config from a file
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, io::Error> {
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, ConfigLoadError> {
+        // Parent
+        let parent = path.as_ref().parent().ok_or(ConfigLoadError::NoParent)?;
         // Read the file
-        let data = fs::read(path)?;
+        let data = fs::read_to_string(&path)?;
         // Parse as config
-        let config = toml::de::from_slice(&data)?;
+        let mut config: Self = toml::from_str(&data)?;
+        // Modify paths (scripts and model paths are relative to config)
+        if let Some(ref mut script_path) = config.execution.script {
+            *script_path = parent.join(&script_path)
+        }
+        for (_, model) in config.models.iter_mut() {
+            model.path = parent.join(&model.path);
+        }
         Ok(config)
     }
 }
@@ -125,6 +136,8 @@ pub mod execution {
         /// Which mode to use: Python or CensorLang
         pub mode: ExecutionMode,
         /// Path to a script to use as the default censor script
+        ///
+        /// RELATIVE to censor.toml
         pub script: Option<PathBuf>,
     }
 }

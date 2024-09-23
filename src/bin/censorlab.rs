@@ -1,12 +1,13 @@
 use censorlab::censor::args::SubCmd;
 use censorlab::censor::{Censor, CensorInitError};
-use censorlab::config::Config;
+use censorlab::config::{Config, ConfigLoadError};
 use censorlab::ipc::IPC_DEFAULT_PORT;
-use censorlab::model::{onnx, start_model_thread};
+use censorlab::model::{onnx, start_model_thread, ModelThreadMessage};
 use clap::Parser;
 use onnxruntime::environment::Environment;
 use onnxruntime::error::OrtError;
 use onnxruntime::LoggingLevel;
+use std::any::Any;
 use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -27,8 +28,11 @@ struct Args {
     /// Path to the config file
     #[clap(short, long)]
     pub config_path: Option<PathBuf>,
-    /// Path to log TCP decisions to
-    pub tcp_decision_log_path: Option<PathBuf>,
+    // /// Path to log TCP decisions to
+    //pub tcp_decision_log_path: Option<PathBuf>,
+    /// Path to a program (overrides the one in config.toml)
+    #[clap(short, long)]
+    pub program: Option<PathBuf>,
     /// Subcommand indicating which mode to run in
     #[clap(subcommand)]
     sub_cmd: SubCmd,
@@ -50,25 +54,36 @@ async fn main() -> Result<(), CensorlabError> {
     // Set the global subscriber
     tracing::subscriber::set_global_default(subscriber)?;
     // Load our config
-    let config = args
+    let mut config = args
         .config_path
         .map(Config::load)
-        .unwrap_or_else(|| Ok(Config::default()))
-        .map_err(CensorlabError::Config)?;
+        .unwrap_or_else(|| Ok(Config::default()))?;
+    // Override with program path if provided
+    if let Some(program) = args.program {
+        config.execution.script = Some(program);
+    }
     // Start the model thread
     let (model_sender, model_thread) = start_model_thread(&config.models)?;
     // Initialize our censor using the common args
     let censor = Censor::new(
         args.ipc_port,
         config,
-        args.tcp_decision_log_path,
-        model_sender,
+        //args.tcp_decision_log_path,
+        //removed tcp decision log path for now
+        None,
+        model_sender.clone(),
     )?;
     // Run the censor in the specified mode using the common arguments
     if let Err(err) = censor.run(args.sub_cmd).await {
         error!(error = tracing::field::display(err), "Error running censor");
     }
-    // Join the handle
+    // Tell the model thread to shut down
+    model_sender.send(ModelThreadMessage::Shutdown).unwrap();
+    // Join the model thread
+    match model_thread.join() {
+        Ok(()) => {}
+        Err(err) => std::panic::resume_unwind(err),
+    }
     Ok(())
 }
 #[derive(Debug, Error)]
@@ -76,7 +91,7 @@ enum CensorlabError {
     #[error("Failed to set global logger: {0}")]
     SetGlobalLogger(#[from] SetGlobalDefaultError),
     #[error("Failed to load config: {0}")]
-    Config(io::Error),
+    Config(#[from] ConfigLoadError),
     #[error("Failed to do something with ONNX: {0}")]
     EnvironmentBuild(#[from] OrtError),
     #[error("Failed to initialize censor: {0}")]

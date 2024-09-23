@@ -47,7 +47,7 @@ impl Censor {
             // Need some kind of trigger to wait for it
             let (size, block) = match pcap_reader.next() {
                 Ok(d) => d,
-                Err(PcapError::Incomplete) => {
+                Err(PcapError::Incomplete(_)) => {
                     pcap_reader
                         .refill()
                         .map_err(|err| err.to_string())

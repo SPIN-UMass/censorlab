@@ -12,6 +12,7 @@ use onnxruntime::LoggingLevel;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
+use tracing::error;
 
 pub trait Classify {
     type Features;
@@ -101,7 +102,9 @@ pub fn start_model_thread(
                     } else {
                         Err(ModelThreadError::ModelNotFound)
                     };
-                    response_channel.send(result);
+                    if let Err(err) = response_channel.send(result) {
+                        error!("Error sending response from model thread: {err}");
+                    }
                 }
             }
         }

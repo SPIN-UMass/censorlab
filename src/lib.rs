@@ -1,3 +1,4 @@
+pub mod application;
 pub mod arp;
 pub mod censor;
 pub mod config;

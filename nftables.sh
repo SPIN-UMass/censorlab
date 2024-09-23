@@ -11,11 +11,12 @@ COMMON_ARGS="-j NFQUEUE --queue-num ${QUEUE_NUM}"
 
 case $1 in
   start)
-    modprobe xt_NFQUEUE 
-    iptables -t raw -A $FW_TABLE $COMMON_ARGS 
+    modprobe xt_NFQUEUE
+    iptables -t raw -A $FW_TABLE $COMMON_ARGS
     ;;
   stop)
-    iptables -t raw -D $FW_TABLE $COMMON_ARGS 
+    modprobe xt_NFQUEUE
+    iptables -t raw -D $FW_TABLE $COMMON_ARGS
     ;;
   *)
     ;;
