@@ -1,3 +1,9 @@
+# To test this
+# (WORKS)
+# curl https://google.com
+# (FAILS)
+# sslocal shadowsocks.json
+# curl --proxy socks5://localhost:1080 https://google.com
 def process(packet):
     tcp = packet.tcp
     if tcp:

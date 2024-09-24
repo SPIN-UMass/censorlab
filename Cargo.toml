@@ -20,7 +20,7 @@ libc = "*"
 mac_address = "1.1"
 nfq = "0.2"
 num = "0.4"
-onnxruntime = {git="https://github.com/witchof0x20/onnxruntime-rs"}
+onnxruntime = "0.0.14" 
 pcap-parser = "0.16"
 procfs = "0.16"
 regex = "1.10"

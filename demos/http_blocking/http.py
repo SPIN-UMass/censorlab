@@ -6,5 +6,5 @@
 def process(packet):
     tcp = packet.tcp
     if tcp and 80 in [tcp.src, tcp.dst]:
-        if "example" in packet.payload:
+        if b"example" in packet.payload:
             return "drop"

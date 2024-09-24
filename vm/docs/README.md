@@ -3,6 +3,9 @@
 # About
 Censorlab is a censorship emulation platform.
 
+# Updating this VM
+To update the vm, run `censorlab-update`
+
 # Configuration
 Configuration of the censor is done in `TOML` files and passed in with the `-c` flag. See `censor.toml` for configuration options. You probably want to copy censor.toml to your own config file and pass it in. The default censor.toml uses
 

@@ -81,9 +81,6 @@ in
   users.users.censorlab = {
     isNormalUser = true;
     extraGroups = [ "wheel" ]; # Enable ‘sudo’ for the user.
-    packages = with pkgs; [
-      firefox
-    ];
     # Password
     hashedPassword = "$6$rounds=10000$8xHqgl3MIbGTLIzO$Xzf2Re55hgFZwUlO0vS.BO7ykbQmc6aggC2uJ88Ao.MJeTHHH.MMu5/6Lrjdfdp1SMShkXtkRXWXDGxX8Wd4l1";
     # SSH public key
@@ -101,9 +98,14 @@ in
     vim # Do not forget to add an editor to edit configuration.nix! The Nano editor is also installed by default.
     wget
     tmux
+    # For demo stuff
+    curl
+    bind
+    shadowsocks-rust
     # Install censorlab
     censorlab
     censorlab-demos
+    censorlab-update
   ];
   # Path to demos system wide
   # Give access to demos
@@ -125,12 +127,6 @@ in
     owner = "root";
     group = "wheel";
     capabilities = "cap_net_admin,cap_net_raw+eip";
-  };
-  security.wrappers."cl_nftables.sh" = {
-    source = "${pkgs.censorlab}/bin/cl_nftables.sh";
-    owner = "root";
-    group = "wheel";
-    capabilities = "cap_net_admin,cap_net_raw,cap_dac_read_search,cap_sys_module+eip";
   };
   # Home manager stuff
   home-manager = {
