@@ -126,6 +126,18 @@
             nixpkgs.overlays = [ self.overlays.default ];
           }
           (import ./vm/configuration.nix)
+          (import ./vm/hardware-x8664.nix)
+          home-manager.nixosModules.default
+        ];
+      };
+      nixosConfigurations.censorlab-arm = nixpkgs.lib.nixosSystem {
+        system = "aarch64-linux";
+        modules = [
+          {
+            nixpkgs.overlays = [ self.overlays.default ];
+          }
+          (import ./vm/configuration.nix)
+          (import ./vm/hardware-aarch64.nix)
           home-manager.nixosModules.default
         ];
       };
@@ -142,6 +154,20 @@
         profiles.system = {
           user = "root";
           path = deploy-rs.lib.${system}.activate.nixos self.nixosConfigurations.censorlab;
+        };
+      };
+      deploy.nodes.censorlab-arm = {
+        # Deploy as root to localhost:10022 (set up as a port forward in the vm)
+        sshUser = "root";
+        hostname = "localhost";
+        sshOpts = [ "-p" "10022" "-i" "./vm/id_ed25519" ];
+        # Build locally rather than on the slow vm
+        remoteBuild = true;
+        fastConnection = false;
+        # Deploy the censorlab system profile
+        profiles.system = {
+          user = "root";
+          path = deploy-rs.lib.${system}.activate.nixos self.nixosConfigurations.censorlab-arm;
         };
       };
 

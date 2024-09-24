@@ -8,4 +8,3 @@ def process(packet):
         for question in dns.questions:
             if "google.com" in question.qname:
                 return "drop"
-    return
