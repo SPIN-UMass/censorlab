@@ -9,34 +9,17 @@ Configuration of the censor is done in `TOML` files and passed in with the `-c` 
 * `censor-scripts/cl-python/shadowsocks_ml.py`
 * `models/poison_test/poisoned.onnx.ml`
 
-# Running in tap mode
-Censorlab uses netfilter queues to intercept traffic. To start intercepting traffic in this vm, run
-```sh
-cl_nftables.sh start
-```
-While this script is started,
-
-* Before CensorLab is started - Traffic will all fail due to no program listening on the given queue
-* While CensorLab is running - Traffic may be blocked by the censor program
-
-Make sure you retain access to this virtual machine using a virtualized display, as SSH may cease to function
-
-To stop forwarding traffic to the queue:
-```sh
-cl_nftables.sh stop
+# Running in this VM
 ```
 
-In a system where `enp0s3` is the interface you want to tap and 10.0.2.15 is the ip of the client (e.g. this VM), the command to start censorlab using the provided censor.toml is
+To start CensorLab (in NFQ mode which intercepts the Linux firewall) using a sample censor (DNS blocking of google.com)
 ```sh
-censorlab -c censor.toml tap enp0s3 10.0.2.15
+censorlab -c /etc/censorlab-demos/dns_blocking/censor.toml nfq
 ```
 
-You may verify the interface name and IP address of the VM using
-```sh
-ip addr
-```
+You may read this censor.toml as an example of what a CensorLab scenario looks like
 
-To list all the configurable options:
+To list all CensorLab's arguments
 ```sh
 censorlab --help
 censorlab nfq --help
@@ -97,3 +80,44 @@ TCP Flags:
  * `re = regex("foo|bar")`
  * `re.ismatch(b)` - accepts a python-style byte array, returns whether the regex matches. useful for payload
 
+## DNS
+This sample code will allow you to get started with parsing DNS packets:
+```python
+from dns import parse as parse_dns
+
+def process(packet):
+    udp = packet.udp
+    if udp and 53 in [udp.src, udp.dst]:
+        dns = parse_dns(packet.payload)
+```
+properties of the dns payload include:
+* `dns.id`
+* `dns.query`
+* `dns.opcode`
+* `dns.authoritative`
+* `dns.truncated`
+* `dns.recursion_desired`
+* `dns.recursion_available`
+* `dns.recursion_available`
+* `dns.authenticated_data`
+* `dns.checking_disabled`
+* `dns.response_code`
+* `dns.questions` - a list of DNS questions in the packet
+* `dns.questions[n].qname` 
+* `dns.questions[n].prefer_unicast` 
+* `dns.questions[n].qtype` 
+* `dns.questions[n].qclass` 
+* `dns.answers` - a list of DNS answers
+* `dns.answers[n].name`
+* `dns.answers[n].multicast_unique`
+* `dns.answers[n].cls`
+* `dns.answers[n].ttl`
+* `dns.answers[n].data` - A tuple of the RData class (e.g. "A", "AAAA") with its fields
+* `dns.nameservers` - Same format as answers
+* `dns.additional` - Same format as answers
+* `dns.opt` - DNS Options
+* `dns.opt.udp` 
+* `dns.opt.extrcode` 
+* `dns.opt.version` 
+* `dns.opt.flags` 
+* `dns.opt.data` 
