@@ -109,7 +109,7 @@
               })
               { };
             censorlab-update = pkgs.writeShellScriptBin "censorlab-update" ''
-              nixos-rebuild switch --flake github:SPIN-UMass#censorlab --use-remote-sudo
+              nixos-rebuild switch --flake github:SPIN-UMass/censorlab#censorlab --use-remote-sudo
             '';
           };
         }) // {
