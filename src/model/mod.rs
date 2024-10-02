@@ -78,32 +78,34 @@ pub fn start_model_thread(
                     response_channel,
                 } => {
                     // Check if we have a model by the given name
-                    let result = if let Some(ref mut model) = models.get_mut(&name) {
-                        match Array::from_shape_vec(
-                            (model.input_dims[0], model.input_dims[1]),
-                            data,
-                        ) {
-                            Ok(input) => {
-                                let inputs = inputs!["float_input" => input.view()].unwrap();
-                                match model.session.run(inputs) {
-                                    Ok(outputs) => {
-                                        let prob = &outputs[model.prob_index];
-                                        Ok(prob
-                                            .try_extract_tensor()
-                                            .unwrap()
-                                            .to_slice()
-                                            .unwrap()
-                                            .to_vec())
+                    let result: Result<Vec<f32>, _> =
+                        if let Some(ref mut model) = models.get_mut(&name) {
+                            match Array::from_shape_vec(
+                                (model.input_dims[0], model.input_dims[1]),
+                                data,
+                            ) {
+                                Ok(input) => {
+                                    let inputs = inputs!["float_input" => input.view()].unwrap();
+                                    match model.session.run(inputs) {
+                                        Ok(outputs) => {
+                                            let prob = &outputs[model.prob_index];
+                                            Ok(prob
+                                                .try_extract_tensor()
+                                                .unwrap()
+                                                .to_slice()
+                                                .unwrap()
+                                                .to_vec())
+                                        }
+                                        Err(err) => Err(ModelThreadError::ModelRunError(err)),
                                     }
-                                    Err(err) => Err(ModelThreadError::ModelRunError(err)),
                                 }
-                            }
 
-                            Err(err) => Err(ModelThreadError::ModelShapeError(err)),
-                        }
-                    } else {
-                        Err(ModelThreadError::ModelNotFound)
-                    };
+                                Err(err) => Err(ModelThreadError::ModelShapeError(err)),
+                            }
+                        } else {
+                            Err(ModelThreadError::ModelNotFound)
+                        };
+                    let result = result.map(|v| v.into_iter().map(f64::from).collect());
                     if let Err(err) = response_channel.send(result) {
                         error!("Error sending response from model thread: {err}");
                     }
