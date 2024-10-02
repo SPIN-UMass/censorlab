@@ -37,5 +37,4 @@
   # networking.interfaces.enp0s8.useDHCP = lib.mkDefault true;
 
   nixpkgs.hostPlatform = lib.mkDefault "aarch64-linux";
-  virtualisation.virtualbox.guest.enable = true;
 }
