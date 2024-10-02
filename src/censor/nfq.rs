@@ -6,7 +6,7 @@ use clap::Parser;
 use core::task::Poll;
 use mac_address::MacAddressError;
 use nfq::{Queue, Verdict};
-use onnxruntime::OrtError;
+use ort::Error as OrtError;
 use procfs::ProcError;
 use smoltcp::phy::{Device, Medium, RawSocket, TxToken};
 use smoltcp::time::Instant as SmoltcpInstant;

@@ -16,7 +16,7 @@ use crate::program::packet::Packet;
 use crate::transport::{TransportState, TransportStateInitError};
 use bitvec::prelude::*;
 use core::ops::{Index, IndexMut};
-use onnxruntime::error::OrtError;
+use ort::Error as OrtError;
 use serde::{de, Deserialize, Deserializer};
 use smoltcp::phy::{Device, RawSocket};
 use smoltcp::wire::Error as SmoltcpError;

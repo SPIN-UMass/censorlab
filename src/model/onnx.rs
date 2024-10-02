@@ -1,5 +1,5 @@
 use crate::censor::Action;
-use onnxruntime::session::Session;
+use ort::Session;
 use serde::{Deserialize, Deserializer};
 use std::fs::{self, File};
 use std::io;
@@ -12,8 +12,8 @@ pub const ENV_NAME: &str = "censorlab";
 
 /// Represents a classification model, generally for performing censorship actions
 #[derive(Debug)]
-pub struct Model<'a> {
-    pub session: Session<'a>,
+pub struct Model {
+    pub session: Session,
     pub input_dims: Vec<usize>,
     pub prob_index: usize,
 }

@@ -121,12 +121,12 @@
           censorlab-demos = self.packages.x86_64-linux.censorlab-demos;
           censorlab-update = self.packages.x86_64-linux.censorlab-update;
         };
-        #        censorlab-arm = final: prev: {
-        #          censorlab = self.packages.aarch64-linux.censorlab;
-        #          censorlab-vm-docs = self.packages.aarch64-linux.censorlab-vm-docs;
-        #          censorlab-demos = self.packages.aarch64-linux.censorlab-demos;
-        #          censorlab-update = self.packages.aarch64-linux.censorlab-update;
-        #        };
+        censorlab-arm = final: prev: {
+          censorlab = self.packages.aarch64-linux.censorlab;
+          censorlab-vm-docs = self.packages.aarch64-linux.censorlab-vm-docs;
+          censorlab-demos = self.packages.aarch64-linux.censorlab-demos;
+          censorlab-update = self.packages.aarch64-linux.censorlab-update;
+        };
       };
       # System configuration for the VM
       nixosConfigurations.censorlab = nixpkgs.lib.nixosSystem {
@@ -140,17 +140,17 @@
           home-manager.nixosModules.default
         ];
       };
-      #      nixosConfigurations.censorlab-arm = nixpkgs.lib.nixosSystem {
-      #        system = "aarch64-linux";
-      #        modules = [
-      #          {
-      #            nixpkgs.overlays = [ self.overlays.censorlab-arm ];
-      #          }
-      #          (import ./vm/configuration.nix)
-      #          (import ./vm/hardware-aarch64.nix)
-      #          home-manager.nixosModules.default
-      #        ];
-      #      };
+      nixosConfigurations.censorlab-arm = nixpkgs.lib.nixosSystem {
+        system = "aarch64-linux";
+        modules = [
+          {
+            nixpkgs.overlays = [ self.overlays.censorlab-arm ];
+          }
+          (import ./vm/configuration.nix)
+          (import ./vm/hardware-aarch64.nix)
+          home-manager.nixosModules.default
+        ];
+      };
       # Deploy config
       deploy.nodes.censorlab = {
         # Deploy as root to localhost:2222 (set up as a port forward in the vm
@@ -166,19 +166,19 @@
           path = deploy-rs.lib.x86_64-linux.activate.nixos self.nixosConfigurations.censorlab;
         };
       };
-      #      deploy.nodes.censorlab-arm = {
-      #        sshUser = "root";
-      #        hostname = "167.235.134.18";
-      #        #sshOpts = [ "./vm/id_ed25519" ];
-      #        # build remotely because cross arch is weird 
-      #        remoteBuild = true;
-      #        fastConnection = false;
-      #        # Deploy the censorlab system profile
-      #        profiles.system = {
-      #          user = "root";
-      #          path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.censorlab-arm;
-      #        };
-      #      };
+      deploy.nodes.censorlab-arm = {
+        sshUser = "root";
+        hostname = "167.235.134.18";
+        sshOpts = [ "-i" "./vm/id_ed25519" ];
+        # build remotely because cross arch is weird 
+        remoteBuild = true;
+        fastConnection = false;
+        # Deploy the censorlab system profile
+        profiles.system = {
+          user = "root";
+          path = deploy-rs.lib.aarch64-linux.activate.nixos self.nixosConfigurations.censorlab-arm;
+        };
+      };
       # Perform checks
       checks = builtins.mapAttrs (system: deployLib: deployLib.deployChecks self.deploy) deploy-rs.lib;
     };

@@ -1,7 +1,7 @@
 use super::{Action, Censor};
 
 use clap::Parser;
-use onnxruntime::OrtError;
+use ort::Error as OrtError;
 use pcap_parser::pcapng::Block;
 use pcap_parser::{PcapBlockOwned, PcapError};
 use smoltcp::wire::IpAddress;

@@ -1,14 +1,15 @@
 pub mod onnx;
+
 use crate::config::model::Model as ModelConfig;
-use onnx::Model;
-use onnxruntime::environment::Environment;
-use onnxruntime::error::OrtError;
-use onnxruntime::ndarray::{
+use ndarray::{
     arr2, rcarr2, Array, ArrayBase, Dim, IntoDimension, OwnedArcRepr, OwnedRepr, ShapeError,
 };
-use onnxruntime::tensor::OrtOwnedTensor;
-use onnxruntime::GraphOptimizationLevel;
-use onnxruntime::LoggingLevel;
+use onnx::Model;
+use ort::inputs;
+use ort::Error as OrtError;
+use ort::GraphOptimizationLevel;
+use ort::Session;
+use ort::Tensor;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
@@ -32,24 +33,20 @@ pub fn start_model_thread(
     // Spawn the processing thread
     let handle = thread::spawn(move || {
         // Initialize the ONNX environment
-        let onnx_env = Environment::builder()
+        let onnx_env = ort::init()
             .with_name(onnx::ENV_NAME)
             //TODO: parameterize
-            .with_log_level(LoggingLevel::Info)
-            .build()
+            .commit()
             .expect("Failed to build ONNX context");
         // For each model in the config, load it
         let mut models: HashMap<String, Model> = Default::default();
         for (name, config) in model_config {
             // Load the model data from a file
-            let session = onnx_env
-                .new_session_builder()
+            let session = Session::builder()
                 .expect("Failed to start session")
-                .with_optimization_level(GraphOptimizationLevel::All)
+                .with_optimization_level(GraphOptimizationLevel::Level3)
                 .expect("Failed to start with optimization")
-                .with_number_threads(1)
-                .expect("Failed to set thread")
-                .with_model_from_file(config.path)
+                .commit_from_file(config.path)
                 .expect("Failed to set model");
             // print some stuff
             let input = session
@@ -57,19 +54,20 @@ pub fn start_model_thread(
                 .iter()
                 .find(|input| input.name == "float_input")
                 .expect("Could not find float_input");
-            let dims = input.dimensions.clone();
-            let (prob_index, _) = session
-                .outputs
-                .iter()
-                .enumerate()
-                .find(|(_, output)| output.name == "probabilities")
-                .expect("Could not find probabilities");
-            let model = Model {
-                session,
-                input_dims: dims.into_iter().map(|dim| dim.unwrap() as usize).collect(),
-                prob_index,
-            };
-            models.insert(name.clone(), model);
+            if let ort::ValueType::Tensor { ref dimensions, .. } = input.input_type.clone() {
+                let (prob_index, _) = session
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, output)| output.name == "probabilities")
+                    .expect("Could not find probabilities");
+                let model = Model {
+                    session,
+                    input_dims: dimensions.into_iter().map(|dim| *dim as usize).collect(),
+                    prob_index,
+                };
+                models.insert(name.clone(), model);
+            }
         }
         while let Ok(message) = receiver.recv() {
             match message {
@@ -81,17 +79,21 @@ pub fn start_model_thread(
                 } => {
                     // Check if we have a model by the given name
                     let result = if let Some(ref mut model) = models.get_mut(&name) {
-                        match ArrayBase::from_shape_vec(
+                        match Array::from_shape_vec(
                             (model.input_dims[0], model.input_dims[1]),
                             data,
                         ) {
                             Ok(input) => {
-                                let inputs = vec![input];
+                                let inputs = inputs!["float_input" => input.view()].unwrap();
                                 match model.session.run(inputs) {
                                     Ok(outputs) => {
-                                        let outputs: Vec<OrtOwnedTensor<f64, _>> = outputs;
                                         let prob = &outputs[model.prob_index];
-                                        Ok(prob.to_slice().unwrap().to_vec())
+                                        Ok(prob
+                                            .try_extract_tensor()
+                                            .unwrap()
+                                            .to_slice()
+                                            .unwrap()
+                                            .to_vec())
                                     }
                                     Err(err) => Err(ModelThreadError::ModelRunError(err)),
                                 }
