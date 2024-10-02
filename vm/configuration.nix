@@ -118,7 +118,7 @@ in
   # Enable the OpenSSH daemon.
   services.openssh.enable = true;
   services.openssh.openFirewall = true;
-
+  services.openssh.settings.PermitRootLogin = "yes";
 
   # Enable the firewall
   networking.firewall.enable = true;
