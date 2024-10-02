@@ -109,7 +109,14 @@
               })
               { };
             censorlab-update = pkgs.writeShellScriptBin "censorlab-update" ''
+              nix-collect-garbage -d
               nixos-rebuild switch --flake github:SPIN-UMass/censorlab#censorlab --use-remote-sudo
+              nix-collect-garbage -d
+            '';
+            censorlab-update-arm = pkgs.writeShellScriptBin "censorlab-update" ''
+              nix-collect-garbage -d
+              nixos-rebuild switch --flake github:SPIN-UMass/censorlab#censorlab-arm --use-remote-sudo
+              nix-collect-garbage -d
             '';
           };
         }) // {
@@ -125,7 +132,7 @@
           censorlab = self.packages.aarch64-linux.censorlab;
           censorlab-vm-docs = self.packages.aarch64-linux.censorlab-vm-docs;
           censorlab-demos = self.packages.aarch64-linux.censorlab-demos;
-          censorlab-update = self.packages.aarch64-linux.censorlab-update;
+          censorlab-update = self.packages.aarch64-linux.censorlab-update-arm;
         };
       };
       # System configuration for the VM
