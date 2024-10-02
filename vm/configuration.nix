@@ -35,12 +35,6 @@ in
   nix = {
     # Use flakes
     package = pkgs.nixFlakes;
-    # Garbage collect
-    gc = {
-      automatic = true;
-      persistent = true;
-      options = "--delete-older-than 7d";
-    };
     # Other settings
     settings = {
       sandbox = true;
