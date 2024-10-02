@@ -4,7 +4,7 @@
 Censorlab is a censorship emulation platform.
 
 # Updating this VM
-To update the vm, run `censorlab-update`
+The CensorLab experimental VM uses NixOS, a declarative operating system which allows for very strong reproducibility. To update the VM, run the `censorlab-update` command
 
 # Configuration
 Configuration of the censor is done in `TOML` files and passed in with the `-c` flag. See `censor.toml` for configuration options. You probably want to copy censor.toml to your own config file and pass it in. The default censor.toml uses
