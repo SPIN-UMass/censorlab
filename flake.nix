@@ -150,6 +150,7 @@
         modules = [
           {
             nixpkgs.overlays = [ self.overlays.censorlab ];
+            nixpkgs.config.allowUnfree = true;
           }
           (import ./vm/configuration.nix)
           (import ./vm/hardware-x8664.nix)
@@ -161,6 +162,7 @@
         modules = [
           {
             nixpkgs.overlays = [ self.overlays.censorlab-arm ];
+            nixpkgs.config.allowUnfree = true;
           }
           (import ./vm/configuration.nix)
           (import ./vm/hardware-aarch64.nix)
