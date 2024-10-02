@@ -120,12 +120,12 @@
             censorlab-update = pkgs.writeShellScriptBin "censorlab-update" ''
               nix-collect-garbage -d
               nixos-rebuild switch --flake github:SPIN-UMass/censorlab#censorlab --use-remote-sudo
-              /nix/var/nix/profiles/system/bin/switch-to-configuration switch
+              sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch
             '';
             censorlab-update-arm = pkgs.writeShellScriptBin "censorlab-update" ''
               nix-collect-garbage -d
               nixos-rebuild switch --flake github:SPIN-UMass/censorlab#censorlab-arm --use-remote-sudo
-              /nix/var/nix/profiles/system/bin/switch-to-configuration switch
+              sudo /nix/var/nix/profiles/system/bin/switch-to-configuration switch
             '';
           };
         }) // {
