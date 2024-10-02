@@ -33,7 +33,16 @@
             inherit system;
           };
           craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.nightly.latest.default);
-          onnxruntime = pkgs-master.onnxruntime;
+          onnxruntime = pkgs-master.onnxruntime.overrideAttrs (final: prev: {
+            src = pkgs-master.fetchFromGitHub {
+              owner = "microsoft";
+              repo = "onnxruntime";
+              rev = "b522df0ae477e59f60acbe6c92c8a64eda96cace";
+              hash = "sha256-ACAaMyOlhknFZ1NJex/VlPGqiDZv6LRgBvwq1DrDglg=";
+              fetchSubmodules = true;
+            };
+            patches = [ (builtins.elemAt prev.patches 0) ];
+          });
           # Library dependencies
           dependencies = [ onnxruntime pkgs.libffi ];
           # Native build inputs
