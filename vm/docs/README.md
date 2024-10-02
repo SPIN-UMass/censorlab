@@ -12,6 +12,26 @@ Configuration of the censor is done in `TOML` files and passed in with the `-c` 
 * `censor-scripts/cl-python/shadowsocks_ml.py`
 * `models/poison_test/poisoned.onnx.ml`
 
+# Censor Programs
+A Censor Program is a Python script in the following form:
+```python
+# Initialize global variables, which will be accessible for all subsequent executions within the same connection
+a = 1
+
+# This function processes packets
+def process(packet):
+    # To allow a packet, return None or "allow"
+    # return None
+    # return
+    # return "allow"
+    # Python functions implicitly return None if no return statement is executed, so you can also use that
+    # To drop a packet,  
+    # return "drop"
+```
+Some example programs are provided in `/etc/censorlab-demos`
+
+Properties of `packet` are listed in the Python API section.
+
 # Running in this VM
 ```
 
@@ -43,19 +63,22 @@ to ensure all appropriate methods are in scope
 The interfaces that may be accessed to read metadata from each packet are:
 
 ## packet
- * global variable, but passed to the function
  * `packet.timestamp` - Unix timestamp of the packet
  * `packet.direction` - Direction of the packet. Client to wan = 1. unknown = 0. wan to client = -1
+
+## ip
  * `ip.header_len` - Length of IP header
  * `ip.total_len` - Total length of ip packet
  * `ip.ttl` - TTL of IP packet
+
+## tcp
  * `packet.tcp.seq` - TCP SEQ number
  * `packet.tcp.ack` - TCP ACK number
  * `packet.tcp.header_len` - TCP header length
  * `packet.tcp.urgent_at` - TCP urgent at flat
  * `packet.tcp.window_len` - TCP window length
-TCP Flags:
-     * `packet.tcp.flags.fin,
+ * *TCP Flags*
+     * `packet.tcp.flags.fin`
      * `packet.tcp.flags.syn`
      * `packet.tcp.flags.rst`
      * `packet.tcp.flags.psh`
@@ -64,8 +87,12 @@ TCP Flags:
      * `packet.tcp.flags.ece`
      * `packet.tcp.flags.cwr`
      * `packet.tcp.flags.ns`
+
+## udp
  * `udp.length` - UDP total length
  * `udp.checksum` - UDP checksum
+
+## Payload properties, generic to TCP and UDP
  * `packet.payload` - payload body, regardless of transport protocol
  * `packet.payload_len` - payload length, regardless of transport protocol
  * `packet.payload_entropy` - payload entropy regardless of transport protocol
@@ -94,31 +121,30 @@ def process(packet):
         dns = parse_dns(packet.payload)
 ```
 properties of the dns payload include:
-* `dns.id`
-* `dns.query`
-* `dns.opcode`
-* `dns.authoritative`
-* `dns.truncated`
-* `dns.recursion_desired`
-* `dns.recursion_available`
-* `dns.recursion_available`
-* `dns.authenticated_data`
-* `dns.checking_disabled`
-* `dns.response_code`
+* `dns.id` - int, ID of the DNS packet, used for matching requests to responses
+* `dns.query` - bool, whether the DNS packet is a query
+* `dns.opcode` - str, see https://docs.rs/dns-parser/latest/dns_parser/enum.Opcode.html
+* `dns.authoritative` - bool, whether the response is authoritative
+* `dns.truncated` - bool - Whether the response was truncated 
+* `dns.recursion_desired` - bool, Whether recursion is requested
+* `dns.recursion_available` - bool, Whether recursion is available
+* `dns.authenticated_data` - bool, Whether the response is authenticated
+* `dns.checking_disabled` - bool, whether DNS response should be sent whether or not validation was successfully performed
+* `dns.response_code` - str, see https://docs.rs/dns-parser/latest/dns_parser/enum.ResponseCode.html
 * `dns.questions` - a list of DNS questions in the packet
-* `dns.questions[n].qname` 
-* `dns.questions[n].prefer_unicast` 
-* `dns.questions[n].qtype` 
-* `dns.questions[n].qclass` 
+* `dns.questions[n].qname` - str, the name requested 
+* `dns.questions[n].prefer_unicast` - bool, whether to prefer unicast addresses
+* `dns.questions[n].qtype`  - str, DNS query type, see https://docs.rs/dns-parser/latest/dns_parser/enum.QueryType.html
+* `dns.questions[n].qclass` - str, DNS query class, see https://docs.rs/dns-parser/latest/dns_parser/enum.QueryClass.html
 * `dns.answers` - a list of DNS answers
-* `dns.answers[n].name`
-* `dns.answers[n].multicast_unique`
-* `dns.answers[n].cls`
-* `dns.answers[n].ttl`
+* `dns.answers[n].name` - name answering to
+* `dns.answers[n].multicast_unique` - bool, related to cache in mdns 
+* `dns.answers[n].cls` - str, DNS record class, see https://docs.rs/dns-parser/latest/dns_parser/enum.Class.html
+* `dns.answers[n].ttl` - int, TTL of the response
 * `dns.answers[n].data` - A tuple of the RData class (e.g. "A", "AAAA") with its fields
 * `dns.nameservers` - Same format as answers
 * `dns.additional` - Same format as answers
-* `dns.opt` - DNS Options
+* `dns.opt` - DNS Options, see https://docs.rs/dns-parser/latest/dns_parser/rdata/opt/struct.Record.html
 * `dns.opt.udp` 
 * `dns.opt.extrcode` 
 * `dns.opt.version` 
