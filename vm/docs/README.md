@@ -67,11 +67,15 @@ The interfaces that may be accessed to read metadata from each packet are:
  * `packet.direction` - Direction of the packet. Client to wan = 1. unknown = 0. wan to client = -1
 
 ## ip
- * `ip.header_len` - Length of IP header
- * `ip.total_len` - Total length of ip packet
- * `ip.ttl` - TTL of IP packet
+ * `packet.ip.header_len` - Length of IP header
+ * `packet.ip.total_len` - Total length of ip packet
+ * `packet.ip.ttl` - TTL of IP packet
+ * `packet.ip.src` - Source IP address
+ * `packet.ip.dst` - Destination IP address
 
 ## tcp
+ * `packet.tcp.src` - Source port
+ * `packet.tcp.dst` - Destination port 
  * `packet.tcp.seq` - TCP SEQ number
  * `packet.tcp.ack` - TCP ACK number
  * `packet.tcp.header_len` - TCP header length
@@ -89,8 +93,10 @@ The interfaces that may be accessed to read metadata from each packet are:
      * `packet.tcp.flags.ns`
 
 ## udp
- * `udp.length` - UDP total length
- * `udp.checksum` - UDP checksum
+ * `packet.udp.src` - Source port
+ * `packet.udp.dst` - Destination port 
+ * `packet.udp.length` - UDP total length
+ * `packet.udp.checksum` - UDP checksum
 
 ## Payload properties, generic to TCP and UDP
  * `packet.payload` - payload body, regardless of transport protocol
