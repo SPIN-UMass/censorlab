@@ -305,6 +305,7 @@ impl TransportState {
                                     },
                                     Err(err) => {
                                         error!("Error calling processing function: {:?}", err);
+                                        vm.print_exception(err);
                                         Action::None
                                     }
                                 }
