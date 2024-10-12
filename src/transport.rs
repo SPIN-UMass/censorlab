@@ -269,7 +269,11 @@ impl TransportState {
                     scope.locals.set_item(PACKET, pkt, vm)?;
                     // Execute our censor program initialization
                     if is_first_cl {
-                        vm.run_code_obj(code, scope.clone())?;
+                        if let Err(err) = vm.run_code_obj(code, scope.clone()) {
+                            error!("Error initializing environment: {:?}", err);
+                            vm.print_exception(err);
+                            return Ok(Action::None);
+                        }
                         let model = PythonModel::new(sender);
                         let model = model.to_pyobject(vm);
                         scope.locals.set_item(MODEL, model, vm)?;
