@@ -74,6 +74,7 @@
               (pkgs.rust-bin.nightly.latest.default.override {
                 extensions = [ "rust-src" "rustfmt" "rust-analyzer" "clippy" ];
               })
+              pkgs.zola
             ];
             buildInputs = [ ] ++ dependencies;
           } // onnx_vars);
