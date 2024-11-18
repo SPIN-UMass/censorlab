@@ -15,7 +15,6 @@ in
       };
     };
   };
-  home-manager.backupFileExtension = true;
   # TODO: move the custom desktop shortcuts here
   # Needed for home-manager
   home.stateVersion = "24.05";
