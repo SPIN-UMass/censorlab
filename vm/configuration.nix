@@ -127,7 +127,7 @@ in
   home-manager = {
     useGlobalPkgs = true;
     useUserPackages = true;
-    backupFileExtension = true;
+    backupFileExtension = "backup";
     users.censorlab = (import ./home.nix);
   };
   # This option defines the first version of NixOS you have installed on this particular machine,
