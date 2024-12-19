@@ -1,9 +1,9 @@
-[submodule "docs_src/3party/academicons"]
-	path = docs_src/3party/academicons
+[submodule "website/3party/academicons"]
+	path = website/3party/academicons
 	url = https://github.com/jpswalsh/academicons
-[submodule "docs_src/3party/bulma"]
-	path = docs_src/3party/bulma
+[submodule "website/3party/bulma"]
+	path = website/3party/bulma
 	url = https://github.com/jgthms/bulma
-[submodule "docs_src/3party/Font-Awesome"]
-	path = docs_src/3party/Font-Awesome
+[submodule "website/3party/Font-Awesome"]
+	path = website/3party/Font-Awesome
 	url = git@github.com:FortAwesome/Font-Awesome.git
