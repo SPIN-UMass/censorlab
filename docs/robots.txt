@@ -1,4 +1,0 @@
-User-agent: *
-Disallow:
-Allow: /
-Sitemap: https://spin-umass.github.io/censorlab/sitemap.xml
