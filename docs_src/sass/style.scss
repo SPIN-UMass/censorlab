@@ -1,3 +1,6 @@
+// Set font path before importing
+$fa-font-path: './webfonts';
+
 // FontAwesome
 // importing core styling file
 @import './fontawesome/scss/fontawesome.scss';
@@ -5,7 +8,6 @@
 @import './fontawesome/scss/solid.scss';
 @import './fontawesome/scss/brands.scss';
 
-$fa-font-path: 'webfonts';
 
 body {
   font-family: 'Noto Sans', sans-serif;
