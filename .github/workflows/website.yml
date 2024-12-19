@@ -4,9 +4,13 @@ on:
       paths:
         - docs_src/**
 jobs:
-  minimal:
+  build:
+    environment:
+      name: github-pages
+        url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: nixbuild/nix-quick-install-action@v29
       - run: nix develop .#website --command zola build -r docs_src -o docs
       - name: Setup Pages
