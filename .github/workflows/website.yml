@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: nixbuild/nix-quick-install-action@v29
-      - run: nix develop .#website --command zola build -r docs_src -o docs
+      - run: nix develop .#website --command zola -r docs_src build -o docs
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
