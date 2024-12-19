@@ -3,6 +3,11 @@ on:
   push:
       paths:
         - docs_src/**
+
+concurrency:
+    group: "pages"
+    cancel-in-progress: false
+
 jobs:
   build:
     environment:
