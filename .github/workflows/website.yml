@@ -24,7 +24,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: nixbuild/nix-quick-install-action@v29
-      - run: nix develop .#website --command zola -r docs_src build -o public
+      - name: Build the website
+        run: nix develop .#website --command zola -r docs_src build -o public
+      - name: Zip up the website to avoid a bug
+        run: zip -r website.zip public
+      - name: Delete the website folder
+        run: rm -r public
+      - name: Unzip the zip file again
+        run: unzip -r website.zip
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
