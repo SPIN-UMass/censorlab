@@ -1,3 +1,5 @@
 /target
 result
 **/.*.sw*
+/public
+/docs
