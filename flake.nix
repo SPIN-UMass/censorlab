@@ -1,9 +1,9 @@
 {
   inputs = {
-    nixpkgs.url = github:NixOS/nixpkgs/nixos-24.05;
+    nixpkgs.url = github:NixOS/nixpkgs/nixos-24.11;
     nixpkgs-master.url = github:NixOS/nixpkgs/master;
     home-manager = {
-      url = github:nix-community/home-manager/release-24.05;
+      url = github:nix-community/home-manager/release-24.11;
       inputs.nixpkgs.follows = "nixpkgs";
     };
     utils.url = github:numtide/flake-utils;
@@ -78,6 +78,11 @@
             ];
             buildInputs = [ ] ++ dependencies;
           } // onnx_vars);
+          devShells.website = pkgs.mkShell {
+            nativeBuildInputs = [
+              pkgs.zola
+            ];
+          };
           # Censorlab package
           packages = rec {
             default = censorlab;

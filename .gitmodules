@@ -1,0 +1,6 @@
+[submodule "docs_src/3party/academicons"]
+	path = docs_src/3party/academicons
+	url = https://github.com/jpswalsh/academicons
+[submodule "docs_src/3party/bulma"]
+	path = docs_src/3party/bulma
+	url = https://github.com/jgthms/bulma

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Documentation</title>
+  </head>
+  <body>
+    <h1 id="censorlab-a-generic-testbed-for-censorship-emulation">CensorLab: A Generic Testbed for Censorship Emulation</h1>
+<h1 id="about">About</h1>
+<p>Censorlab is a censorship emulation platform.</p>
+<h1 id="configuration">Configuration</h1>
+<p>Configuration of the censor is done in <code>TOML</code> files and passed in with the <code>-c</code> flag. See <code>censor.toml</code> for configuration options. You probably want to copy censor.toml to your own config file and pass it in. The default censor.toml uses</p>
+<ul>
+<li><code>censor-scripts/cl-python/shadowsocks_ml.py</code></li>
+<li><code>models/poison_test/poisoned.onnx.ml</code></li>
+</ul>
+<h1 id="running-in-tap-mode">Running in tap mode</h1>
+<p>Censorlab uses netfilter queues to intercept traffic. To start intercepting traffic in this vm, run</p>
+<pre data-lang="sh" style="background-color:#2b303b;color:#c0c5ce;" class="language-sh "><code class="language-sh" data-lang="sh"><span style="color:#bf616a;">cl_nftables.sh</span><span> start
+</span></code></pre>
+<p>While this script is started,</p>
+<ul>
+<li>Before CensorLab is started - Traffic will all fail due to no program listening on the given queue</li>
+<li>While CensorLab is running - Traffic may be blocked by the censor program</li>
+</ul>
+<p>Make sure you retain access to this virtual machine using a virtualized display, as SSH may cease to function</p>
+<p>To stop forwarding traffic to the queue:</p>
+<pre data-lang="sh" style="background-color:#2b303b;color:#c0c5ce;" class="language-sh "><code class="language-sh" data-lang="sh"><span style="color:#bf616a;">cl_nftables.sh</span><span> stop
+</span></code></pre>
+<p>In a system where <code>enp0s3</code> is the interface you want to tap and 10.0.2.15 is the ip of the client (e.g. this VM), the command to start censorlab using the provided censor.toml is</p>
+<pre data-lang="sh" style="background-color:#2b303b;color:#c0c5ce;" class="language-sh "><code class="language-sh" data-lang="sh"><span style="color:#bf616a;">censorlab -c</span><span> censor.toml tap 10.0.2.15 enp0s3
+</span></code></pre>
+<p>You may verify the interface name and IP address of the VM using</p>
+<pre data-lang="sh" style="background-color:#2b303b;color:#c0c5ce;" class="language-sh "><code class="language-sh" data-lang="sh"><span style="color:#bf616a;">ip</span><span> addr
+</span></code></pre>
+<p>To list all the configurable options:</p>
+<pre data-lang="sh" style="background-color:#2b303b;color:#c0c5ce;" class="language-sh "><code class="language-sh" data-lang="sh"><span style="color:#bf616a;">censorlab --help
+</span><span style="color:#bf616a;">censorlab</span><span> nfq</span><span style="color:#bf616a;"> --help
+</span></code></pre>
+<h1 id="python-api">Python API</h1>
+<p>Censor programs are operated in two parts:</p>
+<ul>
+<li>Upon connection, the entire script is executed. This can be used for initialization, etc</li>
+<li>For each packet, including the first packet, the <code>process</code> function is executed</li>
+</ul>
+<p>You likely want to begin your program with</p>
+<pre data-lang="python" style="background-color:#2b303b;color:#c0c5ce;" class="language-python "><code class="language-python" data-lang="python"><span style="color:#b48ead;">from </span><span>rust </span><span style="color:#b48ead;">import </span><span>Packet, Model, regex
+</span></code></pre>
+<p>to ensure all appropriate methods are in scope</p>
+<p>The interfaces that may be accessed to read metadata from each packet are:</p>
+<h2 id="packet">packet</h2>
+<ul>
+<li>global variable, but passed to the function</li>
+<li><code>packet.timestamp</code> - Unix timestamp of the packet</li>
+<li><code>packet.direction</code> - Direction of the packet. Client to wan = 1. unknown = 0. wan to client = -1</li>
+<li><code>ip.header_len</code> - Length of IP header</li>
+<li><code>ip.total_len</code> - Total length of ip packet</li>
+<li><code>ip.ttl</code> - TTL of IP packet</li>
+<li><code>packet.tcp.seq</code> - TCP SEQ number</li>
+<li><code>packet.tcp.ack</code> - TCP ACK number</li>
+<li><code>packet.tcp.header_len</code> - TCP header length</li>
+<li><code>packet.tcp.urgent_at</code> - TCP urgent at flat</li>
+<li><code>packet.tcp.window_len</code> - TCP window length
+TCP Flags:
+<ul>
+<li>`packet.tcp.flags.fin,</li>
+<li><code>packet.tcp.flags.syn</code></li>
+<li><code>packet.tcp.flags.rst</code></li>
+<li><code>packet.tcp.flags.psh</code></li>
+<li><code>packet.tcp.flags.ack</code></li>
+<li><code>packet.tcp.flags.urg</code></li>
+<li><code>packet.tcp.flags.ece</code></li>
+<li><code>packet.tcp.flags.cwr</code></li>
+<li><code>packet.tcp.flags.ns</code></li>
+</ul>
+</li>
+<li><code>udp.length</code> - UDP total length</li>
+<li><code>udp.checksum</code> - UDP checksum</li>
+<li><code>packet.payload</code> - payload body, regardless of transport protocol</li>
+<li><code>packet.payload_len</code> - payload length, regardless of transport protocol</li>
+<li><code>packet.payload_entropy</code> - payload entropy regardless of transport protocol</li>
+<li><code>packet.payload_avg_popcount</code> - payload average popcount, regardless of transport protocol</li>
+</ul>
+<h2 id="model">model</h2>
+<ul>
+<li>global variable</li>
+<li><code>model.evaluate("name", input)</code>
+<ul>
+<li><code>name</code> - the name of the model, as in the config file</li>
+<li><code>data</code> - a python list of floats. It is assumed that the model input has shape NxM (the example is 1x90), in which case the python list should have length 90</li>
+<li><code>RETURNS</code> - a list of floats, from the <code>probability</code> output of the ONNX model</li>
+</ul>
+</li>
+</ul>
+<h2 id="regex">regex</h2>
+<ul>
+<li><code>from rust import regex</code></li>
+<li><code>re = regex("foo|bar")</code></li>
+<li><code>re.ismatch(b)</code> - accepts a python-style byte array, returns whether the regex matches. useful for payload</li>
+</ul>
+<h1 id="ipc">IPC</h1>
+<p>TODO: write documentation about this</p>
+
+  </body>
+</html>

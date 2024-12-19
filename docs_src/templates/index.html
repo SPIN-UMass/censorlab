@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+    <div class="hero-body">
+      <div class="container is-max-desktop">
+        <div class="columns is-centered">
+          <div class="column has-text-centered">
+            <div><h1 class="title is-1 publication-title">{{ section.title }}</h1></div>
+            <h1 class="title is-1 publication-title">{{ section.extra.subtitle }}</h1>
+            <div class="is-size-5 publication-authors">
+              <!-- Paper authors -->
+              {% set unique_institutions = section.extra.authors | map(attribute="institution") | unique %}
+              {% for author in section.extra.authors %}
+								{% set institution = section.extra.institutions | filter(attribute="id", value=author.institution) | first %}
+                <span class="author-block"><a href="{{ author.website }}" target="_blank">{{ author.name }}</a>
+                <sup>{{ institution.symbol }}</sup>
+                </span>
+              {% endfor %}
+            </div>
+
+                  <div class="is-size-5 publication-authors">
+                    <div>{{ section.extra.venue }}</div>
+										{% for institution in section.extra.institutions %}
+                			<div class="author-block">{{ institution.symbol }} {{ institution.name }}</div>
+            				{% endfor %}
+                  </div>
+                
+                  <div class="column has-text-centered">
+                    <div class="publication-links">
+                      <!--<span class="link-block">
+                        <a href="https://arxiv.org/pdf/<ARXIV PAPER ID>.pdf" target="_blank"
+                        class="external-link button is-normal is-rounded is-dark">
+                        <span class="icon">
+                          <i class="fas fa-file-pdf"></i>
+                        </span>
+                        <span>Paper</span>
+                      </a>
+                      </span>-->
+                  <!-- Github link -->
+                  <span class="link-block">
+                    <a href="https://github.com/SPIN-UMass/censorlab" target="_blank"
+                    class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="fab fa-github"></i>
+                    </span>
+                    <span>Code</span>
+                  </a>
+                </span>
+              <!-- Link to documentation -->  
+              <span class="link-block">
+                <a href="/docs/" target="_blank"
+                  class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                    <i class="fa-solid fa-book"></i>
+                  </span>
+                  <span>Getting Started</span>
+                </a>
+              </span>
+
+              <!-- Link to VM Images -->  
+              <span class="link-block">
+                <a href="/vm-info" target="_blank"
+                  class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                    <i class="fa-solid fa-computer"></i>
+                  </span>
+                  <span>CensorLab VM</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="/drives/censorlab.ova" target="_blank"
+                  class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                    <i class="fa-solid fa-computer"></i>
+                  </span>
+                  <span>x86_64 VM</span>
+                </a>
+              </span>
+              <!-- Link to VM Images -->  
+              <span class="link-block">
+                <a href="/drives/censorlab-arm.vmdk" target="_blank"
+                  class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                    <i class="fa-brands fa-apple"></i>
+                  </span>
+                  <span>aarch66 VM</span>
+                </a>
+              </span>
+              <!-- Link to examples -->  
+              <span class="link-block">
+                <a href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank"
+                  class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                    <i class="fa-brands fa-python"></i>
+                  </span>
+                  <span>Examples</span>
+                </a>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- Teaser video-->
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <video poster="" id="tree" autoplay controls muted loop height="100%">
+        <!-- Your video here -->
+        <source src="videos/censorlab_demo.mp4" type="video/mp4">
+      </video>
+      <h2 class="subtitle has-text-centered">
+        CensorLab is a censorship emulation platform that allows developers to test various censorship strategies against their own censorship circumvention tools. By <i>proactively</i> attempting to censor their own protocols, censorship circumvention developers can develop stronger threat models and strengthen their own tools against past, present, and future censor strategies.
+			</h2>
+    </div>
+  </div>
+</section>
+<!-- End teaser video -->
+
+<!-- Getting started -->
+<section class="section hero">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Getting Started</h2>
+        <div class="content has-text-justified">
+          <p>To get started using CensorLab, please download either the x86_64 or ARM VMs above. These VMs are designed for VirtualBox. The API documentation link above has instructions to use CensorLab within the VM. For using CensorLab outside our VM, please see the instructions in README.md within our GitHub repository.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- End getting started -->
+<!-- Paper abstract -->
+<section class="section hero is-light">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>{{ section.extra.abstract }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- End paper abstract -->
+
+
+<!--BibTex citation 
+  <section class="section" id="BibTeX">
+    <div class="container is-max-desktop content">
+      <h2 class="title">BibTeX</h2>
+      <pre><code>BibTex Code Here</code></pre>
+    </div>
+</section>
+End BibTex citation -->
+
+
+<footer class="footer">
+  <div class="container">
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+            This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a> which was adopted from the <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
+            You are free to borrow the source code of this website, we just ask that you link back to <a href="https://nerfies.github.io/">the original</a> in the footer. <br> This website is licensed under a <a rel="license"  href="http://creativecommons.org/licenses/by-sa/4.0/" target="_blank">Creative
+            Commons Attribution-ShareAlike 4.0 International License</a>.
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+{% endblock content %}

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="description" content="DESCRIPTION META TAG">
+  <meta property="og:title" content="{{ section.title }}"/>
+  <meta property="og:description" content="SOCIAL MEDIA DESCRIPTION TAG TAG"/>
+  <meta property="og:url" content="https://censorlab.cs.umass.edu"/>
+  <!-- Path to banner image, should be in the path listed below. Optimal dimenssions are 1200X630-->
+  <meta property="og:image" content="images/censorlab.png" />
+  <meta property="og:image:width" content="1024"/>
+  <meta property="og:image:height" content="1024"/>
+
+
+  <meta name="twitter:title" content="TWITTER BANNER TITLE META TAG">
+  <meta name="twitter:description" content="TWITTER BANNER DESCRIPTION META TAG">
+  <!-- Path to banner image, should be in the path listed below. Optimal dimenssions are 1200X600-->
+  <meta name="twitter:image" content="static/images/your_twitter_banner_image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <!-- Keywords for your paper to be indexed by-->
+  <meta name="keywords" content="KEYWORDS SHOULD BE PLACED HERE">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+
+  <title>{{ section.title }}</title>
+  <link rel="icon" type="image/png" href="images/censorlab.png">
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
+
+  <link rel="stylesheet" href="{{ get_url(path="/style.css") }}">
+  <link rel="stylesheet" href="{{ get_url(path="css/academicons.min.css") }}">
+  <link rel="stylesheet" href="css/bulma.min.css">
+  <!-- jQuery -->
+  <script src="js/jquery/jquery-3.7.1.min.js"></script>
+</head>
+<body>
+{% block content %} {% endblock %}
+</body>
+</html>
