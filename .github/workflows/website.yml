@@ -27,7 +27,7 @@ jobs:
       - name: Build the website
         run: nix develop .#website --command zola -r docs_src build -o public
       - name: Zip up the website to avoid a bug
-        run: zip -r website.zip public
+        run: zip -r -y website.zip public
       - name: Delete the website folder
         run: rm -r public
       - name: Unzip the zip file again
