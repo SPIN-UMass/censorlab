@@ -1,0 +1,20 @@
+name: Deploy Website
+on:
+  push:
+      paths:
+        - docs_src/**
+jobs:
+  minimal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: nixbuild/nix-quick-install-action@v29
+      - run: nix develop .#website --command zola build -r docs_src -o docs
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'docs'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
