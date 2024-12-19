@@ -1,5 +1,5 @@
 # The URL the site will be built for
-base_url = "https://spin-umass.github.io/censorlab"
+base_url = "https://spin-umass.github.io/censorlab/"
 
 # Whether to automatically compile all Sass files in the sass directory
 compile_sass = true
