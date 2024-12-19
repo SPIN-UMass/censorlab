@@ -1,5 +1,5 @@
 +++
-title = "Documentation"
+title = "CensorLab Documentation"
 template = "docs.html"
 +++
 # CensorLab: A Generic Testbed for Censorship Emulation
