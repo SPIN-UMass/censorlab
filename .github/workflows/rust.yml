@@ -7,7 +7,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - src/**
-      - .github/workflows/website.yml
+      - .github/workflows/rust.yml
 
 concurrency:
     group: "rust"
