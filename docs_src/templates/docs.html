@@ -1,9 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <title>{{ page.title }}</title>
-  </head>
-  <body>
-    {{ page.content | safe }}
-  </body>
-</html>
+{% extends "base.html" %}
+{% block content %}
+{{ page.content | safe }}
+{% endblock content%}

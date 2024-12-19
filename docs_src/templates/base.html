@@ -3,7 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="description" content="DESCRIPTION META TAG">
-  <meta property="og:title" content="{{ section.title }}"/>
+  {% if section %}
+    <meta property="og:title" content="{{ section.title }}"/>
+  {% elif page %}
+    <meta property="og:title" content="{{ page.title }}"/>
+  {% endif %}
   <meta property="og:description" content="SOCIAL MEDIA DESCRIPTION TAG TAG"/>
   <meta property="og:url" content="https://censorlab.cs.umass.edu"/>
   <!-- Path to banner image, should be in the path listed below. Optimal dimenssions are 1200X630-->
@@ -22,7 +26,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
 
-  <title>{{ section.title }}</title>
+  {% if section %}
+    <title>{{ section.title }}</title>
+  {% elif page %}
+    <title>{{ page.title }}</title>
+  {% endif %}
   <link rel="icon" type="image/png" href="images/censorlab.png">
   <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
 

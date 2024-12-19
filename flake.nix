@@ -79,9 +79,18 @@
             buildInputs = [ ] ++ dependencies;
           } // onnx_vars);
           devShells.website = pkgs.mkShell {
-            nativeBuildInputs = [
-              pkgs.zola
-            ];
+            nativeBuildInputs =
+              let
+                zola-serve = pkgs.writeShellScriptBin "zola-serve" ''
+                  #!/bin/sh
+                  ${pkgs.zola}/bin/zola --root $(${pkgs.git}/bin/git rev-parse --show-toplevel)/docs_src serve --base-url http://localhost/censorlab 
+                ''
+                ;
+              in
+              [
+                pkgs.zola
+                zola-serve
+              ];
           };
           # Censorlab package
           packages = rec {
