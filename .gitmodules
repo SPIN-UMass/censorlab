@@ -4,3 +4,6 @@
 [submodule "docs_src/3party/bulma"]
 	path = docs_src/3party/bulma
 	url = https://github.com/jgthms/bulma
+[submodule "docs_src/3party/Font-Awesome"]
+	path = docs_src/3party/Font-Awesome
+	url = git@github.com:FortAwesome/Font-Awesome.git
