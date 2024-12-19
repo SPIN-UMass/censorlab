@@ -4,10 +4,11 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - "build.rs"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "src/**"
+      - build.rs
+      - Cargo.toml
+      - Cargo.lock
+      - src/**
+      - .github/workflows/website.yml
 
 concurrency:
     group: "rust"
