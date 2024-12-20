@@ -1,6 +1,6 @@
 +++
 title = "VM Info"
-template = "docs.html"
+template = "markdown.html"
 +++
 # Getting started
 To use our VMs, you will need to install [VirtualBox](https://www.virtualbox.org/wiki/Downloads).
@@ -22,4 +22,3 @@ as the specs of the VM machine
 ![Step 1](/images/vm_config1.png)
 ![Step 2](/images/vm_config2.png)
 ![Step 3](/images/vm_config3.png)
-

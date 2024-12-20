@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+		{% if section %}
+    	<meta name="description" content="{{ section.description }}">
+		{% elif page %}
+    	<meta name="description" content="{{ page.description }}">
+		{% endif %}
+		{% if section %}
+			<title>{{ section.title }}</title>
+		{% elif page %}
+			<title>{{ page.title }}</title>
+		{% endif %}
+</head>
+<body>
+    <main>
+			{% if section %}
+				{{ section.content | safe }}
+			{% elif page %}
+				{{ page.content | safe }}
+			{% endif %}
+    </main>
+</body>
+</html>
+

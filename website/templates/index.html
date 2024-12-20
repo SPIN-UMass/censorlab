@@ -74,7 +74,7 @@
           </span>
         <!-- Link to documentation -->  
         <span class="link-block">
-          <a href="docs/" target="_blank"
+          <a href="{{ get_url(path="getting_started") }}" target="_blank"
             class="external-link button is-normal is-rounded is-dark">
             <span class="icon">
               <i class="fa-solid fa-book"></i>
@@ -82,10 +82,20 @@
             <span>Getting Started</span>
           </a>
         </span>
+        <!-- Link to examples -->  
+        <span class="link-block">
+          <a href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank"
+            class="external-link button is-normal is-rounded is-dark">
+            <span class="icon">
+              <i class="fa-brands fa-python"></i>
+            </span>
+            <span>Examples</span>
+          </a>
+        </span>
 
         <!-- Link to VM Images -->  
         <span class="link-block">
-          <a href="/vm-info" target="_blank"
+          <a href="{{ get_url(path="/vm-info") }}" target="_blank"
             class="external-link button is-normal is-rounded is-dark">
             <span class="icon">
               <i class="fa-solid fa-computer"></i>
@@ -111,22 +121,12 @@
             <span>aarch66 VM</span>
           </a>
         </span>-->
-        <!-- Link to examples -->  
-        <span class="link-block">
-          <a href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank"
-            class="external-link button is-normal is-rounded is-dark">
-            <span class="icon">
-              <i class="fa-brands fa-python"></i>
-            </span>
-            <span>Examples</span>
-          </a>
-        </span>
       </div>
     </div>
       <div class="column is-four-fifths">
         <h2 class="title is-3">Getting Started</h2>
         <div class="content has-text-justified">
-          <p>To get started using CensorLab, please download either the x86_64 or ARM VMs above. These VMs are designed for VirtualBox. The API documentation link above has instructions to use CensorLab within the VM. For using CensorLab outside our VM, please see the instructions in README.md within our GitHub repository.</p>
+          <p>To help you get started with CensorLab, we provide a tutorial, demos, and a VM with all dependencies already installed</p> 
         </div>
       </div>
     </div>
