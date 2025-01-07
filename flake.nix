@@ -83,7 +83,7 @@
               let
                 zola-serve = pkgs.writeShellScriptBin "zola-serve" ''
                   #!/bin/sh
-                  ${pkgs.zola}/bin/zola --root $(${pkgs.git}/bin/git rev-parse --show-toplevel)/website serve --base-url http://localhost/censorlab 
+                  ${pkgs.zola}/bin/zola --root $(${pkgs.git}/bin/git rev-parse --show-toplevel)/website serve 
                 ''
                 ;
               in
