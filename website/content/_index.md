@@ -1,6 +1,8 @@
 +++
 title = "CensorLab"
 extra.subtitle = "A Testbed for Censorship Experimentation"
+extra.arxiv = "https://arxiv.org/abs/2412.16349"
+extra.pdf = "https://arxiv.org/pdf/2412.16349"
 extra.authors = [
     { name = "Jade Sheffey",    website = "https://cs.umass.edu/~jsheffey", institution = "umass" },
     { name = "Amir Houmansadr", website = "https://cs.umass.edu/~amir",     institution = "umass" }

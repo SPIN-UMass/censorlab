@@ -53,15 +53,15 @@
     <div class="columns is-centered has-text-centered">
       <div class="column has-text-centered">
         <div class="publication-links">
-                <!--<span class="link-block">
-                  <a href="https://arxiv.org/pdf/<ARXIV PAPER ID>.pdf" target="_blank"
-                  class="external-link button is-normal is-rounded is-dark">
-                  <span class="icon">
-                    <i class="fas fa-file-pdf"></i>
-                  </span>
-                  <span>Paper</span>
-                </a>
-                </span>-->
+            <span class="link-block">
+              <a href="{{ section.extra.pdf }}" target="_blank"
+              class="external-link button is-normal is-rounded is-dark">
+              <span class="icon">
+                <i class="fas fa-file-pdf"></i>
+              </span>
+              <span>Paper</span>
+            </a>
+            </span>
             <!-- Github link -->
             <span class="link-block">
               <a href="https://github.com/SPIN-UMass/censorlab" target="_blank"
@@ -103,6 +103,16 @@
             <span>CensorLab VM</span>
           </a>
         </span>
+ 				<!-- ArXiv abstract Link -->
+				<span class="link-block">
+						<a href="{{ section.extra.arxiv }}" target="_blank"
+						class="external-link button is-normal is-rounded is-dark">
+						<span class="icon">
+							<i class="ai ai-arxiv"></i>
+						</span>
+						<span>arXiv</span>
+					</a>
+				</span>
         <!--<span class="link-block">
           <a href="/drives/censorlab.ova" target="_blank"
             class="external-link button is-normal is-rounded is-dark">
@@ -126,7 +136,8 @@
       <div class="column is-four-fifths">
         <h2 class="title is-3">Getting Started</h2>
         <div class="content has-text-justified">
-          <p>To help you get started with CensorLab, we provide a tutorial, demos, and a VM with all dependencies already installed</p> 
+          <p>To help you get started with CensorLab, we provide a tutorial, demos, and a VM with all dependencies already installed. Click </p> 
+          Click <a href="{{ get_url(path="getting_started") }}" target="_blank">here</a> for a guide to get started with CensorLab.
         </div>
       </div>
     </div>
@@ -163,6 +174,9 @@ End BibTex citation -->
   <div class="container">
     <div class="columns is-centered">
       <div class="column is-8">
+        <div class="content">
+          If you have any questions about CensorLab, please contact us at <a href="mailto:censorlab@cs.umass.edu">censorlab@cs.umass.edu</a>.
+        </div>
         <div class="content">
             This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a> which was adopted from the <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
             You are free to borrow the source code of this website, we just ask that you link back to <a href="https://nerfies.github.io/">the original</a> in the footer. <br> This website is licensed under a <a rel="license"  href="http://creativecommons.org/licenses/by-sa/4.0/" target="_blank">Creative

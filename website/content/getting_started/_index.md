@@ -26,3 +26,6 @@ Note how we don't return anything unless dropping a packet. This is because the 
 
 You can see more examples of how to use CensorLab [here](https://github.com/SPIN-UMass/censorlab/tree/main/demos), and a full description of the API [here](http://127.0.0.1:1111/docs/).
 
+
+## Examples
+We provide a wide set of examples for CensorLab [here](https://github.com/SPIN-UMass/censorlab/tree/main/demos) to help you get started with writing censor programs. Each example is a folder containing a configuration file, censor program, and optionally an ML model.
