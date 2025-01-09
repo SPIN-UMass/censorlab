@@ -19,6 +19,6 @@ You should use
 * 12GB Memory
 * OS: Arch Linux (arm64)
 as the specs of the VM machine
-![Step 1](/images/vm_config1.png)
-![Step 2](/images/vm_config2.png)
-![Step 3](/images/vm_config3.png)
+![Step 1](vm_config1.png)
+![Step 2](vm_config2.png)
+![Step 3](vm_config3.png)
