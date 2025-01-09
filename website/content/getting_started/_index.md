@@ -12,6 +12,12 @@ If you would prefer to use your own system, you may follow the run instructions 
 ## Usage
 CensorLab is a censorship simulation program that runs Python programs (known as Censor Programs) one packet at a time, within the scope of a connection. It is configured using two main files: a configuration file, and a censor program. The configuration file defines things such as default parameters and behaviors. You can find an example of `censor.toml` [here](https://github.com/SPIN-UMass/censorlab/blob/main/censor.toml). The censor program is a Python program (referenced in `censor.toml`) that performs the actual censorship algorithm.
 
+To run CensorLab in tap mode (e.g., integrated within the system's firewall) and with default settings, simply run
+```bash
+censorlab -p censor.py nfq
+```
+where `censor.py` is the path to a censor program. You may also use `-c censor.toml` to use a full configuration file for more options. See `censorlab --help` for all options available to CensorLab.
+
 For example, a censor program that drops all packets past the first 3 looks like this
 ```python
 num_packets = 0
