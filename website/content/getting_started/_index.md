@@ -18,7 +18,8 @@ censorlab -p censor.py nfq
 ```
 where `censor.py` is the path to a censor program. You may also use `-c censor.toml` to use a full configuration file for more options. See `censorlab --help` for all options available to CensorLab.
 
-For example, a censor program that drops all packets past the first 3 looks like this
+## Censor Programs
+An example censor program that drops all packets past the first 3 looks like this
 ```python
 num_packets = 0
 
