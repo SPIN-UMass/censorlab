@@ -14,7 +14,7 @@ CensorLab is a censorship simulation program that runs Python programs (known as
 
 For example, a censor program that drops all packets past the first 3 looks like this
 ```python
-num_packet = 0
+num_packets = 0
 
 def process(packet):
 	num_packets += 1
@@ -22,6 +22,29 @@ def process(packet):
 		return "drop"
 ```
 Note how we don't return anything unless dropping a packet. This is because the default return value of a function in Python is `None`. In CensorLab, `None` is the same as `"allow"`.
+
+CensorLab also provides the ability to access various data fields from packets, from link-layer, to transport layer for all packets. For example, this censor program implements a primitive form of throttling for plausibly-encrypted connections.
+```python
+ctr = 0
+
+def process(packet):
+    if packet.payload_len > 1000 and packet.payload_entropy > 7.0:
+        ctr += 1
+        if ctr % 2 == 0:
+            return "drop"
+```
+
+While the entire Python standard library is not implemented, CensorLab includes efficient support for regular expressions.
+```python
+from rust import regex
+r = regex("foo|bar")
+
+def process(packet):
+    if r.ismatch(packet.payload):
+        return "drop"
+```
+
+CensorLab also includes support for ML models. See [here](https://TODDO) for a Jupyter notebook that builds models in a way that CensorLab can use.
 
 
 You can see more examples of how to use CensorLab [here](https://github.com/SPIN-UMass/censorlab/tree/main/demos), and a full description of the API [here](http://127.0.0.1:1111/docs/).
