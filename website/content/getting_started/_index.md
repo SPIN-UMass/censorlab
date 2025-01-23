@@ -51,7 +51,7 @@ def process(packet):
         return "drop"
 ```
 
-CensorLab also includes support for ML models. See [here](https://TODDO) for a Jupyter notebook that builds models in a way that CensorLab can use.
+CensorLab also includes support for ML models. See [here](https://github.com/SPIN-UMass/censorlab/tree/main/demos/model) for a Jupyter notebook that builds models in a way that CensorLab can use.
 
 
 You can see more examples of how to use CensorLab [here](https://github.com/SPIN-UMass/censorlab/tree/main/demos), and a full description of the API [here](http://127.0.0.1:1111/docs/).
