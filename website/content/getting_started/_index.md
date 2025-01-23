@@ -28,7 +28,7 @@ def process(packet):
 	if num_packets > 3:
 		return "drop"
 ```
-Note how we don't return anything unless dropping a packet. This is because the default return value of a function in Python is `None`. In CensorLab, `None` is the same as `"allow"`.
+Note how we don't return anything unless dropping a packet. This is because the default return value of a function in Python is `None`. In CensorLab, `None` is the same as `"allow"`, which allows a packet to continue being processed.
 
 CensorLab also provides the ability to access various data fields from packets, from link-layer, to transport layer for all packets. For example, this censor program implements a primitive form of throttling for plausibly-encrypted connections.
 ```python

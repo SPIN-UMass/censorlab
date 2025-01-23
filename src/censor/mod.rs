@@ -248,21 +248,6 @@ impl Censor {
             config.execution,
             model_sender,
         )?;
-        //        // Load the censor model for tcp
-        //        if let Some(model_cfg) = onnx_config {
-        //            // Load the model
-        //            let (onnx_data, metadata) = load_model(model_cfg.model_path, model_cfg.metadata_path)?;
-        //            info!("Loaded onnx model for TCP from config. Sending to censor");
-        //            sender
-        //                .send(crate::ipc::Message::UpdateModel {
-        //                    scope: crate::ipc::ModelScope::Tcp,
-        //                    onnx_data,
-        //                    metadata,
-        //                })
-        //                .map_err(|err| {
-        //                    CensorInitError::SendCensorshipModel(crate::ipc::ModelScope::Tcp, err)
-        //                })?;
-        //        }
         // Construct the censor object
         Ok(Censor {
             // Ethernet
@@ -406,7 +391,7 @@ impl Censor {
             // If the packet successfully parsed
             Ok(packet) => {
                 // Use ethertype
-                let action = match ethertype {
+                let mut action = match ethertype {
                     EtherType::Ipv4 => self.process_ipv4(&payload, censor_ctx, packet),
                     EtherType::Ipv6 => self.process_ipv6(&payload, censor_ctx, packet),
                     EtherType::Arp => self.process_arp(&payload),
@@ -464,8 +449,8 @@ impl Censor {
             // Reset is not valid action
             // TODO: make unrepresentable
             Some(Action::Reset { .. }) => {
-                warn!("Reset is not a valid action for ethernet allow/blocklist. Ignoring instead");
-                Ok(Action::Ignore)
+                warn!("Reset is not a valid action for ethernet allow/blocklist. Dropping instead");
+                Ok(Action::Drop)
             }
             // Other actions are returned immediately without further processing
             Some(action) => Ok(action),
@@ -578,7 +563,7 @@ impl Censor {
     fn process_ip<T: AsRef<[u8]>>(
         &mut self,
         ips: IpPair,
-        _ipid: Option<u16>,
+        ipid: Option<u16>,
         next_header: IpProtocol,
         direction: Direction,
         data: T,
@@ -929,6 +914,7 @@ pub enum Action {
         dst_port: u16,
         seq: TcpSeqNumber,
         ack: TcpSeqNumber,
+        is_ack: bool,
         payload_len: usize,
     },
     /// Ignore  the packet immediately without further processing
@@ -964,6 +950,7 @@ impl Action {
             src_mac,
             dst_mac,
             ipid,
+            is_ack,
             ..
         } = self
         {
@@ -977,6 +964,7 @@ impl Action {
                 seq,
                 ack,
                 payload_len,
+                is_ack,
             }
         } else {
             self
@@ -991,6 +979,7 @@ impl Action {
             seq,
             ack,
             payload_len,
+            is_ack,
             ..
         } = self
         {
@@ -1004,6 +993,7 @@ impl Action {
                 seq,
                 ack,
                 payload_len,
+                is_ack,
             }
         } else {
             self
@@ -1019,6 +1009,7 @@ impl Action {
             seq,
             ack,
             payload_len,
+            is_ack,
             ..
         } = self
         {
@@ -1032,6 +1023,7 @@ impl Action {
                 seq,
                 ack,
                 payload_len,
+                is_ack,
             }
         } else {
             self
@@ -1064,6 +1056,7 @@ impl FromStr for Action {
                 ack: TcpSeqNumber(0),
                 seq: TcpSeqNumber(0),
                 payload_len: 0,
+                is_ack: false,
             }),
             _other => Err(ActionFromStrError(s.to_owned())),
         }

@@ -383,6 +383,7 @@ impl Censor {
                                 dst_port,
                                 seq,
                                 ack,
+                                is_ack,
                                 payload_len,
                             } => {
                                 // Time for misery
@@ -424,6 +425,7 @@ impl Censor {
                                     seq,
                                     ack,
                                     payload_len,
+                                    is_ack,
                                 )?;
                                 // Send the resets
                                 for _ in 0..args.reset_repeat {
@@ -495,6 +497,7 @@ impl Censor {
         ack: TcpSeqNumber,
         seq: TcpSeqNumber,
         payload_len: usize,
+        is_ack: bool,
     ) -> Result<(Vec<u8>, Vec<u8>), smoltcp::wire::Error> {
         // Construct the client reset
         let client_reset = crate::transport::construct_reset(
@@ -507,9 +510,13 @@ impl Censor {
             // dst port
             src_port,
             // ack
-            seq + payload_len,
+            if is_ack {
+                seq + payload_len
+            } else {
+                TcpSeqNumber(0)
+            },
             // seq
-            ack,
+            seq,
         )?;
         // Construct the server reset
         let server_reset = crate::transport::construct_reset(
@@ -517,10 +524,10 @@ impl Censor {
             EthernetAddress(dst_mac),
             ips,
             ipid,
-            src_port, // src port
-            dst_port, // dst port
-            ack,      // ack
-            seq,      // seq
+            src_port,        // src port
+            dst_port,        // dst port
+            TcpSeqNumber(0), // ack
+            ack,             // seq
         )?;
 
         Ok((client_reset, server_reset))

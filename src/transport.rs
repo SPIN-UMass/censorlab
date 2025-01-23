@@ -4,6 +4,7 @@ use crate::model::ModelThreadMessage;
 use crate::program::env::ProgramEnv;
 use crate::program::packet::rust_dns;
 use crate::program::packet::rust_packet::{self, Model as PythonModel, Packet as PythonPacket};
+use crate::program::packet::TransportMetadataExtra;
 use crate::program::packet::{Packet, TransportProtocol};
 use ort::Error as OrtError;
 use rustpython_vm::builtins::{PyBaseExceptionRef, PyCode};
@@ -259,6 +260,8 @@ impl TransportState {
                 let process = self.process.clone();
                 // Create a python-objectified version of the Packet struct
                 // TODO: dont clone
+                let transport = packet.transport.clone();
+                let len = packet.payload.len();
                 let mut packet = PythonPacket::from(packet);
                 packet.set_direction(direction);
                 let sender = self.model_sender.clone();
@@ -288,19 +291,41 @@ impl TransportState {
                                             let s: String = s;
                                             match s.to_lowercase().as_str() {
                                                 "reset" => {
-                                                    error!("Reset is having issues, dropping instead");
-                                                    Action::Drop
-                                                },
+                                                    if let TransportMetadataExtra::Tcp(
+                                                        tcp_metadata,
+                                                    ) = transport.extra
+                                                    {
+                                                        Action::Reset {
+                                                            src_mac: [0; 6],
+                                                            dst_mac: [0; 6],
+                                                            ips,
+                                                            ipid: None,
+                                                            src_port: transport.src,
+                                                            dst_port: transport.dst,
+                                                            seq: tcp_metadata.seq,
+                                                            ack: tcp_metadata.ack,
+                                                            payload_len: len,
+                                                            is_ack: tcp_metadata.flags.ack,
+                                                        }
+                                                    } else {
+                                                        Action::Drop
+                                                    }
+                                                }
                                                 "drop" => Action::Drop,
                                                 "allow" => Action::None,
                                                 other => {
                                                     if other.starts_with("inject") {
-                                                        let data = other.split_ascii_whitespace().skip(1).next();
+                                                        let data = other
+                                                            .split_ascii_whitespace()
+                                                            .skip(1)
+                                                            .next();
                                                         Action::None
-                                                    }
-                                                    else {
-                                                    error!("Unrecognized action: {}. allowing", other);
-                                                    Action::None
+                                                    } else {
+                                                        error!(
+                                                            "Unrecognized action: {}. allowing",
+                                                            other
+                                                        );
+                                                        Action::None
                                                     }
                                                 }
                                             }
