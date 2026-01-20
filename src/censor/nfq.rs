@@ -422,8 +422,8 @@ impl Censor {
                                     ipid,
                                     src_port,
                                     dst_port,
-                                    seq,
                                     ack,
+                                    seq,
                                     payload_len,
                                     is_ack,
                                 )?;
@@ -499,35 +499,41 @@ impl Censor {
         payload_len: usize,
         is_ack: bool,
     ) -> Result<(Vec<u8>, Vec<u8>), smoltcp::wire::Error> {
-        // Construct the client reset
+        // Intercepted packet goes src -> dst with seq and ack fields.
+        // For a RST to be accepted, its seq must be within the recipient's receive window.
+        //
+        // Reset to packet source (client_reset with swapped IPs):
+        // - seq should be what the source expects to receive = intercepted ack
+        // - ack can acknowledge what they sent = intercepted seq + payload_len
         let client_reset = crate::transport::construct_reset(
             EthernetAddress(dst_mac),
             EthernetAddress(src_mac),
             ips.swap(),
             ipid,
-            // src port
-            dst_port,
-            // dst port
-            src_port,
-            // ack
+            dst_port, // src port (swapped)
+            src_port, // dst port (swapped)
+            // ack: acknowledge what they sent
             if is_ack {
                 seq + payload_len
             } else {
                 TcpSeqNumber(0)
             },
-            // seq
-            seq,
+            // seq: what they expect to receive = their ack value
+            ack,
         )?;
-        // Construct the server reset
+        // Reset to packet destination (server_reset with original IPs):
+        // - seq should be what the dest expects = intercepted seq + payload_len
+        //   (since the original packet is accepted, dest will have processed it)
+        // - ack = 0 is fine for RST
         let server_reset = crate::transport::construct_reset(
             EthernetAddress(src_mac),
             EthernetAddress(dst_mac),
             ips,
             ipid,
-            src_port,        // src port
-            dst_port,        // dst port
-            TcpSeqNumber(0), // ack
-            ack,             // seq
+            src_port,          // src port
+            dst_port,          // dst port
+            TcpSeqNumber(0),   // ack
+            seq + payload_len, // seq: what they expect after receiving the packet
         )?;
 
         Ok((client_reset, server_reset))

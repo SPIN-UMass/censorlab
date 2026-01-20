@@ -1,11 +1,13 @@
 use crate::censor::{Action, Direction, IpPair};
 use crate::model::onnx::Model;
 use crate::model::ModelThreadMessage;
+use crate::program::config::Config as ProgramConfig;
 use crate::program::env::ProgramEnv;
 use crate::program::packet::rust_dns;
 use crate::program::packet::rust_packet::{self, Model as PythonModel, Packet as PythonPacket};
 use crate::program::packet::TransportMetadataExtra;
 use crate::program::packet::{Packet, TransportProtocol};
+use crate::program::program::{Action as ProgramAction, Program};
 use ort::Error as OrtError;
 use rustpython_vm::builtins::{PyBaseExceptionRef, PyCode};
 use rustpython_vm::convert::ToPyObject;
@@ -75,8 +77,12 @@ pub struct TransportState {
     code: PyRef<PyCode>,
     /// Code that is run by interpreter on each packet
     process: PyRef<PyCode>,
-    /// Sender used to make requests of the model executor    
+    /// Sender used to make requests of the model executor
     model_sender: mpsc::SyncSender<ModelThreadMessage>,
+    /// CensorLang program (when in CensorLang mode)
+    censorlang_program: Option<Program>,
+    /// CensorLang program config
+    censorlang_config: ProgramConfig,
 }
 
 #[derive(Debug)]
@@ -146,7 +152,7 @@ impl TransportState {
             // Import the native rust module used for dns parsing
             vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
         });
-        let (code, process) = if let Some(script_path) = execution_config.script {
+        let (code, process) = if let Some(ref script_path) = execution_config.script {
             let source = std::fs::read_to_string(script_path)
                 .map_err(TransportStateInitError::ReadScript)?;
             // Do some initialization tasks, eventually returning the compiled code object
@@ -190,6 +196,20 @@ impl TransportState {
             })
             .map_err(TransportStateInitError::PythonInit)?
         };
+        // Load CensorLang program if in CensorLang mode
+        let censorlang_program = match execution_config.mode {
+            ExecutionMode::CensorLang => {
+                if let Some(ref script_path) = execution_config.script {
+                    Some(
+                        Program::load(script_path.clone())
+                            .map_err(TransportStateInitError::ReadScript)?,
+                    )
+                } else {
+                    Some(Program::default())
+                }
+            }
+            ExecutionMode::Python => None,
+        };
         // Construct the overall connection manager
         Ok(TransportState {
             connections: HashMap::new(),
@@ -198,6 +218,8 @@ impl TransportState {
             code,
             process,
             model_sender,
+            censorlang_program,
+            censorlang_config: ProgramConfig::default(),
         })
     }
     /// Processes the tcp packet based on its metadata and our internal state
@@ -242,7 +264,7 @@ impl TransportState {
                         ExecutionMode::CensorLang => {
                             let env = ProgramEnv::new(
                                 packet.connection_identifier(),
-                                &Default::default(),
+                                &self.censorlang_config,
                             );
                             ExecutionEnvironment::CensorLang { env }
                         }
@@ -358,7 +380,21 @@ impl TransportState {
                     }
                 }
             }
-            ExecutionEnvironment::CensorLang { env: _ } => Action::None,
+            ExecutionEnvironment::CensorLang { env } => {
+                // Get the program (should always exist in CensorLang mode)
+                if let Some(ref program) = self.censorlang_program {
+                    let field_default_on_error = self.censorlang_config.env.field_default_on_error;
+                    let program_action = env.process(&packet, program, field_default_on_error);
+                    // Convert program::Action to censor::Action
+                    match program_action {
+                        ProgramAction::Allow => Action::None,
+                        ProgramAction::AllowAll => Action::Ignore,
+                        ProgramAction::TerminateAll => Action::Drop,
+                    }
+                } else {
+                    Action::None
+                }
+            }
         };
         if *is_first {
             *is_first = false;

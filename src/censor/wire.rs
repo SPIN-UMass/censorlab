@@ -6,7 +6,7 @@ use smoltcp::time::Instant as SmoltcpInstant;
 use smoltcp::wire::Error as SmoltcpError;
 use std::io;
 use thiserror::Error;
-use tracing::{error, info, span, Level};
+use tracing::{error, info, span, warn, Level};
 
 /// Args to wire mode
 #[derive(Debug, Parser)]
@@ -45,7 +45,7 @@ impl Censor {
         // Initialize the interfaces
         let mut wan_interface = RawSocket::new(&args.wan_interface, Medium::Ethernet)
             .map_err(WireError::WanIfaceInit)?;
-        let mut client_interface = RawSocket::new(&args.wan_interface, Medium::Ethernet)
+        let mut client_interface = RawSocket::new(&args.client_interface, Medium::Ethernet)
             .map_err(WireError::ClientIfaceInit)?;
         // Initialize buffers for the interfaces that are used for retrying packet sends
         let mut wan_retry = RetryBuffer::for_interface(&wan_interface);
@@ -194,10 +194,18 @@ impl Censor {
                         // If we decide to drop the packet, we did our job
                         Action::Drop => Ok(ForwardFramesResult::Success),
                         Action::Reset { .. } => {
-                            // Need to fix after the reimplementation
-                            unimplemented!()
+                            // In wire mode, we drop the packet when Reset is requested.
+                            // Sending actual TCP RST packets would require restructuring
+                            // to access both interfaces from within this closure.
+                            warn!("Reset action in wire mode: dropping packet (TCP RST injection not yet supported)");
+                            Ok(ForwardFramesResult::Success)
                         }
-                        Action::Delay(_instant) => todo!(),
+                        Action::Delay(_instant) => {
+                            // Wire mode doesn't have async delay infrastructure like NFQ mode.
+                            // Drop the packet with a warning.
+                            warn!("Delay action in wire mode: dropping packet (delay not supported)");
+                            Ok(ForwardFramesResult::Success)
+                        }
                     }
                 });
                 match fwd_result {

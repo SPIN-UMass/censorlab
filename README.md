@@ -4,7 +4,7 @@
 
 
 # Recommended environment
-Turn off offloading to entire accurate packet data
+Turn off offloading for wire-accurate packet data
 ```
 sudo ethtool -K eth0 tso off gro off gso off lro off
 ```

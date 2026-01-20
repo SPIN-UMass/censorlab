@@ -1,5 +1,11 @@
 /target
 result
 **/.*.sw*
+# Output folders for websites
 /public
 /docs
+# Huge pcaps
+/data
+# Exclude LLMs from commits
+CLAUDE.md
+/.claude

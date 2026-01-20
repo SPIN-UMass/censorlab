@@ -1,19 +1,19 @@
 {
   inputs = {
-    nixpkgs.url = github:NixOS/nixpkgs/nixos-24.11;
-    nixpkgs-master.url = github:NixOS/nixpkgs/master;
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs-master.url = "github:NixOS/nixpkgs/master";
     home-manager = {
-      url = github:nix-community/home-manager/release-24.11;
+      url = "github:nix-community/home-manager/release-24.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    utils.url = github:numtide/flake-utils;
-    crane.url = github:ipetkov/crane;
+    utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
     rust-overlay = {
-      url = github:oxalica/rust-overlay;
+      url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     deploy-rs = {
-      url = github:serokell/deploy-rs;
+      url = "github:serokell/deploy-rs";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         utils.follows = "utils";

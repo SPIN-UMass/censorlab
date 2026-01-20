@@ -29,7 +29,7 @@ impl ProgramEnv {
             inner,
         }
     }
-    fn process(
+    pub fn process(
         &mut self,
         packet: &Packet,
         program: &Program,
