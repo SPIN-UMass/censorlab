@@ -43,8 +43,9 @@ impl Censor {
         };
         let mut packet_index = 0;
         loop {
-            // TODO: handle ipcs in pcap mode
-            // Need some kind of trigger to wait for it
+            // IPC is intentionally not supported in PCAP mode: PCAP processes
+            // static capture files, so live model updates and shutdown signals
+            // don't apply.
             let (size, block) = match pcap_reader.next() {
                 Ok(d) => d,
                 Err(PcapError::Incomplete(_)) => {
@@ -99,10 +100,6 @@ pub enum PcapModeError {
     Open(#[from] io::Error),
     #[error("Error reading pcap block")]
     Pcap(String),
-    //#[error("Error handling IPC")]
-    //Ipc(#[from] crate::censor::HandleIpcError),
     #[error("Error updating model")]
     Ort(#[from] OrtError),
-    #[error("todo add error when tis is implemented")]
-    Todo,
 }

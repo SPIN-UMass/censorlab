@@ -15,7 +15,7 @@ pub struct Packet {
     /// Transport-layer metadata
     pub transport: TransportMetadata,
     /// Transport-layer payload
-    // TODO: modify this to be a reference and then we can have zero copy
+    // Cloned per-packet; see TODO.md for zero-copy optimization
     pub payload: Vec<u8>,
 }
 impl Packet {
@@ -187,7 +187,7 @@ impl<T: AsRef<[u8]>> From<&Ipv6Packet<T>> for IpMetadata {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TransportMetadata {
     pub src: u16,
     pub dst: u16,
@@ -211,7 +211,7 @@ impl<T: AsRef<[u8]>> From<&UdpPacket<T>> for TransportMetadata {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum TransportMetadataExtra {
     Tcp(TcpMetadata),
     Udp(UdpMetadata),
@@ -254,7 +254,7 @@ impl<T: AsRef<[u8]>> From<&UdpPacket<T>> for TransportMetadataExtra {
         })
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TcpMetadata {
     pub seq: TcpSeqNumber,
     pub ack: TcpSeqNumber,
@@ -263,7 +263,7 @@ pub struct TcpMetadata {
     pub window_len: u16,
     pub flags: TcpFlags,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TcpFlags {
     pub fin: bool,
     pub syn: bool,
@@ -276,7 +276,7 @@ pub struct TcpFlags {
     pub ns: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct UdpMetadata {
     pub length: u16,
     pub checksum: u16,
@@ -390,19 +390,19 @@ pub fn shannon_entropy(data: &[u8]) -> f64 {
 #[pymodule]
 pub mod rust_packet {
     use super::{
-        IpMetadata as RustIpPacket, Packet as RustPacket, TcpFlags as TcpFlagsRust, TcpMetadata,
-        TransportMetadataExtra, UdpMetadata,
+        IpMetadata as RustIpPacket, IpVersionMetadata, Packet as RustPacket,
+        TcpFlags as TcpFlagsRust, TcpMetadata, TransportMetadataExtra, UdpMetadata,
     };
     use crate::censor::Direction;
     use crate::model::{ModelThreadError, ModelThreadMessage};
     use regex::bytes::Regex as RustRegex;
     use rustpython_vm::convert::ToPyObject;
     use rustpython_vm::{
-        builtins::PyBytesRef, builtins::PyList, builtins::PyListRef, builtins::PyStrRef,
-        convert::IntoPyException, convert::ToPyResult, pyclass, PyObjectRef, PyPayload, PyResult,
+        builtins::PyBytesRef, builtins::PyList, builtins::PyListRef,
+        convert::IntoPyException, pyclass, PyObjectRef, PyPayload, PyResult,
         VirtualMachine,
     };
-    use std::collections::HashMap;
+    
     use std::io;
     use std::sync::mpsc;
 
@@ -427,8 +427,8 @@ pub mod rust_packet {
     }
 
     #[pyclass]
-    //TODO: the accessors here use pygetset. not sure about set, bit nervous about it
-    //TODO: replace the clones by having these objects contain an RC
+    // pygetset with &self only generates getters (no setter without explicit #[pygetset(setter)]).
+    // Accessor objects clone data; Rc optimization tracked in TODO.md.
     impl Packet {
         #[pygetset]
         fn timestamp(&self) -> Option<f64> {
@@ -514,8 +514,89 @@ pub mod rust_packet {
         fn ttl(&self) -> u8 {
             self.0.hop_limit
         }
-        //TODO: next header
-        //TODO: fields specific to ip version
+        #[pygetset]
+        fn next_header(&self) -> u8 {
+            u8::from(self.0.next_header)
+        }
+        #[pygetset]
+        fn version(&self) -> u8 {
+            match self.0.version {
+                IpVersionMetadata::V4 { .. } => 4,
+                IpVersionMetadata::V6 { .. } => 6,
+            }
+        }
+        // IPv4-specific fields
+        #[pygetset]
+        fn dscp(&self) -> Option<u8> {
+            match self.0.version {
+                IpVersionMetadata::V4 { dscp, .. } => Some(dscp),
+                _ => None,
+            }
+        }
+        #[pygetset]
+        fn ecn(&self) -> Option<u8> {
+            match self.0.version {
+                IpVersionMetadata::V4 { ecn, .. } => Some(ecn),
+                _ => None,
+            }
+        }
+        #[pygetset]
+        fn ident(&self) -> Option<u16> {
+            match self.0.version {
+                IpVersionMetadata::V4 { ident, .. } => Some(ident),
+                _ => None,
+            }
+        }
+        #[pygetset]
+        fn dont_frag(&self) -> Option<bool> {
+            match self.0.version {
+                IpVersionMetadata::V4 { dont_frag, .. } => Some(dont_frag),
+                _ => None,
+            }
+        }
+        #[pygetset]
+        fn more_frags(&self) -> Option<bool> {
+            match self.0.version {
+                IpVersionMetadata::V4 { more_frags, .. } => Some(more_frags),
+                _ => None,
+            }
+        }
+        #[pygetset]
+        fn frag_offset(&self) -> Option<u16> {
+            match self.0.version {
+                IpVersionMetadata::V4 { frag_offset, .. } => Some(frag_offset),
+                _ => None,
+            }
+        }
+        #[pygetset]
+        fn checksum(&self) -> Option<u16> {
+            match self.0.version {
+                IpVersionMetadata::V4 { checksum, .. } => Some(checksum),
+                _ => None,
+            }
+        }
+        // IPv6-specific fields
+        #[pygetset]
+        fn traffic_class(&self) -> Option<u8> {
+            match self.0.version {
+                IpVersionMetadata::V6 { traffic_class, .. } => Some(traffic_class),
+                _ => None,
+            }
+        }
+        #[pygetset]
+        fn flow_label(&self) -> Option<u32> {
+            match self.0.version {
+                IpVersionMetadata::V6 { flow_label, .. } => Some(flow_label),
+                _ => None,
+            }
+        }
+        #[pygetset]
+        fn payload_len(&self) -> Option<u16> {
+            match self.0.version {
+                IpVersionMetadata::V6 { payload_len, .. } => Some(payload_len),
+                _ => None,
+            }
+        }
     }
 
     #[pyattr]
@@ -560,7 +641,6 @@ pub mod rust_packet {
         fn window_len(&self) -> u16 {
             self.data.window_len
         }
-        // TODO: flags
         #[pygetset]
         fn flags(&self) -> TcpFlags {
             TcpFlags(self.data.flags.clone())
@@ -714,11 +794,10 @@ pub mod rust_packet {
 #[pymodule]
 pub mod rust_dns {
     use crate::application::dns;
-    use dns_parser::{Class, Header, Packet, QueryClass, QueryType};
+    use dns_parser::{Class, Header, QueryClass, QueryType};
     use rustpython_vm::convert::ToPyObject;
     use rustpython_vm::{
-        builtins::PyByteArray, builtins::PyBytesRef, builtins::PyList, builtins::PyListRef,
-        builtins::PyStrRef, builtins::PyTuple, convert::IntoPyException, convert::ToPyResult,
+        builtins::PyBytesRef, builtins::PyTuple, convert::IntoPyException,
         pyclass, PyObjectRef, PyPayload, PyResult, VirtualMachine,
     };
     use std::io;
@@ -993,8 +1072,14 @@ pub mod rust_dns {
                     port,
                     target,
                 } => ("SRV", *priority, *weight, *port, target).to_pyobject(vm),
-                // TODO: fix this
-                TXT(txt) => ("TXT", "CURRENTLY NOT SUPPORTED").to_pyobject(vm),
+                TXT(txt) => {
+                    let entries: Vec<PyObjectRef> = txt
+                        .iter()
+                        .map(|entry| vm.ctx.new_bytes(entry.clone()).into())
+                        .collect();
+                    let list = vm.ctx.new_list(entries);
+                    ("TXT", list).to_pyobject(vm)
+                }
                 Unknown => ("UNKNOWN",).to_pyobject(vm),
             }
         }
@@ -1032,9 +1117,11 @@ pub mod rust_dns {
             }
         }
     }
+    /// DNS OPT record — fields stored for future Python accessor exposure via `#[pygetset]`.
     #[pyattr]
     #[pyclass(module = "rust", name = "Record")]
     #[derive(Clone, Debug, PyPayload)]
+    #[allow(dead_code)]
     struct Record {
         pub udp: u16,
         pub extrcode: u8,
@@ -1054,5 +1141,655 @@ pub mod rust_dns {
                 data: RData::from(r.data),
             }
         }
+    }
+}
+
+#[pymodule]
+pub mod rust_tls {
+    use crate::application::tls;
+    use rustpython_vm::{
+        builtins::PyBytesRef, convert::IntoPyException, pyclass, PyObjectRef, PyPayload, PyResult,
+        VirtualMachine,
+    };
+    use std::io;
+
+    /// Parse a TLS ClientHello from a raw TCP payload (TLS record format).
+    #[pyfunction]
+    fn parse_client_hello(bytes: PyBytesRef, vm: &VirtualMachine) -> PyResult<ClientHelloInfo> {
+        let bytes = bytes.as_ref();
+        let info = tls::parse_client_hello_record(bytes)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
+        Ok(ClientHelloInfo { inner: info })
+    }
+
+    /// Parse a TLS ClientHello handshake message (without TLS record header).
+    #[pyfunction]
+    fn parse_client_hello_message(
+        bytes: PyBytesRef,
+        vm: &VirtualMachine,
+    ) -> PyResult<ClientHelloInfo> {
+        let bytes = bytes.as_ref();
+        let info = tls::parse_client_hello_message(bytes)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
+        Ok(ClientHelloInfo { inner: info })
+    }
+
+    #[pyattr]
+    #[pyclass(module = "tls", name = "ClientHelloInfo")]
+    #[derive(Debug, PyPayload)]
+    pub struct ClientHelloInfo {
+        inner: tls::ClientHelloInfo,
+    }
+    #[pyclass]
+    impl ClientHelloInfo {
+        /// Server Name Indication, or None
+        #[pygetset]
+        fn sni(&self) -> Option<String> {
+            self.inner.sni.clone()
+        }
+
+        /// ALPN protocol names
+        #[pygetset]
+        fn alpn(&self, vm: &VirtualMachine) -> PyObjectRef {
+            let list: Vec<PyObjectRef> = self
+                .inner
+                .alpn
+                .iter()
+                .map(|s| vm.new_pyobj(s.clone()))
+                .collect();
+            vm.new_pyobj(list)
+        }
+
+        /// Legacy TLS version from the ClientHello (e.g. 0x0303)
+        #[pygetset]
+        fn client_version(&self) -> u16 {
+            self.inner.client_version
+        }
+
+        /// Supported TLS versions from the extension
+        #[pygetset]
+        fn supported_versions(&self, vm: &VirtualMachine) -> PyObjectRef {
+            let list: Vec<PyObjectRef> = self
+                .inner
+                .supported_versions
+                .iter()
+                .map(|v| vm.new_pyobj(*v))
+                .collect();
+            vm.new_pyobj(list)
+        }
+
+        /// Number of cipher suites offered
+        #[pygetset]
+        fn cipher_suites_count(&self) -> usize {
+            self.inner.cipher_suites_count
+        }
+
+        /// Number of extensions present
+        #[pygetset]
+        fn extensions_count(&self) -> usize {
+            self.inner.extensions_count
+        }
+    }
+}
+
+#[pymodule]
+pub mod rust_quic {
+    use crate::application::quic;
+    use rustpython_vm::{
+        builtins::PyBytesRef, convert::IntoPyException, pyclass, PyObjectRef, PyPayload, PyResult,
+        VirtualMachine,
+    };
+    use std::io;
+
+    /// Parse a QUIC Initial packet from raw UDP payload.
+    #[pyfunction]
+    fn parse_initial(bytes: PyBytesRef, vm: &VirtualMachine) -> PyResult<QuicInitialInfo> {
+        let bytes = bytes.as_ref();
+        let info = quic::parse_quic_initial(bytes)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
+        Ok(QuicInitialInfo { inner: info })
+    }
+
+    #[pyattr]
+    #[pyclass(module = "quic", name = "QuicInitialInfo")]
+    #[derive(Debug, PyPayload)]
+    pub struct QuicInitialInfo {
+        inner: quic::QuicInitialInfo,
+    }
+    #[pyclass]
+    impl QuicInitialInfo {
+        /// QUIC version number
+        #[pygetset]
+        fn version(&self) -> u32 {
+            self.inner.version
+        }
+
+        /// Destination Connection ID as bytes
+        #[pygetset]
+        fn dcid(&self, vm: &VirtualMachine) -> PyObjectRef {
+            vm.new_pyobj(self.inner.dcid.clone())
+        }
+
+        /// Source Connection ID as bytes
+        #[pygetset]
+        fn scid(&self, vm: &VirtualMachine) -> PyObjectRef {
+            vm.new_pyobj(self.inner.scid.clone())
+        }
+
+        /// SNI from the TLS ClientHello, if found
+        #[pygetset]
+        fn sni(&self) -> Option<String> {
+            self.inner.sni().map(|s| s.to_string())
+        }
+
+        /// ALPN protocols from the TLS ClientHello, if found
+        #[pygetset]
+        fn alpn(&self, vm: &VirtualMachine) -> PyObjectRef {
+            let list: Vec<PyObjectRef> = self
+                .inner
+                .client_hello
+                .as_ref()
+                .map(|ch| ch.alpn.iter().map(|s| vm.new_pyobj(s.clone())).collect())
+                .unwrap_or_default();
+            vm.new_pyobj(list)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: build a minimal valid IPv4+TCP packet as raw bytes.
+    /// Returns the raw IP-layer bytes (no ethernet frame).
+    fn build_ipv4_tcp_packet(
+        src_ip: [u8; 4],
+        dst_ip: [u8; 4],
+        src_port: u16,
+        dst_port: u16,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        // TCP header: 20 bytes minimum (data offset = 5)
+        let tcp_len = 20 + payload.len();
+        let total_len = 20 + tcp_len; // IP header (20) + TCP + payload
+        let mut buf = vec![0u8; total_len];
+
+        // IPv4 header (20 bytes)
+        buf[0] = 0x45; // version=4, IHL=5
+        buf[2] = (total_len >> 8) as u8;
+        buf[3] = total_len as u8;
+        buf[8] = 64; // TTL
+        buf[9] = 6; // Protocol = TCP
+        buf[12..16].copy_from_slice(&src_ip);
+        buf[16..20].copy_from_slice(&dst_ip);
+
+        // IPv4 checksum
+        let checksum = ipv4_checksum(&buf[..20]);
+        buf[10] = (checksum >> 8) as u8;
+        buf[11] = checksum as u8;
+
+        // TCP header (20 bytes at offset 20)
+        let tcp = &mut buf[20..];
+        tcp[0] = (src_port >> 8) as u8;
+        tcp[1] = src_port as u8;
+        tcp[2] = (dst_port >> 8) as u8;
+        tcp[3] = dst_port as u8;
+        tcp[12] = 5 << 4; // data offset = 5 (20 bytes)
+        // Copy payload
+        tcp[20..20 + payload.len()].copy_from_slice(payload);
+
+        buf
+    }
+
+    /// Helper: build a minimal valid IPv4+UDP packet as raw bytes.
+    fn build_ipv4_udp_packet(
+        src_ip: [u8; 4],
+        dst_ip: [u8; 4],
+        src_port: u16,
+        dst_port: u16,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let udp_len = 8 + payload.len();
+        let total_len = 20 + udp_len;
+        let mut buf = vec![0u8; total_len];
+
+        // IPv4 header
+        buf[0] = 0x45;
+        buf[2] = (total_len >> 8) as u8;
+        buf[3] = total_len as u8;
+        buf[8] = 64;
+        buf[9] = 17; // Protocol = UDP
+        buf[12..16].copy_from_slice(&src_ip);
+        buf[16..20].copy_from_slice(&dst_ip);
+
+        let checksum = ipv4_checksum(&buf[..20]);
+        buf[10] = (checksum >> 8) as u8;
+        buf[11] = checksum as u8;
+
+        // UDP header (8 bytes at offset 20)
+        let udp = &mut buf[20..];
+        udp[0] = (src_port >> 8) as u8;
+        udp[1] = src_port as u8;
+        udp[2] = (dst_port >> 8) as u8;
+        udp[3] = dst_port as u8;
+        udp[4] = (udp_len >> 8) as u8;
+        udp[5] = udp_len as u8;
+        // Copy payload
+        udp[8..8 + payload.len()].copy_from_slice(payload);
+
+        buf
+    }
+
+    /// Helper: build a minimal valid IPv6+TCP packet as raw bytes.
+    fn build_ipv6_tcp_packet(
+        src_ip: [u8; 16],
+        dst_ip: [u8; 16],
+        src_port: u16,
+        dst_port: u16,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let tcp_len = 20 + payload.len();
+        let total_len = 40 + tcp_len; // IPv6 header (40) + TCP + payload
+        let mut buf = vec![0u8; total_len];
+
+        // IPv6 header (40 bytes)
+        buf[0] = 0x60; // version=6
+        buf[4] = (tcp_len >> 8) as u8;
+        buf[5] = tcp_len as u8; // payload length
+        buf[6] = 6; // next header = TCP
+        buf[7] = 64; // hop limit
+        buf[8..24].copy_from_slice(&src_ip);
+        buf[24..40].copy_from_slice(&dst_ip);
+
+        // TCP header (20 bytes at offset 40)
+        let tcp = &mut buf[40..];
+        tcp[0] = (src_port >> 8) as u8;
+        tcp[1] = src_port as u8;
+        tcp[2] = (dst_port >> 8) as u8;
+        tcp[3] = dst_port as u8;
+        tcp[12] = 5 << 4;
+        tcp[20..20 + payload.len()].copy_from_slice(payload);
+
+        buf
+    }
+
+    fn ipv4_checksum(header: &[u8]) -> u16 {
+        let mut sum: u32 = 0;
+        for i in (0..header.len()).step_by(2) {
+            if i == 10 {
+                continue; // skip checksum field
+            }
+            let word = (header[i] as u32) << 8
+                | if i + 1 < header.len() {
+                    header[i + 1] as u32
+                } else {
+                    0
+                };
+            sum += word;
+        }
+        while sum >> 16 != 0 {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+        !sum as u16
+    }
+
+    // ---- Packet parsing tests ----
+
+    #[test]
+    fn parse_ipv4_tcp_packet() {
+        let raw = build_ipv4_tcp_packet(
+            [192, 168, 1, 1],
+            [10, 0, 0, 1],
+            12345,
+            80,
+            b"GET / HTTP/1.1\r\n",
+        );
+        let packet = Packet::from_ts_bytes(Some(1.0), &raw, EthernetProtocol::Ipv4).unwrap();
+        assert_eq!(packet.timestamp, Some(1.0));
+        assert_eq!(packet.ip.hop_limit, 64);
+        assert_eq!(packet.ip.next_header, IpProtocol::Tcp);
+        assert_eq!(packet.transport.src, 12345);
+        assert_eq!(packet.transport.dst, 80);
+        assert_eq!(packet.payload, b"GET / HTTP/1.1\r\n");
+        assert!(matches!(
+            packet.ip.version,
+            IpVersionMetadata::V4 { .. }
+        ));
+        if let IpVersionMetadata::V4 { src, dst, .. } = packet.ip.version {
+            assert_eq!(src, Ipv4Address::new(192, 168, 1, 1));
+            assert_eq!(dst, Ipv4Address::new(10, 0, 0, 1));
+        }
+    }
+
+    #[test]
+    fn parse_ipv4_udp_packet() {
+        let raw = build_ipv4_udp_packet(
+            [8, 8, 8, 8],
+            [192, 168, 1, 100],
+            53,
+            45000,
+            b"\x00\x01\x02\x03",
+        );
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv4).unwrap();
+        assert_eq!(packet.timestamp, None);
+        assert_eq!(packet.transport.src, 53);
+        assert_eq!(packet.transport.dst, 45000);
+        assert_eq!(packet.payload, b"\x00\x01\x02\x03");
+        assert!(matches!(
+            packet.transport.extra,
+            TransportMetadataExtra::Udp(_)
+        ));
+    }
+
+    #[test]
+    fn parse_ipv6_tcp_packet() {
+        let src_ip = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let dst_ip = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        let raw = build_ipv6_tcp_packet(src_ip, dst_ip, 443, 50000, b"hello");
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv6).unwrap();
+        assert_eq!(packet.ip.hop_limit, 64);
+        assert_eq!(packet.transport.src, 443);
+        assert_eq!(packet.transport.dst, 50000);
+        assert_eq!(packet.payload, b"hello");
+        assert!(matches!(
+            packet.ip.version,
+            IpVersionMetadata::V6 { .. }
+        ));
+    }
+
+    #[test]
+    fn parse_unknown_ethertype_fails() {
+        let raw = vec![0u8; 40];
+        let result = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Unknown(0x9999));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParsePacketError::UnknownInternet(_)
+        ));
+    }
+
+    #[test]
+    fn parse_truncated_ipv4_fails() {
+        let raw = vec![0x45, 0x00]; // Too short
+        let result = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv4);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_unknown_transport_fails() {
+        // IPv4 packet with protocol = GRE (47), not TCP/UDP
+        let mut buf = vec![0u8; 40];
+        buf[0] = 0x45;
+        buf[2] = 0;
+        buf[3] = 40;
+        buf[8] = 64;
+        buf[9] = 47; // GRE
+        buf[12..16].copy_from_slice(&[10, 0, 0, 1]);
+        buf[16..20].copy_from_slice(&[10, 0, 0, 2]);
+        let checksum = ipv4_checksum(&buf[..20]);
+        buf[10] = (checksum >> 8) as u8;
+        buf[11] = checksum as u8;
+
+        let result = Packet::from_ts_bytes(None, &buf, EthernetProtocol::Ipv4);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            ParsePacketError::UnknownTransport(_)
+        ));
+    }
+
+    // ---- Entropy tests ----
+
+    #[test]
+    fn entropy_empty() {
+        assert_eq!(shannon_entropy(&[]), 0.0);
+    }
+
+    #[test]
+    fn entropy_single_byte() {
+        // All same bytes: zero entropy
+        assert_eq!(shannon_entropy(&[0xAA; 100]), 0.0);
+    }
+
+    #[test]
+    fn entropy_two_values() {
+        // Equal distribution of two values → entropy = 1 bit / 8 = 0.125
+        let data: Vec<u8> = (0..200).map(|i| if i % 2 == 0 { 0 } else { 1 }).collect();
+        let e = shannon_entropy(&data);
+        assert!((e - 0.125).abs() < 0.001, "entropy was {e}");
+    }
+
+    #[test]
+    fn entropy_uniform() {
+        // All 256 byte values equally: maximum entropy = 1.0
+        let data: Vec<u8> = (0..=255).cycle().take(256 * 4).collect();
+        let e = shannon_entropy(&data);
+        assert!((e - 1.0).abs() < 0.001, "entropy was {e}");
+    }
+
+    #[test]
+    fn entropy_high_for_random_like() {
+        // Pseudo-random-ish data should have high entropy
+        let data: Vec<u8> = (0..1000).map(|i| ((i * 7 + 13) % 256) as u8).collect();
+        let e = shannon_entropy(&data);
+        assert!(e > 0.8, "entropy was {e}");
+    }
+
+    // ---- Popcount tests ----
+
+    #[test]
+    fn popcount_all_zeros() {
+        let p = Packet {
+            timestamp: None,
+            ip: IpMetadata {
+                header_len: 20,
+                total_len: 40,
+                hop_limit: 64,
+                next_header: IpProtocol::Tcp,
+                version: IpVersionMetadata::V4 {
+                    src: Ipv4Address::new(0, 0, 0, 0),
+                    dst: Ipv4Address::new(0, 0, 0, 0),
+                    dscp: 0, ecn: 0, ident: 0,
+                    dont_frag: false, more_frags: false,
+                    frag_offset: 0, checksum: 0,
+                },
+            },
+            direction: 0,
+            transport: TransportMetadata {
+                src: 0,
+                dst: 0,
+                extra: TransportMetadataExtra::Tcp(TcpMetadata {
+                    seq: TcpSeqNumber(0),
+                    ack: TcpSeqNumber(0),
+                    header_len: 20,
+                    flags: TcpFlags {
+                        fin: false, syn: false, rst: false, psh: false,
+                        ack: false, urg: false, ece: false, cwr: false, ns: false,
+                    },
+                    window_len: 0,
+                    urgent_at: 0,
+                }),
+            },
+            payload: vec![0x00; 10],
+        };
+        assert_eq!(p.payload_average_popcount(), 0.0);
+    }
+
+    #[test]
+    fn popcount_all_ones() {
+        let p = Packet {
+            timestamp: None,
+            ip: IpMetadata {
+                header_len: 20,
+                total_len: 40,
+                hop_limit: 64,
+                next_header: IpProtocol::Tcp,
+                version: IpVersionMetadata::V4 {
+                    src: Ipv4Address::new(0, 0, 0, 0),
+                    dst: Ipv4Address::new(0, 0, 0, 0),
+                    dscp: 0, ecn: 0, ident: 0,
+                    dont_frag: false, more_frags: false,
+                    frag_offset: 0, checksum: 0,
+                },
+            },
+            direction: 0,
+            transport: TransportMetadata {
+                src: 0,
+                dst: 0,
+                extra: TransportMetadataExtra::Tcp(TcpMetadata {
+                    seq: TcpSeqNumber(0),
+                    ack: TcpSeqNumber(0),
+                    header_len: 20,
+                    flags: TcpFlags {
+                        fin: false, syn: false, rst: false, psh: false,
+                        ack: false, urg: false, ece: false, cwr: false, ns: false,
+                    },
+                    window_len: 0,
+                    urgent_at: 0,
+                }),
+            },
+            payload: vec![0xFF; 10],
+        };
+        assert_eq!(p.payload_average_popcount(), 8.0);
+    }
+
+    // ---- ConnectionIdentifier tests ----
+
+    #[test]
+    fn connection_identifier_basic() {
+        let raw = build_ipv4_tcp_packet([10, 0, 0, 1], [10, 0, 0, 2], 1234, 80, b"");
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv4).unwrap();
+        let id = packet.connection_identifier();
+        assert_eq!(id.transport_proto, TransportProtocol::Tcp);
+    }
+
+    #[test]
+    fn connection_identifier_direction_same() {
+        let raw1 = build_ipv4_tcp_packet([10, 0, 0, 1], [10, 0, 0, 2], 1234, 80, b"hello");
+        let raw2 = build_ipv4_tcp_packet([10, 0, 0, 1], [10, 0, 0, 2], 1234, 80, b"world");
+        let p1 = Packet::from_ts_bytes(None, &raw1, EthernetProtocol::Ipv4).unwrap();
+        let p2 = Packet::from_ts_bytes(None, &raw2, EthernetProtocol::Ipv4).unwrap();
+        let id1 = p1.connection_identifier();
+        let id2 = p2.connection_identifier();
+        assert!(matches!(
+            id1.direction(&id2),
+            Some(Direction::FromInitiator)
+        ));
+    }
+
+    #[test]
+    fn connection_identifier_direction_reverse() {
+        let raw1 = build_ipv4_tcp_packet([10, 0, 0, 1], [10, 0, 0, 2], 1234, 80, b"");
+        let raw2 = build_ipv4_tcp_packet([10, 0, 0, 2], [10, 0, 0, 1], 80, 1234, b"");
+        let p1 = Packet::from_ts_bytes(None, &raw1, EthernetProtocol::Ipv4).unwrap();
+        let p2 = Packet::from_ts_bytes(None, &raw2, EthernetProtocol::Ipv4).unwrap();
+        let id1 = p1.connection_identifier();
+        let id2 = p2.connection_identifier();
+        assert!(matches!(
+            id1.direction(&id2),
+            Some(Direction::ToInitiator)
+        ));
+    }
+
+    #[test]
+    fn connection_identifier_direction_unrelated() {
+        let raw1 = build_ipv4_tcp_packet([10, 0, 0, 1], [10, 0, 0, 2], 1234, 80, b"");
+        let raw2 = build_ipv4_tcp_packet([172, 16, 0, 1], [172, 16, 0, 2], 5555, 443, b"");
+        let p1 = Packet::from_ts_bytes(None, &raw1, EthernetProtocol::Ipv4).unwrap();
+        let p2 = Packet::from_ts_bytes(None, &raw2, EthernetProtocol::Ipv4).unwrap();
+        let id1 = p1.connection_identifier();
+        let id2 = p2.connection_identifier();
+        assert!(id1.direction(&id2).is_none());
+    }
+
+    #[test]
+    fn connection_identifier_order_by_port() {
+        let raw = build_ipv4_tcp_packet([10, 0, 0, 1], [10, 0, 0, 2], 80, 1234, b"");
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv4).unwrap();
+        let id = packet.connection_identifier();
+        let ordered = id.order_by_port();
+        assert_eq!(ordered.ports, (80, 1234));
+    }
+
+    // ---- TransportMetadata fields ----
+
+    #[test]
+    fn tcp_metadata_fields() {
+        let raw = build_ipv4_tcp_packet([10, 0, 0, 1], [10, 0, 0, 2], 8080, 443, b"data");
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv4).unwrap();
+        assert!(matches!(
+            packet.transport.extra,
+            TransportMetadataExtra::Tcp(TcpMetadata { header_len: 20, .. })
+        ));
+        assert_eq!(packet.transport.extra.protocol(), TransportProtocol::Tcp);
+    }
+
+    #[test]
+    fn udp_metadata_fields() {
+        let raw = build_ipv4_udp_packet([10, 0, 0, 1], [10, 0, 0, 2], 53, 12345, b"query");
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv4).unwrap();
+        if let TransportMetadataExtra::Udp(udp) = packet.transport.extra {
+            assert_eq!(udp.length, 8 + 5); // header + payload
+        } else {
+            panic!("expected UDP metadata");
+        }
+    }
+
+    // ---- IpMetadata accessors ----
+
+    #[test]
+    fn ip_metadata_v4_fields() {
+        let raw = build_ipv4_tcp_packet([192, 168, 0, 1], [192, 168, 0, 2], 1000, 2000, b"");
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv4).unwrap();
+        assert_eq!(packet.ip.header_len, 20);
+        assert_eq!(packet.ip.hop_limit, 64);
+        if let IpVersionMetadata::V4 { src, dst, .. } = packet.ip.version {
+            assert_eq!(src, Ipv4Address::new(192, 168, 0, 1));
+            assert_eq!(dst, Ipv4Address::new(192, 168, 0, 2));
+        } else {
+            panic!("expected IPv4");
+        }
+    }
+
+    #[test]
+    fn ip_metadata_v6_fields() {
+        let src = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        let dst = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        let raw = build_ipv6_tcp_packet(src, dst, 443, 50000, b"");
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv6).unwrap();
+        assert_eq!(packet.ip.header_len, 40);
+        if let IpVersionMetadata::V6 {
+            src: s, dst: d, ..
+        } = packet.ip.version
+        {
+            assert_eq!(s, Ipv6Address::from_bytes(&src));
+            assert_eq!(d, Ipv6Address::from_bytes(&dst));
+        } else {
+            panic!("expected IPv6");
+        }
+    }
+
+    // ---- Copy trait tests ----
+
+    #[test]
+    fn transport_metadata_is_copy() {
+        let tm = TransportMetadata {
+            src: 80,
+            dst: 443,
+            extra: TransportMetadataExtra::Tcp(TcpMetadata {
+                seq: TcpSeqNumber(100),
+                ack: TcpSeqNumber(200),
+                header_len: 20,
+                flags: TcpFlags {
+                    fin: false, syn: true, rst: false, psh: false,
+                    ack: false, urg: false, ece: false, cwr: false, ns: false,
+                },
+                window_len: 65535,
+                urgent_at: 0,
+            }),
+        };
+        let tm2 = tm; // Copy, not move
+        assert_eq!(tm.src, tm2.src);
+        assert_eq!(tm.dst, tm2.dst);
     }
 }

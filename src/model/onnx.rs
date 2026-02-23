@@ -1,5 +1,5 @@
 use crate::censor::Action;
-use ort::Session;
+use ort::session::Session;
 use serde::{Deserialize, Deserializer};
 use std::fs::{self, File};
 use std::io;
@@ -83,11 +83,10 @@ pub enum PacketFeature {
     Length,
     /// The packet's shannon entropy
     Entropy,
-    /// The packet's signed length
+    /// The packet's direction-signed length
     ///
-    /// For example: a packet coming from the server of size 588 could be -588
-    ///
-    /// TODO: make this consistent with the signness we use
+    /// Positive for client→wan, negative for wan→client (matching Direction sign convention).
+    /// For example: a 588-byte packet from the server (wan→client) would be -588.
     DirSignSize,
     /// How deep this packet is into a burst
     ///
@@ -197,4 +196,107 @@ pub fn load_watermarking_model<P: AsRef<Path>>(
 pub enum WatermarkModelLoadError {
     #[error("Failed to load ONNX data: {0}")]
     LoadOnnx(io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn feature_parse_valid_size() {
+        let f = Feature::from_str("w0_p21_Size").unwrap();
+        assert_eq!(f.window_num, 0);
+        assert_eq!(f.packet_num, 21);
+        assert!(matches!(f.feature, PacketFeature::Length));
+    }
+
+    #[test]
+    fn feature_parse_valid_direction() {
+        let f = Feature::from_str("w0_p0_Direction").unwrap();
+        assert_eq!(f.window_num, 0);
+        assert_eq!(f.packet_num, 0);
+        assert!(matches!(f.feature, PacketFeature::Direction));
+    }
+
+    #[test]
+    fn feature_parse_valid_entropy() {
+        let f = Feature::from_str("w1_p5_Entropy").unwrap();
+        assert_eq!(f.window_num, 1);
+        assert_eq!(f.packet_num, 5);
+        assert!(matches!(f.feature, PacketFeature::Entropy));
+    }
+
+    #[test]
+    fn feature_parse_valid_dirsignsize() {
+        let f = Feature::from_str("w0_p3_DirSignSize").unwrap();
+        assert_eq!(f.window_num, 0);
+        assert_eq!(f.packet_num, 3);
+        assert!(matches!(f.feature, PacketFeature::DirSignSize));
+    }
+
+    #[test]
+    fn feature_parse_valid_burstdepth() {
+        let f = Feature::from_str("w2_p10_BurstDepth").unwrap();
+        assert_eq!(f.window_num, 2);
+        assert_eq!(f.packet_num, 10);
+        assert!(matches!(f.feature, PacketFeature::BurstDepth));
+    }
+
+    #[test]
+    fn feature_parse_invalid_feature_name() {
+        let result = Feature::from_str("w0_p0_Invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn feature_parse_missing_packet() {
+        let result = Feature::from_str("w0_Size");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn feature_parse_missing_both() {
+        let result = Feature::from_str("Size");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn feature_parse_non_numeric() {
+        let result = Feature::from_str("w_p_Size");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn feature_parse_empty_string() {
+        let result = Feature::from_str("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn norm_parameters_normalize_basic() {
+        let params: NormParameters =
+            serde_json::from_str(r#"{"mean": 10.0, "std": 5.0, "eps": 0.001}"#).unwrap();
+        let result = params.normalize(20.0);
+        let expected = (20.0_f32 - 10.0) / (5.0 + 0.001);
+        assert!((result - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn norm_parameters_normalize_zero_std() {
+        let params: NormParameters =
+            serde_json::from_str(r#"{"mean": 5.0, "std": 0.0, "eps": 0.001}"#).unwrap();
+        let result = params.normalize(5.0);
+        let expected = (5.0_f32 - 5.0) / (0.0 + 0.001);
+        assert!((result - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn norm_parameters_normalize_negative_value() {
+        let params: NormParameters =
+            serde_json::from_str(r#"{"mean": 10.0, "std": 2.0, "eps": 0.0}"#).unwrap();
+        let result = params.normalize(4.0);
+        let expected = (4.0_f32 - 10.0) / (2.0 + 0.0);
+        assert!((result - expected).abs() < 1e-6);
+    }
 }

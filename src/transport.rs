@@ -1,13 +1,14 @@
 use crate::censor::{Action, Direction, IpPair};
-use crate::model::onnx::Model;
 use crate::model::ModelThreadMessage;
 use crate::program::config::Config as ProgramConfig;
 use crate::program::env::ProgramEnv;
 use crate::program::packet::rust_dns;
+use crate::program::packet::rust_quic;
+use crate::program::packet::rust_tls;
 use crate::program::packet::rust_packet::{self, Model as PythonModel, Packet as PythonPacket};
 use crate::program::packet::TransportMetadataExtra;
 use crate::program::packet::{Packet, TransportProtocol};
-use crate::program::program::{Action as ProgramAction, Program};
+use crate::program::program::{Action as ProgramAction, Program, ProgramLoadError};
 use ort::Error as OrtError;
 use rustpython_vm::builtins::{PyBaseExceptionRef, PyCode};
 use rustpython_vm::convert::ToPyObject;
@@ -23,9 +24,8 @@ use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::error;
 
 /// Connection key is an identifier that will always resolve to the same value for a connection
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -48,7 +48,7 @@ impl ConnectionKey {
         let ip_1 = ips.src();
         let ip_2 = ips.dst();
         // Place values based on sorting IPs
-        // TODO: check whether sorting ports is faster?
+        // Sort by IP to ensure symmetric keys (port sort alternative benchmarked in TODO.md)
         let (addr_low, addr_high, port_low, port_high) = if ip_1 <= ip_2 {
             (ip_1, ip_2, port_1, port_2)
         } else {
@@ -103,6 +103,8 @@ pub enum TransportStateInitError {
     CouldNotFindModelOutput { name: String },
     #[error("Failed to load script: {0}")]
     ReadScript(io::Error),
+    #[error("Failed to load program: {0}")]
+    ProgramLoad(#[from] ProgramLoadError),
     #[error("Failed to load model file: {0}")]
     ModelLoad(io::Error),
 }
@@ -128,7 +130,7 @@ pub enum ExecutionEnvironment {
 
 impl TransportState {
     pub fn new(
-        model_config: HashMap<String, crate::config::model::Model>,
+        _model_config: HashMap<String, crate::config::model::Model>,
         _decision_log_path: Option<PathBuf>,
         execution_config: crate::config::execution::Config,
         model_sender: mpsc::SyncSender<ModelThreadMessage>,
@@ -138,8 +140,7 @@ impl TransportState {
         //settings.isolated = true;
         // Don't have the python subprograms implement sigint
         settings.install_signal_handlers = false;
-        // TODO: have this configurable via config
-        settings.hash_seed = Some(1337);
+        settings.hash_seed = Some(execution_config.hash_seed);
         // Want to make sure nothing is passed
         settings.argv = Vec::new();
         // settings.stdio_unbuffered = true;
@@ -151,6 +152,10 @@ impl TransportState {
             vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
             // Import the native rust module used for dns parsing
             vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
+            // Import the native rust module used for TLS ClientHello parsing
+            vm.add_native_module("tls".to_owned(), Box::new(rust_tls::make_module));
+            // Import the native rust module used for QUIC Initial parsing
+            vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
         });
         let (code, process) = if let Some(ref script_path) = execution_config.script {
             let source = std::fs::read_to_string(script_path)
@@ -201,8 +206,7 @@ impl TransportState {
             ExecutionMode::CensorLang => {
                 if let Some(ref script_path) = execution_config.script {
                     Some(
-                        Program::load(script_path.clone())
-                            .map_err(TransportStateInitError::ReadScript)?,
+                        Program::load(script_path.clone())?,
                     )
                 } else {
                     Some(Program::default())
@@ -279,10 +283,9 @@ impl TransportState {
             ExecutionEnvironment::Python { scope } => {
                 // Copy the code references
                 let code = self.code.clone();
-                let process = self.process.clone();
+                let _process = self.process.clone();
                 // Create a python-objectified version of the Packet struct
-                // TODO: dont clone
-                let transport = packet.transport.clone();
+                let transport = packet.transport;
                 let len = packet.payload.len();
                 let mut packet = PythonPacket::from(packet);
                 packet.set_direction(direction);
@@ -337,7 +340,7 @@ impl TransportState {
                                                 "allow" => Action::None,
                                                 other => {
                                                     if other.starts_with("inject") {
-                                                        let data = other
+                                                        let _data = other
                                                             .split_ascii_whitespace()
                                                             .skip(1)
                                                             .next();
@@ -490,4 +493,145 @@ fn fill_reset(
     tcp_packet.set_rst(true);
     tcp_packet.fill_checksum(&ips.src(), &ips.dst());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smoltcp::wire::{EthernetAddress, Ipv4Address, Ipv6Address, TcpSeqNumber};
+
+    // --- ConnectionKey tests ---
+
+    #[test]
+    fn connection_key_symmetric() {
+        let ips_fwd = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        let ips_rev = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 2),
+            dst: Ipv4Address::new(10, 0, 0, 1),
+        };
+        let key_fwd = ConnectionKey::new(ips_fwd, 1234, 80, TransportProtocol::Tcp);
+        let key_rev = ConnectionKey::new(ips_rev, 80, 1234, TransportProtocol::Tcp);
+        assert_eq!(key_fwd, key_rev);
+    }
+
+    #[test]
+    fn connection_key_different_ips() {
+        let ips_a = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        let ips_b = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 3),
+        };
+        let key_a = ConnectionKey::new(ips_a, 1234, 80, TransportProtocol::Tcp);
+        let key_b = ConnectionKey::new(ips_b, 1234, 80, TransportProtocol::Tcp);
+        assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn connection_key_different_ports() {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        let key_a = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_b = ConnectionKey::new(ips, 1234, 443, TransportProtocol::Tcp);
+        assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn connection_key_different_proto() {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        let key_tcp = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_udp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Udp);
+        assert_ne!(key_tcp, key_udp);
+    }
+
+    // --- construct_reset tests ---
+
+    #[test]
+    fn construct_reset_ipv4_produces_valid_packet() {
+        let src_mac = EthernetAddress([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        let dst_mac = EthernetAddress([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(192, 168, 1, 1),
+            dst: Ipv4Address::new(10, 0, 0, 1),
+        };
+        let result = construct_reset(
+            src_mac,
+            dst_mac,
+            ips,
+            Some(0x1234),
+            12345,
+            80,
+            TcpSeqNumber(1000),
+            TcpSeqNumber(2000),
+        );
+        let pkt = result.unwrap();
+        // Total length = 14 (eth) + 20 (ipv4) + 20 (tcp) = 54
+        assert_eq!(pkt.len(), 54);
+        // Verify Ethernet frame
+        let eth = EthernetFrame::new_unchecked(&pkt);
+        assert_eq!(eth.src_addr(), src_mac);
+        assert_eq!(eth.dst_addr(), dst_mac);
+        assert_eq!(eth.ethertype(), EthernetProtocol::Ipv4);
+        // Verify IP packet
+        let ip = Ipv4Packet::new_unchecked(eth.payload());
+        assert_eq!(ip.next_header(), IpProtocol::Tcp);
+        assert_eq!(ip.src_addr(), Ipv4Address::new(192, 168, 1, 1));
+        assert_eq!(ip.dst_addr(), Ipv4Address::new(10, 0, 0, 1));
+        assert_eq!(ip.ident(), 0x1234);
+        // Verify TCP packet
+        let tcp = TcpPacket::new_unchecked(ip.payload());
+        assert_eq!(tcp.src_port(), 12345);
+        assert_eq!(tcp.dst_port(), 80);
+        assert!(tcp.rst());
+        assert!(tcp.ack());
+        assert_eq!(tcp.ack_number(), TcpSeqNumber(1000));
+        assert_eq!(tcp.seq_number(), TcpSeqNumber(2000));
+    }
+
+    #[test]
+    fn construct_reset_ipv6_produces_valid_packet() {
+        let src_mac = EthernetAddress([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
+        let dst_mac = EthernetAddress([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+        let ips = IpPair::V6 {
+            src: Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+            dst: Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2),
+        };
+        let result = construct_reset(
+            src_mac,
+            dst_mac,
+            ips,
+            None,
+            443,
+            50000,
+            TcpSeqNumber(500),
+            TcpSeqNumber(600),
+        );
+        let pkt = result.unwrap();
+        // Total length = 14 (eth) + 40 (ipv6) + 20 (tcp) = 74
+        assert_eq!(pkt.len(), 74);
+        // Verify Ethernet frame
+        let eth = EthernetFrame::new_unchecked(&pkt);
+        assert_eq!(eth.ethertype(), EthernetProtocol::Ipv6);
+        // Verify IP packet
+        let ip = Ipv6Packet::new_unchecked(eth.payload());
+        assert_eq!(ip.next_header(), IpProtocol::Tcp);
+        assert_eq!(ip.src_addr(), Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        assert_eq!(ip.dst_addr(), Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2));
+        // Verify TCP packet
+        let tcp = TcpPacket::new_unchecked(ip.payload());
+        assert_eq!(tcp.src_port(), 443);
+        assert_eq!(tcp.dst_port(), 50000);
+        assert!(tcp.rst());
+        assert!(tcp.ack());
+    }
 }

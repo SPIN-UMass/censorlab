@@ -40,6 +40,19 @@ pub struct QueuedPacket {
     payload: Vec<u8>,
 }
 
+/// Send a single packet over the given interface.
+fn send_packet(interface: &str, packet: &QueuedPacket) {
+    let mut socket = RawSocket::new(interface, Medium::Ip).expect("Failed to open interface");
+    if let Some(tx_token) = socket.transmit(SmoltcpInstant::from_micros_const(0)) {
+        if let Err(err) = tx_token.consume(packet.payload.len(), |tx_buf| {
+            tx_buf.copy_from_slice(&packet.payload);
+            Ok::<(), ()>(())
+        }) {
+            error!("Error sending delayed packet: {:?}", err);
+        }
+    }
+}
+
 async fn run_thread(mut queue: Receiver<QueuedPacket>, interface: String) {
     // A future that resolves after a sleep time
     let sleep_fut = tokio::time::sleep(Duration::from_secs(u64::MAX));
@@ -48,7 +61,6 @@ async fn run_thread(mut queue: Receiver<QueuedPacket>, interface: String) {
     let mut next_packet: Option<QueuedPacket> = None;
     // A queue of packets, prioritized based on smallest packet time
     let mut packet_queue: BinaryHeap<QueuedPacket> = BinaryHeap::new();
-    // Raw socket used to send packets
     // Loop infinitely
     let mut end = false;
     while !end {
@@ -57,19 +69,7 @@ async fn run_thread(mut queue: Receiver<QueuedPacket>, interface: String) {
             () = &mut sleep_fut => {
                 // Send the packet corresponding to the sleep timer
                 if let Some(next_packet_r) = next_packet.take() {
-                    let mut socket = RawSocket::new(&interface, Medium::Ip).expect("Failed to open interface");
-                    if let Some(tx_token) = socket.transmit(SmoltcpInstant::from_micros_const(0)) {
-                        if let Err(_err) = tx_token.consume(
-                            next_packet_r.payload.len(),
-                            |tx_buf| {
-                                tx_buf.copy_from_slice(&next_packet_r.payload);
-                                Ok::<(),()>(())
-                            }
-                        ) {
-                            //TODO: print error if there is one
-                            error!("Error sending delayed packet");
-                        }
-                    }
+                    send_packet(&interface, &next_packet_r);
                     if let Some(new_packet) = packet_queue.pop() {
                         // Tell the sleep future to sleep until this next new packet
                         sleep_fut.as_mut().reset(new_packet.time.into());
@@ -113,9 +113,12 @@ async fn run_thread(mut queue: Receiver<QueuedPacket>, interface: String) {
                 }
             },
         };
-        if end {
-            //todo: send the rest of the packets
-            break;
-        }
+    }
+    // Send remaining packets on shutdown
+    if let Some(packet) = next_packet.take() {
+        send_packet(&interface, &packet);
+    }
+    while let Some(packet) = packet_queue.pop() {
+        send_packet(&interface, &packet);
     }
 }

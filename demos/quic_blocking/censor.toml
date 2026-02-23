@@ -1,0 +1,40 @@
+[execution]
+mode = "Python"
+script = "quic.py"
+
+[ethernet]
+[ethernet.allowlist]
+list = []
+[ethernet.blocklist]
+list = []
+
+[arp]
+
+[ip]
+[ip.blocklist]
+list = []
+action = "Drop"
+[ip.allowlist]
+list = []
+
+[icmp]
+
+[tcp]
+[tcp.port_allowlist]
+list = []
+[tcp.port_blocklist]
+list = []
+[tcp.ip_port_allowlist]
+list = []
+[tcp.ip_port_blocklist]
+list = []
+
+[udp]
+[udp.port_allowlist]
+list = []
+[udp.port_blocklist]
+list = []
+[udp.ip_port_allowlist]
+list = []
+[udp.ip_port_blocklist]
+list = []

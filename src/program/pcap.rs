@@ -3,9 +3,18 @@ use crate::program::packet::Packet;
 use pcap_parser::pcapng::Block as PcapNGBlock;
 use pcap_parser::{PcapBlockOwned, PcapError};
 use std::fs::File;
-use std::io::{self, BufReader};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
 use tracing::debug;
+
+#[derive(Debug, Error)]
+pub enum PcapLoadError {
+    #[error("Failed to open PCAP file: {0}")]
+    FileOpen(#[from] std::io::Error),
+    #[error("Invalid PCAP format: {0}")]
+    InvalidFormat(String),
+}
 
 pub struct Pcap {
     pub packets: Vec<Packet>,
@@ -14,7 +23,7 @@ pub struct Pcap {
 
 impl Pcap {
     /// Loads a PCAP
-    pub fn load(path: PathBuf, num_connections: Option<usize>) -> Result<Self, io::Error> {
+    pub fn load(path: PathBuf, num_connections: Option<usize>) -> Result<Self, PcapLoadError> {
         // Log the call
         if let Some(num_connections) = num_connections {
             debug!("Loading up to {num_connections} connections worth of pcaps from {path:?}");
@@ -22,7 +31,7 @@ impl Pcap {
             debug!("Loading all packets from {path:?}");
         }
         // Load the pcap
-        let pcap = load_pcap(&path, num_connections, false);
+        let pcap = load_pcap(&path, num_connections, false)?;
         debug!(
             "Loaded {} connections ({} packets) from {path:?}",
             pcap.num_connections,
@@ -36,12 +45,11 @@ pub fn load_pcap<P: AsRef<Path>>(
     path: P,
     num_connections: Option<usize>,
     only_first_data_packet: bool,
-) -> Pcap {
-    // TODO: handle error
-    let file = File::open(path).map(BufReader::new).unwrap();
+) -> Result<Pcap, PcapLoadError> {
+    let file = File::open(&path).map(BufReader::new)?;
     // Create a pcap reader
-    // TODO: handle error
-    let mut reader = pcap_parser::create_reader(u16::MAX.into(), file).unwrap();
+    let mut reader = pcap_parser::create_reader(u16::MAX.into(), file)
+        .map_err(|e| PcapLoadError::InvalidFormat(format!("{:?}", e)))?;
     // This buffer will store packets
     let mut packets = num_connections
         .map(Vec::with_capacity)
@@ -58,7 +66,9 @@ pub fn load_pcap<P: AsRef<Path>>(
                 // Handle the block
                 use PcapBlockOwned::*;
                 use PcapNGBlock::*;
-                // TODO: handle padding?
+                // PCAP-NG block padding: reader.consume(offset) handles block alignment;
+                // any trailing padding in block.data is harmless since IP total_len
+                // constrains packet parsing boundaries.
                 let (timestamp, block_data) = match block {
                     Legacy(block) => (
                         Some(f64::from(block.ts_sec) + f64::from(block.ts_usec) / 1_000_000.0),
@@ -84,36 +94,41 @@ pub fn load_pcap<P: AsRef<Path>>(
                 };
                 // Parse the data as a packet
                 if let Some(block_data) = block_data {
-                    //TODO: handle errors
-                    if let Ok(packet) = Packet::from_ts_bytes(timestamp, block_data, 0.into()) {
-                        // If we're being told to only grab the first data block, do some extra
-                        // stuff
-                        let mut had_first_data_block = None;
-                        if only_first_data_packet {
-                            had_first_data_block =
-                                Some(env.connection_has_received_first_data_packet(&packet));
+                    let packet = match Packet::from_ts_bytes(timestamp, block_data, 0.into()) {
+                        Ok(packet) => packet,
+                        Err(err) => {
+                            debug!("Skipping packet (len={}): {:?}", block_data.len(), err);
+                            reader.consume(offset);
+                            continue;
                         }
-                        // Process the packet
-                        env.process(&packet);
-                        // Store the packet
-                        if !only_first_data_packet {
+                    };
+                    // If we're being told to only grab the first data block, do some extra
+                    // stuff
+                    let mut had_first_data_block = None;
+                    if only_first_data_packet {
+                        had_first_data_block =
+                            Some(env.connection_has_received_first_data_packet(&packet));
+                    }
+                    // Process the packet
+                    env.process(&packet);
+                    // Store the packet
+                    if !only_first_data_packet {
+                        packets.push(packet);
+                    }
+                    // If we're being told to only grab the first data block, do some extra
+                    // stuff
+                    else if let Some(had_first_data_block) = had_first_data_block {
+                        if !had_first_data_block
+                            && env.connection_has_received_first_data_packet(&packet)
+                        {
                             packets.push(packet);
                         }
-                        // If we're being told to only grab the first data block, do some extra
-                        // stuff
-                        else if let Some(had_first_data_block) = had_first_data_block {
-                            if !had_first_data_block
-                                && env.connection_has_received_first_data_packet(&packet)
-                            {
-                                packets.push(packet);
-                            }
-                        }
-                        // Check if it's time to stop
-                        if let Some(num_connections) = num_connections {
-                            if env.num_finished_tcp >= num_connections {
-                                debug!("Sufficient connections have been collected");
-                                break;
-                            }
+                    }
+                    // Check if it's time to stop
+                    if let Some(num_connections) = num_connections {
+                        if env.num_finished_tcp >= num_connections {
+                            debug!("Sufficient connections have been collected");
+                            break;
                         }
                     }
                 }
@@ -121,17 +136,19 @@ pub fn load_pcap<P: AsRef<Path>>(
                 reader.consume(offset);
             }
             Err(PcapError::Eof) => break,
-            Err(PcapError::Incomplete) => {
-                reader.refill().unwrap();
+            Err(PcapError::Incomplete(_needed)) => {
+                if reader.refill().is_err() {
+                    break;
+                }
             }
-            Err(e) => panic!("error while reading: {:?}", e),
+            Err(e) => return Err(PcapLoadError::InvalidFormat(format!("{:?}", e))),
         }
     }
     // Strip out all packets not related to a finished connection
     packets.retain(|packet| env.connection_is_finished(packet));
     // At the end of this we have our packets
-    Pcap {
+    Ok(Pcap {
         packets,
         num_connections: env.num_finished_tcp,
-    }
+    })
 }

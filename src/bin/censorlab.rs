@@ -2,11 +2,9 @@ use censorlab::censor::args::SubCmd;
 use censorlab::censor::{Censor, CensorInitError};
 use censorlab::config::{Config, ConfigLoadError};
 use censorlab::ipc::IPC_DEFAULT_PORT;
-use censorlab::model::{onnx, start_model_thread, ModelThreadMessage};
+use censorlab::model::{start_model_thread, ModelThreadMessage};
 use clap::Parser;
 use ort::Error as OrtError;
-use std::any::Any;
-use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
 use tracing::subscriber::SetGlobalDefaultError;
@@ -38,6 +36,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), CensorlabError> {
+    // Initialize the tract backend for ort (pure Rust ONNX inference)
+    ort::set_api(ort_tract::api());
     // Parse CLI arguments
     let args = Args::parse();
     // Build our log filtr

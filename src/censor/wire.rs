@@ -118,8 +118,10 @@ impl Censor {
         let (source_interface, dest_interface) = match direction {
             Direction::WanToClient => (wan_interface, client_interface),
             Direction::ClientToWan => (client_interface, wan_interface),
-            // TODO: handle this
-            Direction::Unknown => unreachable!(),
+            Direction::Unknown => {
+                warn!("Cannot forward frame with unknown direction, dropping");
+                return Ok(ForwardFramesResult::Success);
+            }
         };
         if let Some(retry_data) = retry.get_data() {
             info!(

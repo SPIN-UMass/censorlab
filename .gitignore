@@ -9,3 +9,6 @@ result
 # Exclude LLMs from commits
 CLAUDE.md
 /.claude
+# other stuff
+reviews
+TODO.md

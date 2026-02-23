@@ -1,7 +1,6 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
-    nixpkgs-master.url = "github:NixOS/nixpkgs/master";
     home-manager = {
       url = "github:nix-community/home-manager/release-24.11";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -21,7 +20,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, home-manager, utils, rust-overlay, crane, deploy-rs, nixpkgs-master }:
+  outputs = { self, nixpkgs, home-manager, utils, rust-overlay, crane, deploy-rs }:
     utils.lib.eachDefaultSystem
       (system:
         let
@@ -29,32 +28,12 @@
           pkgs = import nixpkgs {
             inherit system overlays;
           };
-          pkgs-master = import nixpkgs-master {
-            inherit system;
-          };
           craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.nightly.latest.default);
-          onnxruntime = pkgs-master.onnxruntime.overrideAttrs (final: prev: {
-            src = pkgs-master.fetchFromGitHub {
-              owner = "microsoft";
-              repo = "onnxruntime";
-              rev = "b522df0ae477e59f60acbe6c92c8a64eda96cace";
-              hash = "sha256-ACAaMyOlhknFZ1NJex/VlPGqiDZv6LRgBvwq1DrDglg=";
-              fetchSubmodules = true;
-            };
-            patches = [ (builtins.elemAt prev.patches 0) ];
-          });
           # Library dependencies
-          dependencies = [ onnxruntime pkgs.libffi ];
-          # Native build inputs
-          nativeBuildInputs = [ onnxruntime ];
+          dependencies = [ pkgs.libffi ];
           # Common arguments to building censorlab and deps
-          onnx_vars = {
-            ORT_STRATEGY = "system";
-            ORT_LIB_LOCATION = "${onnxruntime}";
-          };
-          common_args = onnx_vars // {
+          common_args = {
             strictDeps = true;
-            inherit nativeBuildInputs;
             buildInputs = dependencies;
           };
           # Build just the dependencies, without any of the extra stuff
@@ -69,15 +48,15 @@
         in
         {
           # Shell used for developing censorlab
-          devShells.default = pkgs.mkShell ({
-            nativeBuildInputs = nativeBuildInputs ++ [
+          devShells.default = pkgs.mkShell {
+            nativeBuildInputs = [
               (pkgs.rust-bin.nightly.latest.default.override {
                 extensions = [ "rust-src" "rustfmt" "rust-analyzer" "clippy" ];
               })
               pkgs.zola
             ];
-            buildInputs = [ ] ++ dependencies;
-          } // onnx_vars);
+            buildInputs = dependencies;
+          };
           devShells.website = pkgs.mkShell {
             nativeBuildInputs =
               let
@@ -106,7 +85,7 @@
                 name = "source";
               };
               # Dependencies
-              inherit cargoArtifacts nativeBuildInputs;
+              inherit cargoArtifacts;
             });
             censorlab-vm-docs = pkgs.callPackage
               ({ stdenv, pandoc, ... }: stdenv.mkDerivation {

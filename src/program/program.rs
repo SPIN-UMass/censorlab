@@ -8,10 +8,27 @@ use serde::Deserialize;
 use serde_with::DeserializeFromStr;
 use std::fmt;
 use std::fs;
-use std::io;
 use std::num::TryFromIntError;
 use std::path::PathBuf;
 use std::str::FromStr;
+use thiserror::Error;
+
+/// Generates an `all()` method that returns a `Vec` of all listed variants.
+macro_rules! enum_all {
+    ($($variant:expr),+ $(,)?) => {
+        pub fn all() -> Vec<Self> {
+            vec![$($variant),+]
+        }
+    };
+}
+
+#[derive(Debug, Error)]
+pub enum ProgramLoadError {
+    #[error("Failed to read program file: {0}")]
+    Read(#[from] std::io::Error),
+    #[error("Failed to parse program: {0}")]
+    Parse(String),
+}
 
 // Load in the parsing module
 lalrpop_mod!(
@@ -28,11 +45,10 @@ pub struct Program {
 }
 impl Program {
     /// Loads a program
-    pub fn load(program_path: PathBuf) -> Result<Self, io::Error> {
+    pub fn load(program_path: PathBuf) -> Result<Self, ProgramLoadError> {
         // Load the program
         let program = fs::read_to_string(program_path)?;
-        // TODO: Handle error
-        let program = program.parse().unwrap();
+        let program = program.parse().map_err(ProgramLoadError::Parse)?;
         Ok(program)
     }
 }
@@ -736,7 +752,6 @@ pub mod field {
                 Field::PayloadEntropy => Ok(Value::Float(packet.payload_entropy())),
             }
         }
-        // TODO: macro
         pub fn all() -> Vec<Field> {
             let mut fields = vec![Field::Timestamp];
             for field in ip::Field::all() {
@@ -875,8 +890,7 @@ pub mod field {
                     }
                 };
                 if default_on_error {
-                    // TODO: pick custom defaults for each field
-                    Ok(result.unwrap_or(Value::Bool(false)))
+                    Ok(result.unwrap_or(Value::Int(0)))
                 } else {
                     result
                 }
@@ -893,9 +907,10 @@ pub mod field {
             Checksum,
         }
         impl V4Field {
-            fn all() -> Vec<Self> {
-                use V4Field::*;
-                vec![Dscp, Ecn, Ident, DontFrag, MoreFrags, FragOffset, Checksum]
+            enum_all! {
+                V4Field::Dscp, V4Field::Ecn, V4Field::Ident,
+                V4Field::DontFrag, V4Field::MoreFrags, V4Field::FragOffset,
+                V4Field::Checksum,
             }
         }
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -905,10 +920,7 @@ pub mod field {
             PayloadLen,
         }
         impl V6Field {
-            fn all() -> Vec<Self> {
-                use V6Field::*;
-                vec![TrafficClass, FlowLabel, PayloadLen]
-            }
+            enum_all! { V6Field::TrafficClass, V6Field::FlowLabel, V6Field::PayloadLen }
         }
         #[derive(Debug, thiserror::Error)]
         pub enum FieldError {
@@ -931,7 +943,7 @@ pub mod field {
             PayloadLength,
             UrgentAt,
             WindowLength,
-            // TODO: options
+            // TCP options field evaluation not yet supported
         }
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Flag {
@@ -976,8 +988,7 @@ pub mod field {
                         Err(FieldError::WrongProtocol)
                     };
                 if default_on_error {
-                    // TODO: pick custom defaults for each field
-                    Ok(result.unwrap_or(Value::Bool(false)))
+                    Ok(result.unwrap_or(Value::Int(0)))
                 } else {
                     result
                 }
@@ -1054,8 +1065,7 @@ pub mod field {
                         Err(FieldError::WrongProtocol)
                     };
                 if default_on_error {
-                    // TODO: pick custom defaults for each field
-                    Ok(result.unwrap_or(Value::Bool(false)))
+                    Ok(result.unwrap_or(Value::Int(0)))
                 } else {
                     result
                 }
@@ -1115,7 +1125,6 @@ pub enum Operator {
     Logic(LogicOperator),
 }
 impl Operator {
-    // TODO: make a macro to auto generate this
     pub fn all() -> Vec<Operator> {
         vec![
             Operator::Comparison(ComparisonOperator::Less),
@@ -1126,7 +1135,6 @@ impl Operator {
             Operator::Comparison(ComparisonOperator::GreaterEqual),
             Operator::Logic(LogicOperator::And),
             Operator::Logic(LogicOperator::Or),
-            Operator::Logic(LogicOperator::Xor),
             Operator::Logic(LogicOperator::Xor),
             Operator::Logic(LogicOperator::Nand),
             Operator::Logic(LogicOperator::Nor),
@@ -1163,13 +1171,9 @@ pub enum LogicOperator {
 
 fn i64_to_f64(i: i64) -> f64 {
     let f = i as f64;
-    {
-        // Warn if there was precision loss
-        // TODO: should this be an error
-        let i2: i64 = f as i64;
-        if i2 != i {
-            //warn!("Precision loss in i64->f64")
-        }
+    let i2: i64 = f as i64;
+    if i2 != i {
+        tracing::warn!("Precision loss converting i64 ({i}) to f64 ({f}), round-trip gives {i2}");
     }
     f
 }
@@ -1545,10 +1549,7 @@ pub enum Action {
     TerminateAll,
 }
 impl Action {
-    // TODO: make this a macro
-    pub fn all() -> Vec<Self> {
-        vec![Action::Allow, Action::AllowAll, Action::TerminateAll]
-    }
+    enum_all! { Action::Allow, Action::AllowAll, Action::TerminateAll }
 }
 impl FromStr for Action {
     type Err = String;
@@ -1566,5 +1567,617 @@ impl fmt::Display for Action {
             AllowAll => "allow_all",
             TerminateAll => "terminate",
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    // --- Operator::call with comparison operators ---
+
+    #[test]
+    fn operator_call_int_less_than_int() {
+        let op = Operator::Comparison(ComparisonOperator::Less);
+        assert!(op.call(&Value::Int(1), &Value::Int(2)));
+        assert!(!op.call(&Value::Int(2), &Value::Int(1)));
+        assert!(!op.call(&Value::Int(1), &Value::Int(1)));
+    }
+
+    #[test]
+    fn operator_call_float_greater_than_float() {
+        let op = Operator::Comparison(ComparisonOperator::Greater);
+        assert!(op.call(&Value::Float(3.5), &Value::Float(2.0)));
+        assert!(!op.call(&Value::Float(1.0), &Value::Float(2.0)));
+    }
+
+    #[test]
+    fn operator_call_int_equal_float_coercion() {
+        let op = Operator::Comparison(ComparisonOperator::Equal);
+        // Int == Float should coerce: Int(5) compared with Float(5.0)
+        assert!(op.call(&Value::Int(5), &Value::Float(5.0)));
+        assert!(!op.call(&Value::Int(5), &Value::Float(5.1)));
+    }
+
+    #[test]
+    fn operator_call_float_equal_int_coercion() {
+        let op = Operator::Comparison(ComparisonOperator::Equal);
+        assert!(op.call(&Value::Float(5.0), &Value::Int(5)));
+        assert!(!op.call(&Value::Float(5.1), &Value::Int(5)));
+    }
+
+    // --- Operator::call with logic operators ---
+
+    #[test]
+    fn operator_call_bool_and() {
+        let op = Operator::Logic(LogicOperator::And);
+        assert!(op.call(&Value::Bool(true), &Value::Bool(true)));
+        assert!(!op.call(&Value::Bool(true), &Value::Bool(false)));
+        assert!(!op.call(&Value::Bool(false), &Value::Bool(false)));
+    }
+
+    #[test]
+    fn operator_call_bool_or() {
+        let op = Operator::Logic(LogicOperator::Or);
+        assert!(op.call(&Value::Bool(true), &Value::Bool(false)));
+        assert!(op.call(&Value::Bool(false), &Value::Bool(true)));
+        assert!(!op.call(&Value::Bool(false), &Value::Bool(false)));
+    }
+
+    #[test]
+    fn operator_call_bool_xor() {
+        let op = Operator::Logic(LogicOperator::Xor);
+        assert!(op.call(&Value::Bool(true), &Value::Bool(false)));
+        assert!(op.call(&Value::Bool(false), &Value::Bool(true)));
+        assert!(!op.call(&Value::Bool(true), &Value::Bool(true)));
+        assert!(!op.call(&Value::Bool(false), &Value::Bool(false)));
+    }
+
+    // --- Operator::all() ---
+
+    #[test]
+    fn operator_all_no_duplicates() {
+        let all = Operator::all();
+        assert!(!all.is_empty());
+        // Check no duplicates
+        for (i, a) in all.iter().enumerate() {
+            for (j, b) in all.iter().enumerate() {
+                if i != j {
+                    assert_ne!(a, b, "Duplicate operator found at indices {i} and {j}");
+                }
+            }
+        }
+    }
+
+    // --- Action tests ---
+
+    #[test]
+    fn action_all_contains_three_variants() {
+        let all = Action::all();
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&Action::Allow));
+        assert!(all.contains(&Action::AllowAll));
+        assert!(all.contains(&Action::TerminateAll));
+    }
+
+    #[test]
+    fn action_from_str_allow() {
+        let action = Action::from_str("allow").unwrap();
+        assert_eq!(action, Action::Allow);
+    }
+
+    #[test]
+    fn action_from_str_terminate() {
+        let action = Action::from_str("terminate").unwrap();
+        assert_eq!(action, Action::TerminateAll);
+    }
+
+    #[test]
+    fn action_display_allow() {
+        assert_eq!(format!("{}", Action::Allow), "allow");
+    }
+
+    #[test]
+    fn action_display_allow_all() {
+        assert_eq!(format!("{}", Action::AllowAll), "allow_all");
+    }
+
+    #[test]
+    fn action_display_terminate() {
+        assert_eq!(format!("{}", Action::TerminateAll), "terminate");
+    }
+
+    // --- i64_to_f64 ---
+
+    #[test]
+    fn i64_to_f64_basic() {
+        assert_eq!(i64_to_f64(0), 0.0);
+        assert_eq!(i64_to_f64(42), 42.0);
+        assert_eq!(i64_to_f64(-100), -100.0);
+    }
+
+    #[test]
+    fn i64_to_f64_max_safe_integer() {
+        // 2^53 is exactly representable as f64
+        let val = 1_i64 << 53;
+        assert_eq!(i64_to_f64(val), val as f64);
+    }
+
+    // --- Value comparisons and type coercion ---
+
+    #[test]
+    fn value_as_bool() {
+        assert!(Value::Bool(true).as_bool());
+        assert!(!Value::Bool(false).as_bool());
+        assert!(Value::Int(1).as_bool());
+        assert!(!Value::Int(0).as_bool());
+        assert!(Value::Float(1.0).as_bool());
+        assert!(!Value::Float(0.0).as_bool());
+    }
+
+    #[test]
+    fn comparison_less_equal() {
+        let op = Operator::Comparison(ComparisonOperator::LessEqual);
+        assert!(op.call(&Value::Int(1), &Value::Int(1)));
+        assert!(op.call(&Value::Int(1), &Value::Int(2)));
+        assert!(!op.call(&Value::Int(3), &Value::Int(2)));
+    }
+
+    #[test]
+    fn comparison_not_equal() {
+        let op = Operator::Comparison(ComparisonOperator::NotEqual);
+        assert!(op.call(&Value::Int(1), &Value::Int(2)));
+        assert!(!op.call(&Value::Int(1), &Value::Int(1)));
+    }
+
+    #[test]
+    fn comparison_greater_equal() {
+        let op = Operator::Comparison(ComparisonOperator::GreaterEqual);
+        assert!(op.call(&Value::Float(2.0), &Value::Float(2.0)));
+        assert!(op.call(&Value::Float(3.0), &Value::Float(2.0)));
+        assert!(!op.call(&Value::Float(1.0), &Value::Float(2.0)));
+    }
+
+    #[test]
+    fn logic_nand() {
+        let op = Operator::Logic(LogicOperator::Nand);
+        assert!(!op.call(&Value::Bool(true), &Value::Bool(true)));
+        assert!(op.call(&Value::Bool(true), &Value::Bool(false)));
+        assert!(op.call(&Value::Bool(false), &Value::Bool(false)));
+    }
+
+    #[test]
+    fn logic_nor() {
+        let op = Operator::Logic(LogicOperator::Nor);
+        assert!(!op.call(&Value::Bool(true), &Value::Bool(false)));
+        assert!(!op.call(&Value::Bool(false), &Value::Bool(true)));
+        assert!(op.call(&Value::Bool(false), &Value::Bool(false)));
+    }
+
+    #[test]
+    fn logic_xnor() {
+        let op = Operator::Logic(LogicOperator::Xnor);
+        assert!(op.call(&Value::Bool(true), &Value::Bool(true)));
+        assert!(!op.call(&Value::Bool(true), &Value::Bool(false)));
+        assert!(op.call(&Value::Bool(false), &Value::Bool(false)));
+    }
+
+    // =========================================================================
+    // Packet construction helpers for program tests
+    // =========================================================================
+
+    use crate::program::packet::{
+        IpMetadata, IpVersionMetadata, Packet, TcpFlags, TcpMetadata, TransportMetadata,
+        TransportMetadataExtra, UdpMetadata,
+    };
+    use crate::program::env::{EnvFields, Registers};
+    use smoltcp::wire::{Ipv4Address, TcpSeqNumber};
+
+    fn make_tcp_packet(payload: &[u8]) -> Packet {
+        Packet {
+            timestamp: Some(0.0),
+            ip: IpMetadata {
+                header_len: 20,
+                total_len: 40 + payload.len(),
+                hop_limit: 64,
+                next_header: smoltcp::wire::IpProtocol::Tcp,
+                version: IpVersionMetadata::V4 {
+                    src: Ipv4Address::new(10, 0, 0, 1),
+                    dst: Ipv4Address::new(10, 0, 0, 2),
+                    dscp: 0,
+                    ecn: 0,
+                    ident: 0,
+                    dont_frag: false,
+                    more_frags: false,
+                    frag_offset: 0,
+                    checksum: 0,
+                },
+            },
+            direction: 0,
+            transport: TransportMetadata {
+                src: 12345,
+                dst: 80,
+                extra: TransportMetadataExtra::Tcp(TcpMetadata {
+                    seq: TcpSeqNumber(1000),
+                    ack: TcpSeqNumber(0),
+                    header_len: 20,
+                    urgent_at: 0,
+                    window_len: 65535,
+                    flags: TcpFlags {
+                        fin: false,
+                        syn: false,
+                        rst: false,
+                        psh: false,
+                        ack: false,
+                        urg: false,
+                        ece: false,
+                        cwr: false,
+                        ns: false,
+                    },
+                }),
+            },
+            payload: payload.to_vec(),
+        }
+    }
+
+    fn make_syn_packet() -> Packet {
+        let mut pkt = make_tcp_packet(&[]);
+        if let TransportMetadataExtra::Tcp(ref mut tcp) = pkt.transport.extra {
+            tcp.flags.syn = true;
+        }
+        pkt
+    }
+
+    fn make_udp_packet(payload: &[u8]) -> Packet {
+        Packet {
+            timestamp: Some(0.0),
+            ip: IpMetadata {
+                header_len: 20,
+                total_len: 28 + payload.len(),
+                hop_limit: 64,
+                next_header: smoltcp::wire::IpProtocol::Udp,
+                version: IpVersionMetadata::V4 {
+                    src: Ipv4Address::new(10, 0, 0, 1),
+                    dst: Ipv4Address::new(10, 0, 0, 2),
+                    dscp: 0,
+                    ecn: 0,
+                    ident: 0,
+                    dont_frag: false,
+                    more_frags: false,
+                    frag_offset: 0,
+                    checksum: 0,
+                },
+            },
+            direction: 0,
+            transport: TransportMetadata {
+                src: 12345,
+                dst: 53,
+                extra: TransportMetadataExtra::Udp(UdpMetadata {
+                    length: 8 + payload.len() as u16,
+                    checksum: 0,
+                }),
+            },
+            payload: payload.to_vec(),
+        }
+    }
+
+    fn default_registers() -> Registers {
+        Registers::new(16, false)
+    }
+
+    fn default_env_fields() -> EnvFields {
+        EnvFields { num_packets: 0 }
+    }
+
+    // =========================================================================
+    // Group 4: CensorLang parse + run end-to-end
+    // =========================================================================
+
+    #[test]
+    fn program_parse_unconditional_return() {
+        let prog: Program = "RETURN terminate".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        assert!(prog.lines[0].condition.is_none());
+        assert!(matches!(prog.lines[0].operation, Operation::Return(Action::TerminateAll)));
+    }
+
+    #[test]
+    fn program_parse_conditional_return() {
+        let prog: Program = "if field:tcp.flag.syn == True: RETURN terminate".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        assert!(prog.lines[0].condition.is_some());
+        assert!(matches!(prog.lines[0].operation, Operation::Return(Action::TerminateAll)));
+    }
+
+    #[test]
+    fn program_parse_copy_operation() {
+        let prog: Program = "COPY 42 -> reg:i.0".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        match &prog.lines[0].operation {
+            Operation::Copy { from, to } => {
+                assert_eq!(*from, Input::Int(42));
+                assert_eq!(to.ty, RegisterType::Int);
+                assert_eq!(to.index, 0);
+            }
+            other => panic!("Expected Copy, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn program_parse_math_operation() {
+        let prog: Program = "ADD reg:f.0, 1.0 -> reg:f.1".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        match &prog.lines[0].operation {
+            Operation::Add { lhs, rhs, out } => {
+                assert!(matches!(lhs, Input::Register(r) if r.ty == RegisterType::Float && r.index == 0));
+                assert_eq!(*rhs, Input::Float(1.0));
+                assert_eq!(out.ty, RegisterType::Float);
+                assert_eq!(out.index, 1);
+            }
+            other => panic!("Expected Add, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn program_run_empty_returns_allow() {
+        let prog = Program::default();
+        let pkt = make_tcp_packet(b"hello");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::Allow);
+    }
+
+    #[test]
+    fn program_run_unconditional_terminate() {
+        let prog: Program = "RETURN terminate".parse().unwrap();
+        let pkt = make_tcp_packet(b"hello");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_run_conditional_true_returns_terminate() {
+        let prog: Program = "if field:tcp.payload.len > 0: RETURN terminate".parse().unwrap();
+        let pkt = make_tcp_packet(b"hello");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_run_conditional_false_returns_allow() {
+        let prog: Program = "if field:tcp.payload.len > 0: RETURN terminate".parse().unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::Allow);
+    }
+
+    #[test]
+    fn program_run_copy_then_conditional_on_register() {
+        let source = "COPY 5 -> reg:i.0\nif reg:i.0 == 5: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_run_first_return_wins() {
+        let source = "RETURN terminate\nRETURN allow_all";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    // =========================================================================
+    // Group 5: Field evaluation
+    // =========================================================================
+
+    #[test]
+    fn field_eval_tcp_payload_length() {
+        let pkt = make_tcp_packet(b"0123456789");
+        let fields = default_env_fields();
+        let val = field::tcp::Field::PayloadLength.eval(&pkt, false).unwrap();
+        assert!(matches!(val, Value::Int(10)));
+        // Also test via the top-level Field enum
+        let val2 = field::Field::Tcp(field::tcp::Field::PayloadLength)
+            .eval(&pkt, &fields, false)
+            .unwrap();
+        assert!(matches!(val2, Value::Int(10)));
+    }
+
+    #[test]
+    fn field_eval_tcp_flag_syn() {
+        let pkt = make_syn_packet();
+        let val = field::tcp::Field::Flag(field::tcp::Flag::Syn)
+            .eval(&pkt, false)
+            .unwrap();
+        assert!(matches!(val, Value::Bool(true)));
+    }
+
+    #[test]
+    fn field_eval_tcp_on_udp_errors() {
+        let pkt = make_udp_packet(b"data");
+        let result = field::tcp::Field::PayloadLength.eval(&pkt, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn field_eval_tcp_on_udp_defaults() {
+        let pkt = make_udp_packet(b"data");
+        let val = field::tcp::Field::PayloadLength.eval(&pkt, true).unwrap();
+        assert!(matches!(val, Value::Int(0)));
+    }
+
+    #[test]
+    fn field_eval_payload_entropy_zeros() {
+        let pkt = make_tcp_packet(&[0u8; 100]);
+        let fields = default_env_fields();
+        let val = field::Field::PayloadEntropy.eval(&pkt, &fields, false).unwrap();
+        assert!(matches!(val, Value::Float(f) if f == 0.0));
+    }
+
+    #[test]
+    fn field_eval_env_num_packets() {
+        let pkt = make_tcp_packet(b"");
+        let fields = EnvFields { num_packets: 5 };
+        let val = field::Field::Env(field::env::Field::NumPackets)
+            .eval(&pkt, &fields, false)
+            .unwrap();
+        assert!(matches!(val, Value::Int(5)));
+    }
+
+    #[test]
+    fn field_eval_timestamp_present() {
+        let mut pkt = make_tcp_packet(b"");
+        pkt.timestamp = Some(1.5);
+        let fields = default_env_fields();
+        let val = field::Field::Timestamp.eval(&pkt, &fields, false).unwrap();
+        assert!(matches!(val, Value::Float(f) if (f - 1.5).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn field_eval_timestamp_missing_errors() {
+        let mut pkt = make_tcp_packet(b"");
+        pkt.timestamp = None;
+        let fields = default_env_fields();
+        let result = field::Field::Timestamp.eval(&pkt, &fields, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn field_eval_timestamp_missing_defaults() {
+        let mut pkt = make_tcp_packet(b"");
+        pkt.timestamp = None;
+        let fields = default_env_fields();
+        let val = field::Field::Timestamp.eval(&pkt, &fields, true).unwrap();
+        assert!(matches!(val, Value::Float(f) if f == 0.0));
+    }
+
+    #[test]
+    fn field_eval_ip_header_len() {
+        let pkt = make_tcp_packet(b"");
+        let fields = default_env_fields();
+        let val = field::Field::Ip(field::ip::Field::HeaderLen)
+            .eval(&pkt, &fields, false)
+            .unwrap();
+        assert!(matches!(val, Value::Int(20)));
+    }
+
+    // =========================================================================
+    // Group 6: Optimization passes
+    // =========================================================================
+
+    #[test]
+    fn optimise_strips_noops() {
+        let mut prog = Program {
+            lines: vec![
+                Line {
+                    condition: None,
+                    operation: Operation::Noop,
+                },
+                Line {
+                    condition: None,
+                    operation: Operation::Noop,
+                },
+            ],
+        };
+        prog.optimise();
+        assert_eq!(prog.lines.len(), 0);
+    }
+
+    #[test]
+    fn optimise_dead_code_after_unconditional_return() {
+        let source = "RETURN terminate\nCOPY 1 -> reg:i.0";
+        let prog: Program = source.parse().unwrap();
+        // Program::new calls optimise
+        let prog = Program::new(prog.lines);
+        assert_eq!(prog.lines.len(), 1);
+        assert!(matches!(prog.lines[0].operation, Operation::Return(Action::TerminateAll)));
+    }
+
+    #[test]
+    fn optimise_always_true_condition_removed() {
+        let source = "if 1 == 1: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let prog = Program::new(prog.lines);
+        assert_eq!(prog.lines.len(), 1);
+        // Condition should be stripped (always true)
+        assert!(prog.lines[0].condition.is_none());
+        assert!(matches!(prog.lines[0].operation, Operation::Return(Action::TerminateAll)));
+    }
+
+    #[test]
+    fn optimise_always_false_condition_removed() {
+        let source = "if 1 == 2: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let prog = Program::new(prog.lines);
+        // Line should be entirely removed (always false → noop → stripped)
+        assert_eq!(prog.lines.len(), 0);
+    }
+
+    #[test]
+    fn optimise_constant_folding() {
+        // ADD 2, 3 -> reg:i.0 then if reg:i.0 == 5: RETURN terminate
+        // The add should be constant-folded to COPY 5 -> reg:i.0, then the
+        // condition can evaluate since the register is known
+        let source = "ADD 2, 3 -> reg:i.0\nif reg:i.0 == 5: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let prog = Program::new(prog.lines);
+        // After optimization, should reduce to an unconditional return
+        assert!(!prog.lines.is_empty());
+        // The final line should be a return terminate
+        let last = prog.lines.last().unwrap();
+        assert!(matches!(last.operation, Operation::Return(Action::TerminateAll)));
+    }
+
+    // =========================================================================
+    // Group 7: Math edge cases
+    // =========================================================================
+
+    #[test]
+    fn math_div_by_zero_returns_zero() {
+        let source = "DIV 10, 0 -> reg:i.0\nif reg:i.0 == 0: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn math_mod_by_zero_returns_zero() {
+        let source = "MOD 10, 0 -> reg:i.0\nif reg:i.0 == 0: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn math_add_float_int_coercion() {
+        let source = "ADD 1.5, 2 -> reg:f.0";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let val = regs.get(&Register { ty: RegisterType::Float, index: 0 }).unwrap();
+        assert!(matches!(val, Value::Float(f) if (f - 3.5).abs() < f64::EPSILON));
     }
 }

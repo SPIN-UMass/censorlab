@@ -44,6 +44,9 @@ impl ProgramEnv {
             field_default_on_error,
         )
     }
+    /// Check whether the connection has finished (both FIN-ACKs seen for TCP).
+    /// Not currently called but retained as part of the connection lifecycle API.
+    #[allow(dead_code)]
     fn is_finished(&self) -> bool {
         self.inner.is_finished()
     }
@@ -140,6 +143,9 @@ impl ProgramEnvInner {
             Udp(env) => env.process(packet, program, registers, fields, field_default_on_error),
         }
     }
+    /// Check whether the connection has finished (both FIN-ACKs seen for TCP).
+    /// Not currently called but retained as part of the connection lifecycle API.
+    #[allow(dead_code)]
     fn is_finished(&self) -> bool {
         use ProgramEnvInner::*;
         match self {
@@ -342,11 +348,81 @@ mod udp {
     }
 }
 
-/// Used to measure a baseline
-struct ConnectionStats {
-    was_terminated: bool,
-    last_packet: u32,
-    total_packets: u32,
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::program::program::{Register, RegisterType, Value};
+
+    #[test]
+    fn registers_new_initializes_to_defaults() {
+        let regs = Registers::new(4, false);
+        for i in 0..4 {
+            let f = regs.get(&Register { ty: RegisterType::Float, index: i });
+            assert!(matches!(f, Some(Value::Float(v)) if v == 0.0));
+            let int = regs.get(&Register { ty: RegisterType::Int, index: i });
+            assert!(matches!(int, Some(Value::Int(0))));
+            let b = regs.get(&Register { ty: RegisterType::Bool, index: i });
+            assert!(matches!(b, Some(Value::Bool(false))));
+        }
+    }
+
+    #[test]
+    fn registers_get_set_float() {
+        let mut regs = Registers::new(4, false);
+        let reg = Register { ty: RegisterType::Float, index: 1 };
+        regs.set(&reg, &Value::Float(3.14)).unwrap();
+        let val = regs.get(&reg).unwrap();
+        assert!(matches!(val, Value::Float(f) if (f - 3.14).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn registers_get_set_int() {
+        let mut regs = Registers::new(4, false);
+        let reg = Register { ty: RegisterType::Int, index: 2 };
+        regs.set(&reg, &Value::Int(42)).unwrap();
+        assert!(matches!(regs.get(&reg), Some(Value::Int(42))));
+    }
+
+    #[test]
+    fn registers_get_set_bool() {
+        let mut regs = Registers::new(4, false);
+        let reg = Register { ty: RegisterType::Bool, index: 0 };
+        regs.set(&reg, &Value::Bool(true)).unwrap();
+        assert!(matches!(regs.get(&reg), Some(Value::Bool(true))));
+    }
+
+    #[test]
+    fn registers_set_wrong_type_strict() {
+        let mut regs = Registers::new(4, false);
+        let int_reg = Register { ty: RegisterType::Int, index: 0 };
+        let result = regs.set(&int_reg, &Value::Float(1.0));
+        assert!(matches!(result, Err(RegisterWriteError::InvalidType)));
+    }
+
+    #[test]
+    fn registers_set_wrong_type_relaxed() {
+        let mut regs = Registers::new(4, true);
+        let int_reg = Register { ty: RegisterType::Int, index: 0 };
+        // With relax_register_types=true, a Float value goes to the float bank
+        regs.set(&int_reg, &Value::Float(2.5)).unwrap();
+        let float_reg = Register { ty: RegisterType::Float, index: 0 };
+        assert!(matches!(regs.get(&float_reg), Some(Value::Float(f)) if (f - 2.5).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn registers_get_out_of_bounds() {
+        let regs = Registers::new(2, false);
+        let reg = Register { ty: RegisterType::Int, index: 10 };
+        assert!(regs.get(&reg).is_none());
+    }
+
+    #[test]
+    fn registers_set_out_of_bounds() {
+        let mut regs = Registers::new(2, false);
+        let reg = Register { ty: RegisterType::Int, index: 10 };
+        let result = regs.set(&reg, &Value::Int(1));
+        assert!(matches!(result, Err(RegisterWriteError::InvalidIndex)));
+    }
 }
 
 /// Aggregate stats from censorship

@@ -1,24 +1,30 @@
+mod filter;
 mod nfq;
 mod pcap;
 #[cfg(feature = "wire")]
 mod wire;
 
+use crate::censor::filter::{AllowBlockList, AllowList, BlockList, RecommendList};
 use crate::censor::nfq::NfqModeError;
 use crate::censor::pcap::PcapModeError;
 #[cfg(feature = "wire")]
 use crate::censor::wire::WireError;
 use crate::config::ethernet::MACAddress;
-use crate::config::{Config, List};
+use crate::config::Config;
 use crate::ipc::{ipc_thread, ModelThreadError};
 use crate::model::onnx::ModelLoadError;
 use crate::model::ModelThreadMessage;
 use crate::program::packet::Packet;
 use crate::transport::{TransportState, TransportStateInitError};
 use bitvec::prelude::*;
+#[cfg(feature = "wire")]
 use core::ops::{Index, IndexMut};
 use ort::Error as OrtError;
 use serde::{de, Deserialize, Deserializer};
-use smoltcp::phy::{Device, RawSocket};
+#[cfg(feature = "wire")]
+use smoltcp::phy::RawSocket;
+#[cfg(feature = "wire")]
+use smoltcp::phy::Device;
 use smoltcp::wire::Error as SmoltcpError;
 use smoltcp::wire::{
     ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol as EtherType, Icmpv4Packet,
@@ -28,20 +34,20 @@ use smoltcp::wire::{
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt;
-use std::hash::Hash;
 use std::io;
 use std::net::IpAddr;
 use std::path::PathBuf;
+#[cfg(feature = "wire")]
 use std::slice::SliceIndex;
 use std::str::FromStr;
 use std::sync::mpsc;
 use std::time::Instant;
 use thiserror::Error;
-use tokio::signal::unix::{signal, Signal, SignalKind};
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinError;
-use tracing::{debug, error, info, info_span, warn};
+use tracing::{debug, error, info_span, warn};
 
 /// Used for fast access to a list of every port for examples such as udp port filtering
 pub type PortVec = BitArr!(for 65536, in u64, Msb0);
@@ -100,12 +106,17 @@ pub struct Censor {
     /// TCP allow/blocklist for ports
     tcp_port_list: AllowBlockList<PortVec>,
     /// TCP allow/blocklist for ip-port pairs
-    tcp_ip_port_list: AllowBlockList<HashSet<String>>,
+    tcp_ip_port_list: AllowBlockList<HashSet<crate::config::IpPort>>,
     // UDP
-    /// UDP allow/blocklist for ports
+    /// UDP allow/blocklist for ports.
+    /// Loaded from config but not yet used in process_transport (see TODO.md).
+    #[allow(dead_code)]
     udp_port_list: AllowBlockList<PortVec>,
     /// UDP allow/blocklist for ip-port pairs
-    udp_ip_port_list: AllowBlockList<HashSet<String>>,
+    udp_ip_port_list: AllowBlockList<HashSet<crate::config::IpPort>>,
+    // Reset
+    /// Number of times to repeat TCP RST packets
+    reset_repeat: usize,
     // IPC
     /// Port to listen for model changes on
     ipc_port: u16,
@@ -180,17 +191,27 @@ impl Censor {
         tcp_decision_log_path: Option<PathBuf>,
         model_sender: mpsc::SyncSender<ModelThreadMessage>,
     ) -> Result<Self, CensorInitError> {
+        // Destructure config to move each field independently (avoids cloning models)
+        let Config {
+            execution,
+            ethernet,
+            arp,
+            ip,
+            icmp,
+            tcp,
+            udp,
+            models,
+        } = config;
+
         // Convert MAC allow/blocklist into hashsets
         let ethernet_allowlist =
-            AllowList::from(config.ethernet.allowlist.map(MACAddress::into).set());
+            AllowList::from(ethernet.allowlist.map(MACAddress::into).set());
         let ethernet_blocklist =
-            BlockList::from(config.ethernet.blocklist.map(MACAddress::into).set());
+            BlockList::from(ethernet.blocklist.map(MACAddress::into).set());
         // Combine into allow-blocklist
         let ethernet_list = AllowBlockList::new(ethernet_allowlist, ethernet_blocklist);
 
         // Split IP lists out into ipv4 and ipv6
-        // Create filtering functions
-        // TODO: split these out into a util file
         let ipv4_filter = |ip| {
             if let IpAddr::V4(ipv4) = ip {
                 Some(ipv4.into())
@@ -206,67 +227,70 @@ impl Censor {
             }
         };
         // Perform filtering (ipv4)
-        let ipv4_allowlist = AllowList::from(config.ip.allowlist.filter_map(ipv4_filter).set());
-        let ipv4_blocklist = BlockList::from(config.ip.blocklist.filter_map(ipv4_filter).set());
+        let ipv4_allowlist = AllowList::from(ip.allowlist.filter_map(ipv4_filter).set());
+        let ipv4_blocklist = BlockList::from(ip.blocklist.filter_map(ipv4_filter).set());
         // Combine allow and blocklist
         let ipv4_list = AllowBlockList::new(ipv4_allowlist, ipv4_blocklist);
         // Perform filtering (ipv6)
-        let ipv6_allowlist = AllowList::from(config.ip.allowlist.filter_map(ipv6_filter).set());
-        let ipv6_blocklist = BlockList::from(config.ip.blocklist.filter_map(ipv6_filter).set());
+        let ipv6_allowlist = AllowList::from(ip.allowlist.filter_map(ipv6_filter).set());
+        let ipv6_blocklist = BlockList::from(ip.blocklist.filter_map(ipv6_filter).set());
         // Combine allow and blocklist
         let ipv6_list = AllowBlockList::new(ipv6_allowlist, ipv6_blocklist);
 
         // Initialize bitvec for tcp port lists
-        let tcp_port_allowlist = AllowList::from(config.tcp.port_allowlist.bit_vec());
-        let tcp_port_blocklist = BlockList::from(config.tcp.port_blocklist.bit_vec());
+        let tcp_port_allowlist = AllowList::from(tcp.port_allowlist.bit_vec());
+        let tcp_port_blocklist = BlockList::from(tcp.port_blocklist.bit_vec());
         // Combine into 1 thing
         let tcp_port_list = AllowBlockList::new(tcp_port_allowlist, tcp_port_blocklist);
         // Initialize hashmaps for tcp ip-port lists
-        let tcp_ip_port_allowlist = AllowList::from(config.tcp.ip_port_allowlist.set());
-        let tcp_ip_port_blocklist = BlockList::from(config.tcp.ip_port_blocklist.set());
+        let tcp_ip_port_allowlist = AllowList::from(tcp.ip_port_allowlist.set());
+        let tcp_ip_port_blocklist = BlockList::from(tcp.ip_port_blocklist.set());
         // Combine into 1 thing
         let tcp_ip_port_list = AllowBlockList::new(tcp_ip_port_allowlist, tcp_ip_port_blocklist);
 
         // Initialize bitvec for udp port lists
-        let udp_port_allowlist = AllowList::from(config.udp.port_allowlist.bit_vec());
-        let udp_port_blocklist = BlockList::from(config.udp.port_blocklist.bit_vec());
+        let udp_port_allowlist = AllowList::from(udp.port_allowlist.bit_vec());
+        let udp_port_blocklist = BlockList::from(udp.port_blocklist.bit_vec());
         // Combine into 1 thing
         let udp_port_list = AllowBlockList::new(udp_port_allowlist, udp_port_blocklist);
         // Initialize hashmaps for udp ip-port lists
-        let udp_ip_port_allowlist = AllowList::from(config.udp.ip_port_allowlist.set());
-        let udp_ip_port_blocklist = BlockList::from(config.udp.ip_port_blocklist.set());
+        let udp_ip_port_allowlist = AllowList::from(udp.ip_port_allowlist.set());
+        let udp_ip_port_blocklist = BlockList::from(udp.ip_port_blocklist.set());
         // Combine into 1 thing
         let udp_ip_port_list = AllowBlockList::new(udp_ip_port_allowlist, udp_ip_port_blocklist);
 
         // Construct a control channel
         let (sender, receiver) = unbounded_channel();
+        // Save reset_repeat before moving execution config
+        let reset_repeat = execution.reset_repeat;
         // Start up our tcp state
         let transport_state = TransportState::new(
-            //TODO: dont clone
-            config.models.clone(),
+            models,
             tcp_decision_log_path,
-            config.execution,
+            execution,
             model_sender,
         )?;
         // Construct the censor object
         Ok(Censor {
             // Ethernet
             ethernet_list,
-            ethernet_unknown: config.ethernet.unknown,
+            ethernet_unknown: ethernet.unknown,
             // Arp
-            arp: config.arp,
+            arp,
             // IP
             ipv4_list,
             ipv6_list,
-            ip_unknown: config.ip.unknown,
+            ip_unknown: ip.unknown,
             // ICMP
-            icmp: config.icmp,
+            icmp,
             // TCP
             tcp_port_list,
             tcp_ip_port_list,
             // UDP
             udp_port_list,
             udp_ip_port_list,
+            // Reset
+            reset_repeat,
             //IPC
             ipc_port,
             sender,
@@ -280,9 +304,9 @@ impl Censor {
         while let Ok(message) = self.receiver.try_recv() {
             match message {
                 crate::ipc::Message::UpdateModel {
-                    scope,
-                    onnx_data,
-                    metadata,
+                    scope: _,
+                    onnx_data: _,
+                    metadata: _,
                 } => {
                     /*info!("Updating model");
                     let session = self
@@ -385,42 +409,43 @@ impl Censor {
         censor_ctx: &mut Context,
     ) -> Result<Action, SmoltcpError> {
         coz::progress!("process_frame_payload");
-        // Do full packet parsing out of the frame
-        // TODO: be a bit more lazy with parsing this
-        match Packet::from_ts_bytes(None, payload.as_ref(), ethertype) {
-            // If the packet successfully parsed
-            Ok(packet) => {
-                // Use ethertype
-                let mut action = match ethertype {
-                    EtherType::Ipv4 => self.process_ipv4(&payload, censor_ctx, packet),
-                    EtherType::Ipv6 => self.process_ipv6(&payload, censor_ctx, packet),
-                    EtherType::Arp => self.process_arp(&payload),
-                    EtherType::Unknown(_) => Ok(self.ethernet_unknown),
-                };
-                // Handle the delayer if relevant
-                match action? {
-                    Action::Delay(instant) => {
-                        if let Context::Nfq(nfq::Context { delayer, .. }) = censor_ctx {
-                            delayer
-                                .delay_packet(payload.as_ref().to_vec(), instant)
-                                .unwrap();
-                            // We consider the packet "dropped" here
-                            Ok(Action::Drop)
-                        } else {
-                            // If we couldnt delay the packet, just pass it
-                            Ok(Action::None)
-                        }
+        // For non-IP ethertypes, skip full packet parsing
+        let action = match ethertype {
+            EtherType::Arp => return self.process_arp(&payload),
+            EtherType::Unknown(_) => return Ok(self.ethernet_unknown),
+            // IP packets need full parsing for transport-layer processing
+            EtherType::Ipv4 | EtherType::Ipv6 => {
+                match Packet::from_ts_bytes(None, payload.as_ref(), ethertype) {
+                    Ok(packet) => match ethertype {
+                        EtherType::Ipv4 => self.process_ipv4(&payload, censor_ctx, packet),
+                        EtherType::Ipv6 => self.process_ipv6(&payload, censor_ctx, packet),
+                        _ => unreachable!(),
+                    },
+                    // Unparseable packets are expected (e.g. truncated frames) and
+                    // should not block traffic.
+                    Err(err) => {
+                        warn!("Error parsing packet, allowing through: {:?}", err);
+                        return Ok(Default::default());
                     }
-                    // Return any other actions
-                    action => Ok(action),
                 }
             }
-            // If it did not, log the error
-            Err(err) => {
-                debug!("Error parsing packet: {:?}", err);
-                //TODO: pass the error
-                Ok(Default::default())
+        };
+        // Handle the delayer if relevant
+        match action? {
+            Action::Delay(instant) => {
+                if let Context::Nfq(nfq::Context { delayer, .. }) = censor_ctx {
+                    delayer
+                        .delay_packet(payload.as_ref().to_vec(), instant)
+                        .unwrap();
+                    // We consider the packet "dropped" here
+                    Ok(Action::Drop)
+                } else {
+                    // If we couldnt delay the packet, just pass it
+                    Ok(Action::None)
+                }
             }
+            // Return any other actions
+            action => Ok(action),
         }
     }
     /// Processes the raw packet based on its metadata and our internal state
@@ -446,8 +471,7 @@ impl Censor {
             Some(Action::None) | None => Ok(self
                 .process_frame_payload(ethertype, payload, censor_ctx)?
                 .add_mac(frame.src_addr().0, frame.dst_addr().0)),
-            // Reset is not valid action
-            // TODO: make unrepresentable
+            // Reset is not valid for Ethernet layer (see TODO.md: make unrepresentable)
             Some(Action::Reset { .. }) => {
                 warn!("Reset is not a valid action for ethernet allow/blocklist. Dropping instead");
                 Ok(Action::Drop)
@@ -563,7 +587,7 @@ impl Censor {
     fn process_ip<T: AsRef<[u8]>>(
         &mut self,
         ips: IpPair,
-        ipid: Option<u16>,
+        _ipid: Option<u16>,
         next_header: IpProtocol,
         direction: Direction,
         data: T,
@@ -646,25 +670,49 @@ impl Censor {
             Some(action) => Ok(action),
         }
     }
-    /// Blocks an IP
-    ///
-    /// # Parameters
-    /// * `ip` - The IP to block
-    fn block_ip(&mut self, ip: IpAddress) {
-        match ip {
-            IpAddress::Ipv4(ipv4) => {
-                self.ipv4_list.block.store.insert(ipv4);
-            }
-            IpAddress::Ipv6(ipv6) => {
-                self.ipv6_list.block.store.insert(ipv6);
-            }
-        };
-    }
 }
 impl fmt::Display for Censor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "Censor Parameters:")?;
-        //TODO: rewrite this
+
+        // Ethernet
+        let eth_allow = self.ethernet_list.allow.store.len();
+        let eth_block = self.ethernet_list.block.store.len();
+        if eth_allow > 0 || eth_block > 0 {
+            writeln!(f, "  Ethernet: {eth_allow} allowed, {eth_block} blocked")?;
+        }
+        writeln!(f, "  Ethernet unknown ethertype: {}", self.ethernet_unknown)?;
+
+        // IP
+        let ipv4_allow = self.ipv4_list.allow.store.len();
+        let ipv4_block = self.ipv4_list.block.store.len();
+        let ipv6_allow = self.ipv6_list.allow.store.len();
+        let ipv6_block = self.ipv6_list.block.store.len();
+        if ipv4_allow > 0 || ipv4_block > 0 {
+            writeln!(f, "  IPv4: {ipv4_allow} allowed, {ipv4_block} blocked")?;
+        }
+        if ipv6_allow > 0 || ipv6_block > 0 {
+            writeln!(f, "  IPv6: {ipv6_allow} allowed, {ipv6_block} blocked")?;
+        }
+        writeln!(f, "  IP unknown protocol: {}", self.ip_unknown)?;
+
+        // ICMP
+        writeln!(f, "  ICMP: {}", self.icmp.action)?;
+
+        // TCP
+        let tcp_ip_port_allow = self.tcp_ip_port_list.allow.store.len();
+        let tcp_ip_port_block = self.tcp_ip_port_list.block.store.len();
+        if tcp_ip_port_allow > 0 || tcp_ip_port_block > 0 {
+            writeln!(f, "  TCP ip:port: {tcp_ip_port_allow} allowed, {tcp_ip_port_block} blocked")?;
+        }
+
+        // UDP
+        let udp_ip_port_allow = self.udp_ip_port_list.allow.store.len();
+        let udp_ip_port_block = self.udp_ip_port_list.block.store.len();
+        if udp_ip_port_allow > 0 || udp_ip_port_block > 0 {
+            writeln!(f, "  UDP ip:port: {udp_ip_port_allow} allowed, {udp_ip_port_block} blocked")?;
+        }
+
         Ok(())
     }
 }
@@ -718,8 +766,11 @@ pub enum Direction {
     Unknown,
 }
 impl Direction {
-    // TODO: maybe these structs can be a config file
-    /// Which direction should be converted to -1
+    /// Direction-to-sign mapping used for numeric conversion (e.g. ML features).
+    ///
+    /// Convention: WanToClient = -1, Unknown = 0, ClientToWan = 1.
+    /// This matches the sign convention used in paper experiments and training data.
+    /// If a different mapping is needed, these constants can be adjusted here.
     pub const NEGATIVE_ONE: Direction = Direction::WanToClient;
     /// Which direction should be converted to 0
     pub const ZERO: Direction = Direction::Unknown;
@@ -745,11 +796,13 @@ impl From<Direction> for f64 {
     }
 }
 
+#[cfg(feature = "wire")]
 pub struct RetryBuffer {
     buf: Vec<u8>,
     size: Option<usize>,
 }
 
+#[cfg(feature = "wire")]
 impl RetryBuffer {
     fn for_interface(interface: &RawSocket) -> Self {
         // Get iface MTU
@@ -768,6 +821,7 @@ impl RetryBuffer {
     }
 }
 
+#[cfg(feature = "wire")]
 impl<T> Index<T> for RetryBuffer
 where
     T: SliceIndex<[u8]>,
@@ -777,123 +831,13 @@ where
         self.buf.index(index)
     }
 }
+#[cfg(feature = "wire")]
 impl<T> IndexMut<T> for RetryBuffer
 where
     T: SliceIndex<[u8]>,
 {
     fn index_mut(&mut self, index: T) -> &mut Self::Output {
         self.buf.index_mut(index)
-    }
-}
-
-/// Used to abstract over different kinds of store (hashset, bit vec)
-pub trait Contains<T> {
-    fn contains(&self, value: &T) -> bool;
-}
-impl<T> Contains<T> for HashSet<T>
-where
-    T: Eq + Hash,
-{
-    fn contains(&self, value: &T) -> bool {
-        HashSet::contains(self, value)
-    }
-}
-impl Contains<u16> for PortVec {
-    fn contains(&self, value: &u16) -> bool {
-        self.get(usize::from(*value)).as_deref() == Some(&true)
-    }
-}
-
-/// Trait that can be shared between both an allow and blocklist
-pub trait RecommendList<T, Store>
-where
-    Store: Contains<T>,
-{
-    /// Recommends an action based on some value
-    fn recommend(&self, value: &T) -> Option<Action>;
-    /// Recommends an action for 2 different values
-    fn recommend_either(&self, val_1: &T, val_2: &T) -> Option<Action> {
-        match self.recommend(val_1) {
-            Some(Action::None) | None => self.recommend(val_2),
-            Some(action) => Some(action),
-        }
-    }
-}
-
-/// A blocklist
-pub struct BlockList<Store> {
-    pub store: Store,
-    pub in_blocklist: Action,
-}
-impl<Store> From<List<Store>> for BlockList<Store> {
-    fn from(list: List<Store>) -> Self {
-        Self {
-            store: list.list,
-            in_blocklist: list.action,
-        }
-    }
-}
-impl<T, Store> RecommendList<T, Store> for BlockList<Store>
-where
-    Store: Contains<T>,
-{
-    fn recommend(&self, value: &T) -> Option<Action> {
-        if self.store.contains(value) {
-            Some(self.in_blocklist)
-        } else {
-            None
-        }
-    }
-}
-/// An allowlist
-pub struct AllowList<Store> {
-    store: Store,
-    not_in_allowlist: Action,
-}
-impl<Store> From<List<Store>> for AllowList<Store> {
-    fn from(list: List<Store>) -> Self {
-        Self {
-            store: list.list,
-            not_in_allowlist: list.action,
-        }
-    }
-}
-impl<T, Store> RecommendList<T, Store> for AllowList<Store>
-where
-    Store: Contains<T>,
-{
-    fn recommend(&self, value: &T) -> Option<Action> {
-        if self.store.contains(value) {
-            None
-        } else {
-            Some(self.not_in_allowlist)
-        }
-    }
-}
-/// Combined allow+blocklist that performs each in order
-pub struct AllowBlockList<T> {
-    /// Allowlist
-    allow: AllowList<T>,
-    /// Blocklist
-    block: BlockList<T>,
-}
-impl<T> AllowBlockList<T> {
-    /// Constructor
-    fn new(allow: AllowList<T>, block: BlockList<T>) -> Self {
-        Self { allow, block }
-    }
-}
-impl<T, Store> RecommendList<T, Store> for AllowBlockList<Store>
-where
-    Store: Contains<T>,
-{
-    /// Check both allow and blocklist and perform actions
-    fn recommend(&self, value: &T) -> Option<Action> {
-        // First check the blocklist
-        match self.block.recommend(value) {
-            Some(Action::None) | None => self.allow.recommend(value),
-            Some(action) => Some(action),
-        }
     }
 }
 
@@ -934,7 +878,7 @@ impl Ord for Action {
 }
 
 impl Action {
-    fn is_reset(&self) -> bool {
+    pub fn is_reset(&self) -> bool {
         matches!(self, Action::Reset { .. })
     }
     pub fn enrich(
@@ -1115,4 +1059,205 @@ pub enum SignalHandlerThreadError {
     Init(#[from] io::Error),
     #[error("Error sending shutdown to ipc")]
     Ipc(#[from] SendError<crate::ipc::Message>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::List;
+    use std::collections::HashSet;
+    use std::str::FromStr;
+
+    // --- Action FromStr tests ---
+
+    #[test]
+    fn action_from_str_none() {
+        let action = Action::from_str("none").unwrap();
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn action_from_str_ignore() {
+        let action = Action::from_str("ignore").unwrap();
+        assert_eq!(action, Action::Ignore);
+    }
+
+    #[test]
+    fn action_from_str_drop() {
+        let action = Action::from_str("drop").unwrap();
+        assert_eq!(action, Action::Drop);
+    }
+
+    #[test]
+    fn action_from_str_reset() {
+        let action = Action::from_str("reset").unwrap();
+        assert!(action.is_reset());
+    }
+
+    #[test]
+    fn action_from_str_case_insensitive() {
+        let action = Action::from_str("NONE").unwrap();
+        assert_eq!(action, Action::None);
+        let action = Action::from_str("Drop").unwrap();
+        assert_eq!(action, Action::Drop);
+    }
+
+    #[test]
+    fn action_from_str_invalid() {
+        let result = Action::from_str("invalid_action");
+        assert!(result.is_err());
+    }
+
+    // --- Action Display tests ---
+
+    #[test]
+    fn action_display_none() {
+        assert_eq!(format!("{}", Action::None), "continue processing");
+    }
+
+    #[test]
+    fn action_display_ignore() {
+        assert_eq!(
+            format!("{}", Action::Ignore),
+            "ignore without processing"
+        );
+    }
+
+    #[test]
+    fn action_display_drop() {
+        assert_eq!(format!("{}", Action::Drop), "drop without processing");
+    }
+
+    #[test]
+    fn action_display_reset() {
+        let action = Action::from_str("reset").unwrap();
+        let display = format!("{}", action);
+        assert!(display.contains("RST"));
+    }
+
+    // --- Direction tests ---
+
+    #[test]
+    fn direction_to_f64_wan_to_client() {
+        let val: f64 = Direction::WanToClient.into();
+        assert_eq!(val, -1.0);
+    }
+
+    #[test]
+    fn direction_to_f64_client_to_wan() {
+        let val: f64 = Direction::ClientToWan.into();
+        assert_eq!(val, 1.0);
+    }
+
+    #[test]
+    fn direction_to_f64_unknown() {
+        let val: f64 = Direction::Unknown.into();
+        assert_eq!(val, 0.0);
+    }
+
+    #[test]
+    fn direction_display_wan_to_client() {
+        assert_eq!(format!("{}", Direction::WanToClient), "wan->client");
+    }
+
+    #[test]
+    fn direction_display_client_to_wan() {
+        assert_eq!(format!("{}", Direction::ClientToWan), "client->wan");
+    }
+
+    #[test]
+    fn direction_display_unknown() {
+        assert_eq!(format!("{}", Direction::Unknown), "unknown");
+    }
+
+    // --- BlockList tests ---
+
+    #[test]
+    fn blocklist_recommend_item_in_list() {
+        let store: HashSet<u16> = vec![80, 443].into_iter().collect();
+        let blocklist = BlockList {
+            store,
+            in_blocklist: Action::Drop,
+        };
+        assert_eq!(blocklist.recommend(&80), Some(Action::Drop));
+        assert_eq!(blocklist.recommend(&443), Some(Action::Drop));
+    }
+
+    #[test]
+    fn blocklist_recommend_item_not_in_list() {
+        let store: HashSet<u16> = vec![80, 443].into_iter().collect();
+        let blocklist = BlockList {
+            store,
+            in_blocklist: Action::Drop,
+        };
+        assert_eq!(blocklist.recommend(&22), None);
+    }
+
+    // --- AllowList tests ---
+
+    #[test]
+    fn allowlist_recommend_item_in_list() {
+        let store: HashSet<u16> = vec![80, 443].into_iter().collect();
+        let list = List {
+            list: store,
+            action: Action::Drop,
+        };
+        let allowlist = AllowList::from(list);
+        // Item in allowlist => no action (allowed)
+        assert_eq!(allowlist.recommend(&80), None);
+    }
+
+    #[test]
+    fn allowlist_recommend_item_not_in_list() {
+        let store: HashSet<u16> = vec![80, 443].into_iter().collect();
+        let list = List {
+            list: store,
+            action: Action::Drop,
+        };
+        let allowlist = AllowList::from(list);
+        // Item NOT in allowlist => action taken
+        assert_eq!(allowlist.recommend(&22), Some(Action::Drop));
+    }
+
+    // --- AllowBlockList tests ---
+
+    #[test]
+    fn allowblocklist_blocklist_takes_priority() {
+        // Blocklist blocks port 80
+        let block_store: HashSet<u16> = vec![80].into_iter().collect();
+        let blocklist = BlockList {
+            store: block_store,
+            in_blocklist: Action::Drop,
+        };
+        // Allowlist allows port 80 (but blocklist should win)
+        let allow_store: HashSet<u16> = vec![80, 443].into_iter().collect();
+        let allow_list = List {
+            list: allow_store,
+            action: Action::Ignore,
+        };
+        let allowlist = AllowList::from(allow_list);
+        let abl = AllowBlockList::new(allowlist, blocklist);
+        // Port 80 is in blocklist => Drop
+        assert_eq!(abl.recommend(&80), Some(Action::Drop));
+    }
+
+    #[test]
+    fn allowblocklist_allowlist_checked_when_not_blocked() {
+        let block_store: HashSet<u16> = vec![80].into_iter().collect();
+        let blocklist = BlockList {
+            store: block_store,
+            in_blocklist: Action::Drop,
+        };
+        let allow_store: HashSet<u16> = vec![443].into_iter().collect();
+        let allow_list = List {
+            list: allow_store,
+            action: Action::Ignore,
+        };
+        let allowlist = AllowList::from(allow_list);
+        let abl = AllowBlockList::new(allowlist, blocklist);
+        // Port 443 is allowed (in allowlist, not in blocklist) => None
+        assert_eq!(abl.recommend(&443), None);
+        // Port 22 is not in allowlist and not in blocklist => Ignore (allowlist action)
+        assert_eq!(abl.recommend(&22), Some(Action::Ignore));
+    }
 }

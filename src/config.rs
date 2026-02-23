@@ -43,6 +43,8 @@ pub enum ConfigLoadError {
     NoParent,
     #[error("Failed to parse config file")]
     Parse(#[from] toml::de::Error),
+    #[error("Invalid config: {0}")]
+    Validation(String),
 }
 impl Config {
     /// Load the config from a file
@@ -60,7 +62,39 @@ impl Config {
         for (_, model) in config.models.iter_mut() {
             model.path = parent.join(&model.path);
         }
+        // Validate the config
+        config.validate()?;
         Ok(config)
+    }
+    /// Validate config invariants that can't be enforced at the type level.
+    fn validate(&self) -> Result<(), ConfigLoadError> {
+        // Reset is only valid at the transport layer (TCP); reject it for ethernet/ARP/IP/ICMP
+        if self.ethernet.unknown.is_reset() {
+            return Err(ConfigLoadError::Validation(
+                "\"Reset\" is not a valid action for ethernet.unknown (only valid for TCP)".into(),
+            ));
+        }
+        if self.ethernet.allowlist.action.is_reset() {
+            return Err(ConfigLoadError::Validation(
+                "\"Reset\" is not a valid action for ethernet.allowlist (only valid for TCP)".into(),
+            ));
+        }
+        if self.ethernet.blocklist.action.is_reset() {
+            return Err(ConfigLoadError::Validation(
+                "\"Reset\" is not a valid action for ethernet.blocklist (only valid for TCP)".into(),
+            ));
+        }
+        if self.arp.action.is_reset() {
+            return Err(ConfigLoadError::Validation(
+                "\"Reset\" is not a valid action for ARP (only valid for TCP)".into(),
+            ));
+        }
+        if self.icmp.action.is_reset() {
+            return Err(ConfigLoadError::Validation(
+                "\"Reset\" is not a valid action for ICMP (only valid for TCP)".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -139,6 +173,19 @@ pub mod execution {
         ///
         /// RELATIVE to censor.toml
         pub script: Option<PathBuf>,
+        /// Hash seed for Python VM reproducibility (default: 1337)
+        #[serde(default = "default_hash_seed")]
+        pub hash_seed: u32,
+        /// Number of times to repeat sending a TCP RST packet (default: 5)
+        #[serde(default = "default_reset_repeat")]
+        pub reset_repeat: usize,
+    }
+
+    fn default_hash_seed() -> u32 {
+        1337
+    }
+    fn default_reset_repeat() -> usize {
+        5
     }
 }
 pub mod ethernet {
@@ -225,9 +272,49 @@ pub mod icmp {
     }
 }
 
+/// An IP address + port pair that deserializes from "ip:port" strings.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct IpPort(pub std::net::IpAddr, pub u16);
+
+impl std::fmt::Display for IpPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}:{}", self.0, self.1)
+    }
+}
+
+impl<'de> Deserialize<'de> for IpPort {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        // Support both "ip:port" and "[ipv6]:port"
+        let (ip_str, port_str) = if s.starts_with('[') {
+            // IPv6: "[::1]:80"
+            let bracket_end = s.find(']').ok_or_else(|| {
+                serde::de::Error::custom(format!("invalid ip:port pair (missing ']'): {s}"))
+            })?;
+            let ip_part = &s[1..bracket_end];
+            let port_part = s.get(bracket_end + 2..).ok_or_else(|| {
+                serde::de::Error::custom(format!("invalid ip:port pair (missing port after ']:'): {s}"))
+            })?;
+            (ip_part, port_part)
+        } else {
+            // IPv4: "1.2.3.4:80"
+            let colon = s.rfind(':').ok_or_else(|| {
+                serde::de::Error::custom(format!("invalid ip:port pair (missing ':'): {s}"))
+            })?;
+            (&s[..colon], &s[colon + 1..])
+        };
+        let ip: std::net::IpAddr = ip_str.parse().map_err(serde::de::Error::custom)?;
+        let port: u16 = port_str.parse().map_err(serde::de::Error::custom)?;
+        Ok(IpPort(ip, port))
+    }
+}
+
 /// Config related to TCP  handling
 pub mod tcp {
-    use super::List;
+    use super::{IpPort, List};
     use serde::Deserialize;
 
     #[derive(Default, Deserialize)]
@@ -240,18 +327,16 @@ pub mod tcp {
         /// Blocklist of ports
         pub port_blocklist: List<Vec<u16>>,
         /// Allowlist of ip-port pairs
-        // TODO: have these auto deserialize into (IpAddr, u16)
-        pub ip_port_allowlist: List<Vec<String>>,
+        pub ip_port_allowlist: List<Vec<IpPort>>,
         #[serde(default)]
         /// Blocklist of ip-port pairs
-        // TODO: have these auto deserialize into (IpAddr, u16)
-        pub ip_port_blocklist: List<Vec<String>>,
+        pub ip_port_blocklist: List<Vec<IpPort>>,
     }
 }
 
 /// Config related to UDP  handling
 pub mod udp {
-    use super::List;
+    use super::{IpPort, List};
     use serde::Deserialize;
 
     #[derive(Default, Deserialize)]
@@ -264,12 +349,10 @@ pub mod udp {
         /// Blocklist of ports
         pub port_blocklist: List<Vec<u16>>,
         /// Allowlist of ip-port pairs
-        // TODO: have these auto deserialize into (IpAddr, u16)
-        pub ip_port_allowlist: List<Vec<String>>,
+        pub ip_port_allowlist: List<Vec<IpPort>>,
         #[serde(default)]
         /// Blocklist of ip-port pairs
-        // TODO: have these auto deserialize into (IpAddr, u16)
-        pub ip_port_blocklist: List<Vec<String>>,
+        pub ip_port_blocklist: List<Vec<IpPort>>,
     }
 }
 
@@ -283,5 +366,234 @@ pub mod model {
     pub struct Model {
         /// Path to the model's ONNX file
         pub path: PathBuf,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::censor::Action;
+
+    #[test]
+    fn deserialize_minimal_config() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.models.is_empty());
+    }
+
+    #[test]
+    fn deserialize_with_ip_blocklist() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["192.168.1.1"]
+action = "Drop"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.ip.blocklist.list.len(), 1);
+        assert_eq!(config.ip.blocklist.action, Action::Drop);
+    }
+
+    #[test]
+    fn deserialize_with_tcp_port_lists() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.port_blocklist]
+list = [80, 443]
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.tcp.port_blocklist.list.len(), 2);
+        assert!(config.tcp.port_blocklist.list.contains(&80));
+        assert!(config.tcp.port_blocklist.list.contains(&443));
+    }
+
+    /// Helper to deserialize an Action from a TOML value string
+    fn action_from_toml(s: &str) -> Action {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            action: Action,
+        }
+        let toml_str = format!("action = \"{}\"", s);
+        let w: Wrapper = toml::from_str(&toml_str).unwrap();
+        w.action
+    }
+
+    #[test]
+    fn action_deserialize_none() {
+        let action = action_from_toml("none");
+        assert_eq!(action, Action::None);
+    }
+
+    #[test]
+    fn action_deserialize_ignore() {
+        let action = action_from_toml("ignore");
+        assert_eq!(action, Action::Ignore);
+    }
+
+    #[test]
+    fn action_deserialize_drop() {
+        let action = action_from_toml("drop");
+        assert_eq!(action, Action::Drop);
+    }
+
+    #[test]
+    fn action_deserialize_reset() {
+        let action = action_from_toml("reset");
+        assert!(matches!(action, Action::Reset { .. }));
+    }
+
+    #[test]
+    fn default_config() {
+        let toml_str = r#"
+[execution]
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.ip.blocklist.action, Action::None);
+        assert!(config.ip.blocklist.list.is_empty());
+        assert!(config.tcp.port_blocklist.list.is_empty());
+        assert!(config.models.is_empty());
+    }
+
+    #[test]
+    fn list_map_operation() {
+        let list: List<Vec<u16>> = List {
+            list: vec![1, 2, 3],
+            action: Action::Drop,
+        };
+        let mapped = list.map(|x| x * 2);
+        assert_eq!(mapped.list, vec![2, 4, 6]);
+        assert_eq!(mapped.action, Action::Drop);
+    }
+
+    #[test]
+    fn list_set_operation() {
+        let list: List<Vec<u16>> = List {
+            list: vec![80, 443, 80],
+            action: Action::Ignore,
+        };
+        let set_list = list.set();
+        assert_eq!(set_list.list.len(), 2);
+        assert!(set_list.list.contains(&80));
+        assert!(set_list.list.contains(&443));
+        assert_eq!(set_list.action, Action::Ignore);
+    }
+
+    #[test]
+    fn list_bit_vec_for_ports() {
+        let list: List<Vec<u16>> = List {
+            list: vec![80, 443, 8080],
+            action: Action::Drop,
+        };
+        let bv = list.bit_vec();
+        assert_eq!(*bv.list.get(80).unwrap(), true);
+        assert_eq!(*bv.list.get(443).unwrap(), true);
+        assert_eq!(*bv.list.get(8080).unwrap(), true);
+        assert_eq!(*bv.list.get(22).unwrap(), false);
+        assert_eq!(bv.action, Action::Drop);
+    }
+
+    #[test]
+    fn validate_rejects_reset_on_ethernet_blocklist() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[ethernet.blocklist]
+list = []
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("ethernet.blocklist"), "Error should mention ethernet.blocklist: {err_msg}");
+    }
+
+    #[test]
+    fn validate_rejects_reset_on_arp() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[arp]
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_allows_reset_on_tcp() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.port_blocklist]
+list = [80]
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn ip_port_deserialize_ipv4() {
+        #[derive(Deserialize)]
+        struct W {
+            pair: super::IpPort,
+        }
+        let w: W = toml::from_str("pair = \"192.168.1.1:80\"").unwrap();
+        assert_eq!(w.pair.0, std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)));
+        assert_eq!(w.pair.1, 80);
+    }
+
+    #[test]
+    fn ip_port_deserialize_ipv6() {
+        #[derive(Deserialize)]
+        struct W {
+            pair: super::IpPort,
+        }
+        let w: W = toml::from_str("pair = \"[::1]:443\"").unwrap();
+        assert_eq!(w.pair.0, std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+        assert_eq!(w.pair.1, 443);
+    }
+
+    #[test]
+    fn ip_port_deserialize_invalid() {
+        #[derive(Deserialize)]
+        struct W {
+            pair: super::IpPort,
+        }
+        assert!(toml::from_str::<W>("pair = \"not-an-ip\"").is_err());
+        assert!(toml::from_str::<W>("pair = \"192.168.1.1\"").is_err()); // missing port
+    }
+
+    #[test]
+    fn deserialize_tcp_ip_port_list() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = ["10.0.0.1:80", "10.0.0.2:443"] }
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.tcp.ip_port_allowlist.list.len(), 2);
+        assert_eq!(config.tcp.ip_port_allowlist.list[0].1, 80);
+        assert_eq!(config.tcp.ip_port_allowlist.list[1].1, 443);
     }
 }

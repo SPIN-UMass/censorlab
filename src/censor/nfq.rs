@@ -3,7 +3,6 @@ use crate::arp::ArpCache;
 use crate::censor::{HandleIpcError, IpPair};
 use crate::watermark::Delayer;
 use clap::Parser;
-use core::task::Poll;
 use mac_address::MacAddressError;
 use nfq::{Queue, Verdict};
 use ort::Error as OrtError;
@@ -17,7 +16,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr};
 use thiserror::Error;
 use tokio::task::JoinError;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 /// Default IPTables table
 const IPTABLES_TABLE_DEFAULT: &str = "raw";
@@ -46,10 +45,6 @@ pub struct Args {
     pub iptables: IpTablesArgs,
     /// Interface to send packets to (defaults to first interface that can send AF_INET packets
     pub interface: Option<String>,
-    /// Number of times to send a reset
-    /// TODO: move this to the config file
-    #[clap(long, default_value_t = 5)]
-    pub reset_repeat: usize,
 }
 /// IPTables data
 #[derive(Clone, Debug, Parser)]
@@ -69,6 +64,9 @@ pub struct IpTablesArgs {
     /// Which NFQUEUE queue number for outbound packets
     #[clap(long, default_value_t = 1)]
     pub queue_num_out: u16,
+    /// Force iptables rule insertion even if conflicting NFQUEUE rules are found
+    #[clap(long = "force-iptables")]
+    pub force: bool,
 }
 impl IpTablesArgs {
     fn rule_inbound(&self) -> IpTablesRule {
@@ -120,7 +118,7 @@ impl IpTablesRule {
     ///
     /// NOTE: upon dropping the object produced by this function
     /// its Drop implementation will attempt to remove the rule
-    fn activate(&self, is_ipv6: bool) -> Result<IpTablesRuleActivated, IpTablesError> {
+    fn activate(&self, is_ipv6: bool, force: bool) -> Result<IpTablesRuleActivated, IpTablesError> {
         // Get a handle on iptables using the given ipv6 preferences
         let iptables = iptables::new(is_ipv6)?;
         // Start with sanity checks: does the chain exist?
@@ -144,23 +142,23 @@ impl IpTablesRule {
             );
             iptables.delete_all(&self.table, &self.chain, rule)?;
         }
-        // TODO: look for any other rules that intercept the queue we are using
-        // FIXME: the fllowing section is commented, as it just looks for anything
-        // using nfqueue
-        /*
-        // Scan through the table again, this time for NFQ rules that
-        // may interfere with censorlab
+        // Scan for other NFQUEUE rules using the same queue number that
+        // don't belong to CensorLab (identified by our comment marker)
+        let queue_num_str = format!("--queue-num {}", self.queue_num);
         let mut conflicting_rules = false;
-        for rule in iptables.list(&self.table, &self.chain)? {
-            if rule.contains("NFQUEUE") || rule.contains("--queue-num") {
-                //TODO: add override
-                error!("Found potentially conflicting rule: ({rule}). Please remove before using CensorLab");
-                conflicting_rules = true;
+        for existing_rule in iptables.list(&self.table, &self.chain)? {
+            if existing_rule.contains(&queue_num_str) && !existing_rule.contains(IPTABLES_COMMENT) {
+                if force {
+                    warn!("Found potentially conflicting rule: ({existing_rule}), continuing due to --force-iptables");
+                } else {
+                    error!("Found potentially conflicting rule: ({existing_rule}). Use --force-iptables to override");
+                    conflicting_rules = true;
+                }
             }
         }
         if conflicting_rules {
             return Err(IpTablesError::IpTablesConflictingRule);
-        }*/
+        }
         // Finally, add the NFQ rule
         warn!(
             "Adding the rule: ({self}). \
@@ -170,8 +168,9 @@ impl IpTablesRule {
         );
         iptables.append_unique(&self.table, &self.chain, rule)?;
 
-        // Wrap as an activated rule
+        // Wrap as an activated rule, caching the rule string for drop
         Ok(IpTablesRuleActivated {
+            rule_string: self.rule_string(),
             rule: self.clone(),
             iptables,
         })
@@ -193,6 +192,8 @@ pub enum IpTablesError {
 struct IpTablesRuleActivated {
     /// The rule that has been activated
     rule: IpTablesRule,
+    /// Cached rule string for use in drop
+    rule_string: String,
     /// The iptables handle (may be different for ipv6 vs ipv4
     iptables: iptables::IPTables,
 }
@@ -201,9 +202,7 @@ impl Drop for IpTablesRuleActivated {
     /// This function is responsible for removing the
     /// rule from iptables upon drop
     fn drop(&mut self) {
-        // Regenerate the rule string
-        // TODO: i know this is dumb but is it worth it to cache this
-        let rule = &(self.rule.rule_string());
+        let rule = &self.rule_string;
         // Log what is happening
         info!(
             "The iptables({}) rule ({}) will now be removed, including any duplicates.",
@@ -219,10 +218,14 @@ impl Drop for IpTablesRuleActivated {
         }
     }
 }
-/// Context for the pcap censor
+/// Context for the NFQ censor, providing network identity and packet delay support.
 pub struct Context {
+    /// Stored for potential future use in RST packet construction.
+    #[allow(dead_code)]
     pub client_mac: EthernetAddress,
     pub client_ip: IpAddress,
+    /// Stored for potential future use in direction-less traffic handling.
+    #[allow(dead_code)]
     pub no_dir_action: Action,
     /// Module for delaying packets
     pub delayer: Delayer,
@@ -267,14 +270,12 @@ impl Censor {
         // Initialize an arp cache. This is used for resolving IPs to arp
         let mut arp_cache = ArpCache::default();
         // Iterate over interfaces, and store the client mac/ip for our preferred interface
-        //TODO: audit use of get_if_addrs
-        for system_if in get_if_addrs::get_if_addrs().map_err(NfqModeError::Interface)? {
+        for system_if in if_addrs::get_if_addrs().map_err(NfqModeError::Interface)? {
             // Skip loopback
             if system_if.is_loopback() {
                 continue;
             }
             // Get the mac address of the interface
-            // TODO: audit use of mac_address
             if let Some(mac) = mac_address::mac_address_by_name(&system_if.name)? {
                 let mac = EthernetAddress(mac.bytes());
                 // Store that info in the arp cache
@@ -293,8 +294,7 @@ impl Censor {
         let mut interface = RawSocket::new(&interface_name, Medium::Ethernet)
             .map_err(NfqModeError::RawSocketOpen)?;
         info!("Opened raw socket for {}", interface_name);
-        //TODO: configurable parameters
-        // Create our context. This will basically never change
+        // Create our NFQ context
         let mut context_nfq = Context {
             client_mac,
             client_ip,
@@ -319,19 +319,30 @@ impl Censor {
         // Create inbound and outbound iptables rules
         let rule_in = args.iptables.rule_inbound();
         let rule_out = args.iptables.rule_outbound();
-        // Activate the iptables rules for both IPV4 and IPV6
+        // Activate the iptables rules for both IPv4 and IPv6.
         // NOTE: In this section, iptables rules are initialized that will
-        //       disrupt connectivity of the system, until we begin processing packets
-        // TODO: allow ipv6 to fail if ipv4 is present and vice versa
-        // Upon drop (e.g. if this function has an error) the rules will be removed
-        #[allow(unused)]
-        let rule_in_ipv4 = rule_in.activate(false);
-        #[allow(unused)]
-        let rule_in_ipv6 = rule_in.activate(true);
-        #[allow(unused)]
-        let rule_out_ipv4 = rule_out.activate(false);
-        #[allow(unused)]
-        let rule_out_ipv6 = rule_out.activate(true);
+        //       disrupt connectivity of the system, until we begin processing packets.
+        // Upon drop (e.g. if this function has an error) the rules will be removed.
+        // At least one of IPv4/IPv6 must succeed per direction.
+        let force = args.iptables.force;
+        // Activate rules; at least one of IPv4/IPv6 must succeed per direction.
+        // Keep activated rules alive so their Drop impls clean up on exit.
+        let rule_in_ipv4 = rule_in.activate(false, force);
+        let rule_in_ipv6 = rule_in.activate(true, force);
+        match (&rule_in_ipv4, &rule_in_ipv6) {
+            (Err(_), Err(e)) => return Err(NfqModeError::IpTables(IpTablesError::IpTables(e.to_string().into()))),
+            (Err(e), _) => warn!("Could not activate inbound IPv4 iptables rule: {e}"),
+            (_, Err(e)) => warn!("Could not activate inbound IPv6 iptables rule: {e}"),
+            _ => {}
+        }
+        let rule_out_ipv4 = rule_out.activate(false, force);
+        let rule_out_ipv6 = rule_out.activate(true, force);
+        match (&rule_out_ipv4, &rule_out_ipv6) {
+            (Err(_), Err(e)) => return Err(NfqModeError::IpTables(IpTablesError::IpTables(e.to_string().into()))),
+            (Err(e), _) => warn!("Could not activate outbound IPv4 iptables rule: {e}"),
+            (_, Err(e)) => warn!("Could not activate outbound IPv6 iptables rule: {e}"),
+            _ => {}
+        }
         // Start processing packets
         info!("Starting packet loop");
         let mut packet_num = 0;
@@ -428,7 +439,7 @@ impl Censor {
                                     is_ack,
                                 )?;
                                 // Send the resets
-                                for _ in 0..args.reset_repeat {
+                                for _ in 0..self.reset_repeat {
                                     if let Some(tx_token) =
                                         interface.transmit(SmoltcpInstant::from_micros_const(0))
                                     {
