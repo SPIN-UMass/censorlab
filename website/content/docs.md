@@ -5,7 +5,156 @@ template = "docs.html"
 
 # CensorLab Reference Documentation
 
-This document covers the CensorLab configuration file format, the Python censor language (PyCL) API, and the CensorLang DSL.
+This document covers general usage of CensorLab, the configuration file format, the Python censor language (PyCL) API, and the CensorLang DSL.
+
+---
+
+# General Usage
+
+CensorLab is a censorship emulation testbed that intercepts network packets and processes them through configurable layers with optional Python scripts or ML models for custom censorship logic.
+
+## Installation
+
+The easiest way to get started is with the pre-built VM images available on the [VM Info](/vm-info/) page. These provide a self-contained environment with everything pre-configured.
+
+To build from source, you need a Rust toolchain. Nix users can run `nix develop` for a complete environment.
+
+```bash
+# Build (release mode recommended for performance)
+cargo build --release
+
+# Build with wire mode support
+cargo build --release --features wire
+
+# Set required network capabilities
+sudo ./set_permissions.sh
+
+# Run tests
+cargo test --verbose
+```
+
+The `set_permissions.sh` script grants `CAP_NET_ADMIN` and `CAP_NET_RAW` capabilities to the binary, which are required for packet interception.
+
+## Environment Setup
+
+For accurate packet data, disable hardware offloading on the network interface CensorLab will use:
+
+```bash
+sudo ethtool -K eth0 tso off gro off gso off lro off
+```
+
+Replace `eth0` with your actual interface name.
+
+## Running CensorLab
+
+CensorLab has three execution modes: **NFQ** (netfilter queue), **PCAP** (offline analysis), and **Wire** (inline bridge). Each mode is selected as a subcommand.
+
+### Quick Start
+
+```bash
+# Run with a Python script in NFQ mode
+censorlab -p censor.py nfq
+
+# Run with a full configuration file
+censorlab -c censor.toml nfq
+
+# Analyze a saved packet capture
+censorlab -c censor.toml pcap capture.pcap 192.168.1.100
+```
+
+### Global Options
+
+| Flag | Description |
+|------|-------------|
+| `-c, --config-path <PATH>` | Path to the TOML configuration file |
+| `-p, --program <PATH>` | Path to a censor script (overrides the one in config) |
+| `-v, --verbosity <LEVEL>` | Log verbosity: `trace`, `debug`, `info`, `warn`, `error` (default: `info`) |
+| `--ipc-port <PORT>` | Port for IPC commands |
+
+### NFQ Mode
+
+The most common mode. CensorLab hooks into the Linux netfilter queue to intercept live traffic. It automatically creates iptables rules on startup and removes them on shutdown.
+
+```bash
+censorlab -c censor.toml nfq [OPTIONS] [INTERFACE]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--client-ip <IP>` | *(auto-detected)* | IP address considered the "client" for direction calculation |
+| `--no-dir-action <ACTION>` | `ignore` | Action for traffic without a determinable direction |
+| `--iptables-table <TABLE>` | `raw` | iptables table to intercept at |
+| `--iptables-chain-in <CHAIN>` | `PREROUTING` | iptables chain for inbound packets |
+| `--iptables-chain-out <CHAIN>` | `OUTPUT` | iptables chain for outbound packets |
+| `--queue-num-in <NUM>` | `0` | NFQUEUE number for inbound packets |
+| `--queue-num-out <NUM>` | `1` | NFQUEUE number for outbound packets |
+| `--force-iptables` | | Force rule insertion even if conflicting NFQUEUE rules exist |
+| `[INTERFACE]` | *(auto-detected)* | Network interface to use for sending packets |
+
+CensorLab determines packet direction by comparing source/destination addresses against the client IP. Traffic from the client IP is considered client-to-WAN; traffic to it is WAN-to-client.
+
+### PCAP Mode
+
+Analyzes a saved packet capture file offline. CensorLab processes each packet through the censor pipeline and logs what actions it *would* have taken.
+
+```bash
+censorlab -c censor.toml pcap <PCAP_PATH> <CLIENT_IP>
+```
+
+| Argument | Description |
+|----------|-------------|
+| `<PCAP_PATH>` | Path to the `.pcap` file to analyze |
+| `<CLIENT_IP>` | Client IP address for direction calculation |
+
+### Wire Mode
+
+In wire mode, CensorLab sits between two network interfaces (WAN and client) and forwards packets between them. It can drop, delay, or modify packets inline. This mode requires the `wire` feature flag at build time.
+
+```bash
+cargo build --release --features wire
+censorlab -c censor.toml wire <WAN_INTERFACE> <CLIENT_INTERFACE> [OPTIONS]
+```
+
+| Argument / Flag | Default | Description |
+|-----------------|---------|-------------|
+| `<WAN_INTERFACE>` | | WAN-side network interface |
+| `<CLIENT_INTERFACE>` | | Client-side network interface |
+| `--wan-packets <NUM>` | `1` | Max packets from WAN before polling client |
+| `--client-packets <NUM>` | `1` | Max packets from client before polling WAN |
+
+## Packet Processing Pipeline
+
+Packets flow through a layered processing pipeline. Each layer can allow, drop, reset, or ignore packets before they reach the censor script:
+
+```
+Network Input (NFQ / Wire / PCAP)
+  → Ethernet layer (MAC allowlist/blocklist)
+    → ARP handling
+      → IP layer (IP allowlist/blocklist)
+        → ICMP handling
+          → TCP/UDP layer (port allowlist/blocklist)
+            → Censor script (Python or CensorLang)
+              → Action (Allow / Drop / Reset / Ignore)
+```
+
+If a packet matches a blocklist at any layer, the configured action is taken immediately and the packet does not reach the censor script. Allowlists work inversely — only listed values pass through.
+
+## Demos
+
+The [demos directory](https://github.com/SPIN-UMass/censorlab/tree/main/demos) contains example scenarios, each with a `censor.toml` and associated scripts/models:
+
+```bash
+# DNS blocking
+censorlab -c demos/dns_blocking/censor.toml nfq
+
+# HTTP blocking
+censorlab -c demos/http_blocking/censor.toml nfq
+
+# IP blocking
+censorlab -c demos/ip_blocking/censor.toml nfq
+```
+
+Paths in `censor.toml` are relative to the TOML file itself, including paths to censor scripts and ML models.
 
 ---
 
