@@ -1,4 +1,102 @@
 {% extends "base.html" %}
 {% block content %}
-{{ page.content | safe }}
-{% endblock content%}
+<section class="section">
+  <div class="container is-max-desktop">
+    <h1 class="title is-2 has-text-centered docs-page-title">CensorLab Documentation</h1>
+    <div class="tabs is-centered is-boxed is-medium" id="docs-tabs">
+      <ul>
+        <li class="is-active" data-tab="general-usage"><a>General Usage</a></li>
+        <li data-tab="configuration-reference"><a>Configuration</a></li>
+        <li data-tab="pycl-python-censor-language-reference"><a>PyCL (Python)</a></li>
+        <li data-tab="censorlang-reference"><a>CensorLang</a></li>
+      </ul>
+    </div>
+    <div class="docs-content" id="docs-content">
+      {{ page.content | safe }}
+    </div>
+  </div>
+</section>
+
+<script>
+(function() {
+  // Split the rendered markdown content into tabbed sections by <h1> tags
+  var container = document.getElementById('docs-content');
+  var children = Array.from(container.childNodes);
+  var sections = [];
+  var current = null;
+
+  children.forEach(function(node) {
+    // Check for h1 elements (our section dividers)
+    if (node.nodeType === 1 && node.tagName === 'H1') {
+      // Create a slug from the heading text
+      var slug = node.textContent
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/[\s]+/g, '-')
+        .replace(/-{2,}/g, '-')
+        .replace(/^-+|-+$/g, '');
+      current = { slug: slug, title: node.textContent, nodes: [] };
+      sections.push(current);
+    } else if (current) {
+      current.nodes.push(node);
+    }
+  });
+
+  // Skip the first "CensorLab Reference Documentation" heading — it's the page title.
+  // The real sections start from the second h1 onward.
+  if (sections.length > 0 && sections[0].slug === 'censorlab-reference-documentation') {
+    // The intro text (between the title h1 and first section h1) goes nowhere — it's
+    // already represented by the tab bar itself
+    sections.shift();
+  }
+
+  // Clear the container and build tab panes
+  container.innerHTML = '';
+  sections.forEach(function(sec, i) {
+    var pane = document.createElement('div');
+    pane.className = 'docs-tab-pane' + (i === 0 ? ' is-active' : '');
+    pane.id = 'tab-' + sec.slug;
+    pane.setAttribute('data-tab', sec.slug);
+
+    // Add the content (skip the <hr> separators between sections)
+    sec.nodes.forEach(function(node) {
+      if (node.nodeType === 1 && node.tagName === 'HR') return;
+      pane.appendChild(node);
+    });
+
+    container.appendChild(pane);
+  });
+
+  // Tab switching
+  var tabs = document.querySelectorAll('#docs-tabs li');
+  var panes = document.querySelectorAll('.docs-tab-pane');
+
+  function activateTab(tabSlug) {
+    tabs.forEach(function(tab) {
+      tab.classList.toggle('is-active', tab.getAttribute('data-tab') === tabSlug);
+    });
+    panes.forEach(function(pane) {
+      pane.classList.toggle('is-active', pane.getAttribute('data-tab') === tabSlug);
+    });
+    // Update URL hash without scrolling
+    history.replaceState(null, '', '#' + tabSlug);
+  }
+
+  tabs.forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      activateTab(tab.getAttribute('data-tab'));
+      window.scrollTo({ top: document.getElementById('docs-tabs').offsetTop - 20, behavior: 'smooth' });
+    });
+  });
+
+  // Activate tab from URL hash on load
+  var hash = window.location.hash.replace('#', '');
+  if (hash) {
+    var matchingTab = document.querySelector('#docs-tabs li[data-tab="' + hash + '"]');
+    if (matchingTab) {
+      activateTab(hash);
+    }
+  }
+})();
+</script>
+{% endblock content %}
