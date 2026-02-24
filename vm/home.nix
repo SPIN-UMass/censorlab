@@ -15,7 +15,25 @@ in
       };
     };
   };
-  # TODO: move the custom desktop shortcuts here
+  # Desktop shortcuts
+  xdg.desktopEntries = {
+    censorlab-docs = {
+      name = "CensorLab Docs";
+      comment = "Open CensorLab documentation in Firefox";
+      exec = "${pkgs.firefox}/bin/firefox file://${censorlab-docs}/share/censorlab/README.html";
+      icon = "text-html";
+      terminal = false;
+      categories = [ "Documentation" ];
+    };
+    censorlab-demos = {
+      name = "CensorLab Demos";
+      comment = "Open a terminal in the demos directory";
+      exec = "${pkgs.konsole}/bin/konsole --workdir /etc/censorlab-demos";
+      icon = "utilities-terminal";
+      terminal = false;
+      categories = [ "Development" ];
+    };
+  };
   # Needed for home-manager
   home.stateVersion = "24.05";
 }

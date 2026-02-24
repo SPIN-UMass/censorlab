@@ -74,19 +74,35 @@
           # Censorlab package
           packages = rec {
             default = censorlab;
-            # TODO: split scripts  out into a second derivation
             censorlab = craneLib.buildPackage (common_args // {
               # Install from source (remove all the extra stuff)
               src = pkgs.lib.cleanSourceWith {
                 src = ./.;
                 filter = path: _type: (craneLib.filterCargoSources path _type) ||
-                builtins.match ".*lalrpop" path != null ||
-                builtins.match ".*sh" path != null;
+                builtins.match ".*lalrpop" path != null;
                 name = "source";
               };
               # Dependencies
               inherit cargoArtifacts;
             });
+            # Helper scripts (set_permissions.sh, etc.) packaged separately from the binary
+            censorlab-scripts = pkgs.callPackage
+              ({ stdenv, ... }: stdenv.mkDerivation {
+                pname = "censorlab-scripts";
+                version = "0.1";
+                src = pkgs.lib.cleanSourceWith {
+                  src = ./.;
+                  filter = path: _type: builtins.match ".*\\.sh" path != null;
+                  name = "scripts-source";
+                };
+                installPhase = ''
+                  mkdir -p $out/bin
+                  for f in *.sh; do
+                    [ -f "$f" ] && install -m755 "$f" "$out/bin/"
+                  done
+                '';
+              })
+              { };
             censorlab-vm-docs = pkgs.callPackage
               ({ stdenv, pandoc, ... }: stdenv.mkDerivation {
                 pname = "censorlab-vm-docs";

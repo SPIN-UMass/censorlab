@@ -14,8 +14,13 @@ pub struct Packet {
     pub direction: i8,
     /// Transport-layer metadata
     pub transport: TransportMetadata,
-    /// Transport-layer payload
-    // Cloned per-packet; see TODO.md for zero-copy optimization
+    /// Transport-layer payload.
+    ///
+    /// Allocated once via `.to_vec()` from a borrowed capture buffer during parsing.
+    /// Not cloned in production code paths; the Python accessor copies into PyBytes
+    /// which is unavoidable regardless of the backing type (Vec, Rc, or Arc).
+    /// Using `Rc<[u8]>` was considered but provides no benefit since Packet is never
+    /// cloned in production and the Python VM requires owned bytes.
     pub payload: Vec<u8>,
 }
 impl Packet {
@@ -428,7 +433,8 @@ pub mod rust_packet {
 
     #[pyclass]
     // pygetset with &self only generates getters (no setter without explicit #[pygetset(setter)]).
-    // Accessor objects clone data; Rc optimization tracked in TODO.md.
+    // Accessor objects clone metadata (IpMetadata, TcpMetadata, UdpMetadata) which are small
+    // stack-allocated structs — Rc would add overhead, not remove it.
     impl Packet {
         #[pygetset]
         fn timestamp(&self) -> Option<f64> {
