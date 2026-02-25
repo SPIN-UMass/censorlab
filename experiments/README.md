@@ -12,27 +12,27 @@ nix develop .#experiments
 
 ### Docker Mode (no Nix required)
 
-For users without Nix, a Docker image uses nix-in-docker to provide the full environment. Build from the repo root:
+For users without Nix, a single script builds the Docker image and runs every experiment:
 
 ```bash
+bash experiments/scripts/run_all_docker.sh [ITERATIONS]
+```
+
+This builds a nix-in-docker image, then runs the full PCAP-mode pipeline inside the container. Results are written back to the host via a bind mount.
+
+You can also run the steps separately:
+
+```bash
+# Build the image
 docker build -f experiments/Dockerfile -t censorlab-experiments .
-```
 
-**Run the full pipeline** (generates PCAPs, runs all PCAP-mode experiments, analyzes results):
-
-```bash
+# Run all experiments
 docker run --rm -v $(pwd)/experiments:/censorlab/experiments censorlab-experiments bash experiments/scripts/run_all.sh
-```
 
-**Interactive shell** (for running individual experiments):
-
-```bash
+# Interactive shell
 docker run --rm -it -v $(pwd)/experiments:/censorlab/experiments censorlab-experiments bash
-```
 
-**Run a single experiment** inside the container:
-
-```bash
+# Single experiment
 docker run --rm -v $(pwd)/experiments:/censorlab/experiments censorlab-experiments \
     bash experiments/01_http_keyword/scripts/run_showcase.sh 3
 ```

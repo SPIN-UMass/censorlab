@@ -498,4 +498,4 @@
 997: Ok(Drop)
 998: Ok(Drop)
 1000: Ok(Drop)
-Pcap mode took 9736us to process the file
+Pcap mode took 10334us to process the file

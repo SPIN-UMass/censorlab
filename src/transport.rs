@@ -18,7 +18,7 @@ use serde::Deserialize;
 use smoltcp::wire::Error as SmoltcpError;
 use smoltcp::wire::{
     EthernetAddress, EthernetFrame, EthernetProtocol, IpAddress, IpProtocol, Ipv4Packet,
-    Ipv6Packet, TcpPacket, TcpSeqNumber,
+    Ipv6Packet, TcpPacket, TcpSeqNumber, UdpPacket,
 };
 use std::collections::HashMap;
 use std::io;
@@ -157,7 +157,12 @@ impl TransportState {
             // Import the native rust module used for QUIC Initial parsing
             vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
         });
-        let (code, process) = if let Some(ref script_path) = execution_config.script {
+        // Only compile the script as Python if we're in Python mode
+        let python_script = match execution_config.mode {
+            ExecutionMode::Python => execution_config.script.as_ref(),
+            ExecutionMode::CensorLang => None,
+        };
+        let (code, process) = if let Some(script_path) = python_script {
             let source = std::fs::read_to_string(script_path)
                 .map_err(TransportStateInitError::ReadScript)?;
             // Do some initialization tasks, eventually returning the compiled code object
@@ -311,9 +316,9 @@ impl TransportState {
                         if let Some(process_callable) = process_function.to_callable() {
                             if let Ok(pkt) = scope.locals.get_item(PACKET, vm) {
                                 match process_callable.invoke((pkt,), vm) {
-                                    Ok(result) => match result.try_into_value(vm) {
-                                        Ok(s) => {
-                                            let s: String = s;
+                                    Ok(result) => {
+                                        // Try string first
+                                        if let Ok(s) = result.clone().try_into_value::<String>(vm) {
                                             match s.to_lowercase().as_str() {
                                                 "reset" => {
                                                     if let TransportMetadataExtra::Tcp(
@@ -339,24 +344,28 @@ impl TransportState {
                                                 "drop" => Action::Drop,
                                                 "allow" => Action::None,
                                                 other => {
-                                                    if other.starts_with("inject") {
-                                                        let _data = other
-                                                            .split_ascii_whitespace()
-                                                            .skip(1)
-                                                            .next();
-                                                        Action::None
-                                                    } else {
-                                                        error!(
-                                                            "Unrecognized action: {}. allowing",
-                                                            other
-                                                        );
-                                                        Action::None
-                                                    }
+                                                    error!(
+                                                        "Unrecognized action: {}. allowing",
+                                                        other
+                                                    );
+                                                    Action::None
                                                 }
                                             }
+                                        } else if let Some(bytes_obj) = result.payload::<rustpython_vm::builtins::PyBytes>() {
+                                            // Bytes returned → injection
+                                            let bytes: Vec<u8> = bytes_obj.as_ref().to_vec();
+                                            Action::Inject {
+                                                src_mac: [0; 6],
+                                                dst_mac: [0; 6],
+                                                ips: ips.swap(),
+                                                src_port: transport.dst,
+                                                dst_port: transport.src,
+                                                payload: bytes,
+                                            }
+                                        } else {
+                                            Action::None
                                         }
-                                        Err(_) => Action::None,
-                                    },
+                                    }
                                     Err(err) => {
                                         error!("Error calling processing function: {:?}", err);
                                         vm.print_exception(err);
@@ -410,6 +419,7 @@ const ETH_HEADER_LEN: u8 = 14;
 const IPV4_HEADER_LEN: u8 = 20;
 const IPV6_HEADER_LEN: u8 = 40;
 const TCP_HEADER_LEN: u8 = 20;
+const UDP_HEADER_LEN: u8 = 8;
 
 pub fn construct_reset(
     src_mac: EthernetAddress,
@@ -492,6 +502,77 @@ fn fill_reset(
     tcp_packet.set_ack(true);
     tcp_packet.set_rst(true);
     tcp_packet.fill_checksum(&ips.src(), &ips.dst());
+    Ok(())
+}
+
+/// Construct a UDP injection packet with Ethernet/IP/UDP headers wrapping the given payload.
+///
+/// Used for injecting forged responses (e.g. DNS poisoning) while the original packet
+/// is allowed through (racing the real server, similar to GFW behavior).
+pub fn construct_udp_inject(
+    src_mac: EthernetAddress,
+    dst_mac: EthernetAddress,
+    ips: IpPair,
+    src_port: u16,
+    dst_port: u16,
+    payload: &[u8],
+) -> Result<Vec<u8>, SmoltcpError> {
+    let ip_header_len: u8 = match ips {
+        IpPair::V4 { .. } => IPV4_HEADER_LEN,
+        IpPair::V6 { .. } => IPV6_HEADER_LEN,
+    };
+    let udp_total_len = UDP_HEADER_LEN as usize + payload.len();
+    let total_length = ETH_HEADER_LEN as usize + ip_header_len as usize + udp_total_len;
+    let mut packet_buf = vec![0u8; total_length];
+    let mut eth_packet = EthernetFrame::new_unchecked(&mut packet_buf);
+    eth_packet.set_src_addr(src_mac);
+    eth_packet.set_dst_addr(dst_mac);
+    match ips {
+        IpPair::V4 { src, dst } => {
+            eth_packet.set_ethertype(EthernetProtocol::Ipv4);
+            // TTL
+            eth_packet.payload_mut()[8] = 0x40;
+            let mut ip_packet = Ipv4Packet::new_unchecked(eth_packet.payload_mut());
+            ip_packet.set_total_len((IPV4_HEADER_LEN as u16) + (udp_total_len as u16));
+            ip_packet.set_version(4);
+            ip_packet.set_header_len(IPV4_HEADER_LEN);
+            ip_packet.check_len()?;
+            ip_packet.set_src_addr(src);
+            ip_packet.set_dst_addr(dst);
+            ip_packet.set_next_header(IpProtocol::Udp);
+            ip_packet.fill_checksum();
+            fill_udp(ip_packet.payload_mut(), ips, src_port, dst_port, payload)?;
+        }
+        IpPair::V6 { src, dst } => {
+            eth_packet.set_ethertype(EthernetProtocol::Ipv6);
+            let mut ip_packet = Ipv6Packet::new_unchecked(eth_packet.payload_mut());
+            ip_packet.set_payload_len(udp_total_len as u16);
+            ip_packet.set_version(6);
+            ip_packet.check_len()?;
+            ip_packet.set_src_addr(src);
+            ip_packet.set_dst_addr(dst);
+            ip_packet.set_next_header(IpProtocol::Udp);
+            fill_udp(ip_packet.payload_mut(), ips, src_port, dst_port, payload)?;
+        }
+    };
+    Ok(packet_buf)
+}
+
+fn fill_udp(
+    ip_payload: &mut [u8],
+    ips: IpPair,
+    src_port: u16,
+    dst_port: u16,
+    payload: &[u8],
+) -> Result<(), SmoltcpError> {
+    let udp_total_len = UDP_HEADER_LEN as u16 + payload.len() as u16;
+    let mut udp_packet = UdpPacket::new_unchecked(ip_payload);
+    udp_packet.set_src_port(src_port);
+    udp_packet.set_dst_port(dst_port);
+    udp_packet.set_len(udp_total_len);
+    // Copy payload into the UDP packet
+    udp_packet.payload_mut()[..payload.len()].copy_from_slice(payload);
+    udp_packet.fill_checksum(&ips.src(), &ips.dst());
     Ok(())
 }
 

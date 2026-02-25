@@ -4,6 +4,7 @@ use crate::program::packet::{IpVersionMetadata, TcpFlags, TransportMetadataExtra
 use fnv::FnvHashSet;
 use lalrpop_util::lalrpop_mod;
 use num::Zero;
+use regex::bytes::Regex as BytesRegex;
 use serde::Deserialize;
 use serde_with::DeserializeFromStr;
 use std::fmt;
@@ -42,6 +43,8 @@ lalrpop_mod!(
 #[serde(transparent)]
 pub struct Program {
     pub lines: Vec<Line>,
+    #[serde(skip)]
+    pub regexes: Vec<BytesRegex>,
 }
 impl Program {
     /// Loads a program
@@ -54,6 +57,9 @@ impl Program {
 }
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for re in &self.regexes {
+            writeln!(f, "regex \"{}\"", re.as_str())?;
+        }
         for line in &self.lines {
             writeln!(f, "{}", line)?;
         }
@@ -62,7 +68,10 @@ impl fmt::Display for Program {
 }
 impl Program {
     pub fn new(lines: Vec<Line>) -> Self {
-        let mut program = Program { lines };
+        Self::new_with_regexes(lines, vec![])
+    }
+    pub fn new_with_regexes(lines: Vec<Line>, regexes: Vec<BytesRegex>) -> Self {
+        let mut program = Program { lines, regexes };
         program.optimise();
         program
     }
@@ -192,7 +201,8 @@ impl Program {
                 | Mod { ref out, .. }
                 | And { ref out, .. }
                 | Or { ref out, .. }
-                | Xor { ref out, .. } => {
+                | Xor { ref out, .. }
+                | Regex { ref out, .. } => {
                     regs.push(Some(out.index));
                 }
                 _ => {
@@ -287,7 +297,7 @@ impl Program {
     ) -> Result<Action, LineExecutionError> {
         let mut action = Action::default();
         for line in &self.lines {
-            action = line.run(packet, registers, fields, field_default_on_error)?;
+            action = line.run(packet, registers, fields, field_default_on_error, &self.regexes)?;
             if action != Action::default() {
                 break;
             }
@@ -299,13 +309,34 @@ impl FromStr for Program {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut lines = Vec::new();
+        let mut regexes = Vec::new();
         for line in s.lines() {
+            let trimmed = line.trim();
+            // Skip blank lines and comments
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            // Parse regex directives: regex "pattern"
+            if let Some(rest) = trimmed.strip_prefix("regex ") {
+                let rest = rest.trim();
+                if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
+                    let pattern = &rest[1..rest.len() - 1];
+                    let re = BytesRegex::new(pattern)
+                        .map_err(|e| format!("Invalid regex pattern \"{pattern}\": {e}"))?;
+                    regexes.push(re);
+                } else {
+                    return Err(format!(
+                        "Invalid regex directive, expected regex \"pattern\", got: {trimmed}"
+                    ));
+                }
+                continue;
+            }
             let line = program_parse::LineParser::new()
-                .parse(line)
+                .parse(trimmed)
                 .map_err(|e| e.to_string())?;
             lines.push(line);
         }
-        Ok(Program { lines })
+        Ok(Program { lines, regexes })
     }
 }
 
@@ -379,7 +410,8 @@ impl Line {
             | Mod { ref out, .. }
             | And { ref out, .. }
             | Or { ref out, .. }
-            | Xor { ref out, .. } => Some(out.clone()),
+            | Xor { ref out, .. }
+            | Regex { ref out, .. } => Some(out.clone()),
             _ => None,
         }
     }
@@ -389,6 +421,7 @@ impl Line {
         registers: &mut Registers,
         fields: &EnvFields,
         field_default_on_error: bool,
+        regexes: &[BytesRegex],
     ) -> Result<Action, LineExecutionError> {
         // Only execute the line if the condition evaluates to true
         if self
@@ -500,6 +533,13 @@ impl Line {
                         field_default_on_error,
                     )?;
                 }
+                Regex { index, out } => {
+                    let re = regexes
+                        .get(*index)
+                        .ok_or(LineExecutionError::RegexIndex(*index))?;
+                    let matched = re.is_match(&packet.payload);
+                    registers.set(out, &Value::Bool(matched))?;
+                }
                 Return(action) => {
                     return Ok(*action);
                 }
@@ -536,6 +576,8 @@ pub enum LineExecutionError {
     Input(#[from] InputError),
     #[error("Error writing value to register: {0}")]
     RegisterWrite(#[from] RegisterWriteError),
+    #[error("Regex index {0} out of bounds")]
+    RegexIndex(usize),
 }
 impl fmt::Display for Line {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1456,6 +1498,10 @@ pub enum Operation {
         rhs: Input,
         out: Register,
     },
+    Regex {
+        index: usize,
+        out: Register,
+    },
     Return(Action),
     Noop,
     Model,
@@ -1522,6 +1568,7 @@ impl fmt::Display for Operation {
             And { .. } => "AND",
             Or { .. } => "OR",
             Xor { .. } => "XOR",
+            Regex { .. } => "REGEX",
             Return(_) => "RETURN ",
             Noop => "NOOP",
             Model => "MODEL",
@@ -1536,6 +1583,7 @@ impl fmt::Display for Operation {
             | And { lhs, rhs, out }
             | Or { lhs, rhs, out }
             | Xor { lhs, rhs, out } => write!(f, " {lhs},{rhs}->{out}"),
+            Regex { index, out } => write!(f, " {index}->{out}"),
             Return(action) => action.fmt(f),
             _ => Ok(()),
         }
@@ -2093,6 +2141,7 @@ mod tests {
                     operation: Operation::Noop,
                 },
             ],
+            regexes: vec![],
         };
         prog.optimise();
         assert_eq!(prog.lines.len(), 0);
@@ -2179,5 +2228,80 @@ mod tests {
         prog.run(&pkt, &mut regs, &fields, false).unwrap();
         let val = regs.get(&Register { ty: RegisterType::Float, index: 0 }).unwrap();
         assert!(matches!(val, Value::Float(f) if (f - 3.5).abs() < f64::EPSILON));
+    }
+
+    // =========================================================================
+    // Group 8: REGEX operation
+    // =========================================================================
+
+    #[test]
+    fn program_parse_regex_directive() {
+        let source = "regex \"example\\.com\"\nREGEX 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        assert_eq!(prog.regexes.len(), 1);
+        assert_eq!(prog.regexes[0].as_str(), "example\\.com");
+    }
+
+    #[test]
+    fn program_regex_matches_payload() {
+        let source = "regex \"example\\.com\"\nREGEX 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"GET http://example.com/ HTTP/1.1");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_regex_no_match_allows() {
+        let source = "regex \"example\\.com\"\nREGEX 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"GET http://other.org/ HTTP/1.1");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::Allow);
+    }
+
+    #[test]
+    fn program_regex_multiple_patterns() {
+        let source = "regex \"blocked\"\nregex \"forbidden\"\nREGEX 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\nREGEX 1 -> reg:b.1\nif reg:b.1 == True: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        assert_eq!(prog.regexes.len(), 2);
+        // Match second pattern
+        let pkt = make_tcp_packet(b"this is forbidden content");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_regex_index_out_of_bounds() {
+        let source = "REGEX 5 -> reg:b.0";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"data");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn program_regex_invalid_pattern_errors() {
+        let source = "regex \"[invalid\"";
+        let result: Result<Program, _> = source.parse();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn program_regex_dead_code_elimination() {
+        // REGEX writing to a register that's never read should be pruned
+        let source = "regex \"test\"\nREGEX 0 -> reg:b.0";
+        let prog: Program = source.parse().unwrap();
+        let prog = Program::new_with_regexes(prog.lines, prog.regexes);
+        // The REGEX line writes reg:b.0 but nothing reads it, so it should be optimized away
+        assert_eq!(prog.lines.len(), 0);
     }
 }

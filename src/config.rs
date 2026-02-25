@@ -128,7 +128,7 @@ where
     {
         List {
             list: self.list.clone().into_iter().filter_map(f).collect(),
-            action: self.action,
+            action: self.action.clone(),
         }
     }
     pub fn set(self) -> List<HashSet<T>>
@@ -152,7 +152,7 @@ where
         }
         List {
             list: port_vec,
-            action: self.action,
+            action: self.action.clone(),
         }
     }
 }

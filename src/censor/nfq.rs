@@ -298,7 +298,7 @@ impl Censor {
         let mut context_nfq = Context {
             client_mac,
             client_ip,
-            no_dir_action: args.no_dir_action,
+            no_dir_action: args.no_dir_action.clone(),
             delayer: Delayer::new(interface_name),
         };
         // Convert context to generic
@@ -458,6 +458,60 @@ impl Censor {
                                     }
                                 }
                                 // Accept the packet
+                                msg.set_verdict(Verdict::Accept);
+                                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+                            }
+                            Action::Inject {
+                                src_mac: _,
+                                dst_mac: _,
+                                ips: inject_ips,
+                                src_port: inject_src_port,
+                                dst_port: inject_dst_port,
+                                payload: inject_payload,
+                            } => {
+                                // Resolve MAC addresses for the injection packet
+                                let mut inj_src_mac = [0u8; 6];
+                                let mut inj_dst_mac = [0u8; 6];
+                                if let IpPair::V4 { src, dst } = inject_ips {
+                                    if let Some(mac) = arp_cache
+                                        .resolve(src.into())
+                                        .map_err(NfqModeError::OpenArp)?
+                                    {
+                                        inj_src_mac = mac.0;
+                                    } else if IpAddress::from(src) != client_ip {
+                                        if let Some(mac) = default_route_mac {
+                                            inj_src_mac = mac;
+                                        }
+                                    }
+                                    if let Some(mac) = arp_cache
+                                        .resolve(dst.into())
+                                        .map_err(NfqModeError::OpenArp)?
+                                    {
+                                        inj_dst_mac = mac.0;
+                                    } else if IpAddress::from(dst) != client_ip {
+                                        if let Some(mac) = default_route_mac {
+                                            inj_dst_mac = mac;
+                                        }
+                                    }
+                                }
+                                // Construct and send the injection packet
+                                let inject_packet = crate::transport::construct_udp_inject(
+                                    EthernetAddress(inj_src_mac),
+                                    EthernetAddress(inj_dst_mac),
+                                    inject_ips,
+                                    inject_src_port,
+                                    inject_dst_port,
+                                    &inject_payload,
+                                )?;
+                                if let Some(tx_token) =
+                                    interface.transmit(SmoltcpInstant::from_micros_const(0))
+                                {
+                                    tx_token.consume(inject_packet.len(), |tx_buf| {
+                                        tx_buf.copy_from_slice(&inject_packet);
+                                        Ok::<(), SmoltcpError>(())
+                                    })?;
+                                }
+                                // Accept the original packet (race the real server, like GFW)
                                 msg.set_verdict(Verdict::Accept);
                                 queue.verdict(msg).map_err(NfqModeError::Nfq)?;
                             }

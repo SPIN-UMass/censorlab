@@ -1,8 +1,8 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     home-manager = {
-      url = "github:nix-community/home-manager/release-24.11";
+      url = "github:nix-community/home-manager/release-25.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     utils.url = "github:numtide/flake-utils";
@@ -57,6 +57,26 @@
             ];
             buildInputs = dependencies;
           };
+          # Shell for running experiments (Table 3/4 in PoPETs paper)
+          devShells.experiments = pkgs.mkShell {
+            nativeBuildInputs = [
+              self.packages.${system}.censorlab
+              (pkgs.python3.withPackages (ps: with ps; [
+                scapy
+                pandas
+                matplotlib
+                scikit-learn
+                onnx
+                skl2onnx
+              ]))
+              pkgs.zeek
+              pkgs.tcpdump
+              pkgs.curl
+              pkgs.coreutils
+              pkgs.bash
+              pkgs.time
+            ];
+          };
           devShells.website = pkgs.mkShell {
             nativeBuildInputs =
               let
@@ -84,6 +104,8 @@
               };
               # Dependencies
               inherit cargoArtifacts;
+              # Integration tests reference demo scripts not in the clean source
+              doCheck = false;
             });
             # Helper scripts (set_permissions.sh, etc.) packaged separately from the binary
             censorlab-scripts = pkgs.callPackage
@@ -127,6 +149,33 @@
                 '';
               })
               { };
+            # Docker image for NFQ-mode live experiments
+            experiment-image = pkgs.dockerTools.buildImage {
+              name = "censorlab-experiment";
+              tag = "latest";
+              copyToRoot = pkgs.buildEnv {
+                name = "experiment-root";
+                paths = [
+                  censorlab
+                  pkgs.iptables
+                  pkgs.iproute2
+                  pkgs.tcpdump
+                  (pkgs.python3.withPackages (ps: with ps; [
+                    scapy
+                    pandas
+                    scikit-learn
+                    onnx
+                    skl2onnx
+                  ]))
+                  pkgs.bash
+                  pkgs.coreutils
+                ];
+                pathsToLink = [ "/bin" "/lib" "/share" ];
+              };
+              config = {
+                Cmd = [ "/bin/bash" ];
+              };
+            };
             censorlab-update = pkgs.writeShellScriptBin "censorlab-update" ''
               nix-collect-garbage -d
               nixos-rebuild switch --flake github:SPIN-UMass/censorlab#censorlab --use-remote-sudo

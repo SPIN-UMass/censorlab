@@ -61,7 +61,7 @@ where
 {
     fn recommend(&self, value: &T) -> Option<Action> {
         if self.store.contains(value) {
-            Some(self.in_blocklist)
+            Some(self.in_blocklist.clone())
         } else {
             None
         }
@@ -88,7 +88,7 @@ where
         if self.store.contains(value) {
             None
         } else {
-            Some(self.not_in_allowlist)
+            Some(self.not_in_allowlist.clone())
         }
     }
 }

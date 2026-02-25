@@ -5,7 +5,7 @@ use crate::program::program::{
         udp::Field as UdpField, Field,
     },
     Action, ComparisonOperator, Condition, Input, Line, LogicOperator, Operation, Operator,
-    Program, Register, RegisterType,
+    Register, RegisterType,
 };
 use std::str::FromStr;
 
@@ -127,7 +127,8 @@ Operation: Operation = {
   "AND"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::And{lhs, rhs, out},
   "OR"     <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Or{ lhs, rhs, out},
   "XOR"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Xor{lhs, rhs, out},
-  "RETURN" <action: Action> => Operation::Return(action), 
+  "REGEX"  <index: Usize> "->" <out: Register> => Operation::Regex{index, out},
+  "RETURN" <action: Action> => Operation::Return(action),
   "NOOP" => Operation::Noop,
   "MODEL" => Operation::Model,
 }

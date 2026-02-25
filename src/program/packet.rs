@@ -809,6 +809,27 @@ pub mod rust_dns {
     use std::io;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
+    /// Craft a DNS response from a query, returning raw bytes suitable for injection.
+    ///
+    /// Usage from Python: `dns.craft_response(packet.payload, "10.10.10.10")`
+    /// or with TTL: `dns.craft_response(packet.payload, "10.10.10.10", 300)`
+    #[pyfunction(name = "craft_response")]
+    fn craft_response(
+        query_bytes: PyBytesRef,
+        answer_ip: String,
+        ttl: rustpython_vm::function::OptionalArg<u32>,
+        vm: &VirtualMachine,
+    ) -> PyResult<rustpython_vm::builtins::PyBytes> {
+        let ip: Ipv4Addr = answer_ip.parse().map_err(|err| {
+            io::Error::new(io::ErrorKind::InvalidInput, format!("Invalid IPv4 address: {err}"))
+                .into_pyexception(vm)
+        })?;
+        let ttl = ttl.unwrap_or(300);
+        let response = dns::craft_dns_response(query_bytes.as_ref(), ip, ttl)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
+        Ok(rustpython_vm::builtins::PyBytes::from(response))
+    }
+
     #[pyfunction]
     fn parse(bytes: PyBytesRef, vm: &VirtualMachine) -> PyResult<DnsPacket> {
         let bytes = bytes.as_ref();

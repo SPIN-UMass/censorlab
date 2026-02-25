@@ -412,7 +412,7 @@ impl Censor {
         // For non-IP ethertypes, skip full packet parsing
         let action = match ethertype {
             EtherType::Arp => return self.process_arp(&payload),
-            EtherType::Unknown(_) => return Ok(self.ethernet_unknown),
+            EtherType::Unknown(_) => return Ok(self.ethernet_unknown.clone()),
             // IP packets need full parsing for transport-layer processing
             EtherType::Ipv4 | EtherType::Ipv6 => {
                 match Packet::from_ts_bytes(None, payload.as_ref(), ethertype) {
@@ -612,7 +612,7 @@ impl Censor {
                     "Encountered packet with unknown IP protocol {}. Performing {} action",
                     other, self.ip_unknown
                 );
-                Ok(self.ip_unknown)
+                Ok(self.ip_unknown.clone())
             }
         }
     }
@@ -624,7 +624,7 @@ impl Censor {
         // Just make sure the packet is indeed arp
         let _arp_packet = ArpPacket::new_checked(data)?;
         // Do what we are supposed to for arp
-        Ok(self.arp.action)
+        Ok(self.arp.action.clone())
     }
     /// Processes an ICMP packet based on its metadata nad our internal state
     ///
@@ -644,7 +644,7 @@ impl Censor {
                 let _icmp_packet = Icmpv6Packet::new_checked(data)?;
             }
         }
-        Ok(self.icmp.action)
+        Ok(self.icmp.action.clone())
     }
     /// Processes the transport-layer  packet based on its metadata and our internal state
     ///
@@ -842,7 +842,7 @@ where
 }
 
 /// An action taken by the censor
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Default)]
 pub enum Action {
     /// Continue to process the packet.
     /// If there is no more processing to be done, Wire mode and nfq mode will forward the packet
@@ -860,6 +860,15 @@ pub enum Action {
         ack: TcpSeqNumber,
         is_ack: bool,
         payload_len: usize,
+    },
+    /// Inject a UDP packet (e.g. forged DNS response) while allowing the original through
+    Inject {
+        src_mac: [u8; 6],
+        dst_mac: [u8; 6],
+        ips: IpPair,
+        src_port: u16,
+        dst_port: u16,
+        payload: Vec<u8>,
     },
     /// Ignore  the packet immediately without further processing
     /// In wire mode this does a forward, in tap mode this ignores the packet
@@ -914,20 +923,22 @@ impl Action {
             self
         }
     }
+    pub fn is_inject(&self) -> bool {
+        matches!(self, Action::Inject { .. })
+    }
     pub fn add_mac(self, src_mac: [u8; 6], dst_mac: [u8; 6]) -> Self {
-        if let Action::Reset {
-            ips,
-            ipid,
-            src_port,
-            dst_port,
-            seq,
-            ack,
-            payload_len,
-            is_ack,
-            ..
-        } = self
-        {
+        match self {
             Action::Reset {
+                ips,
+                ipid,
+                src_port,
+                dst_port,
+                seq,
+                ack,
+                payload_len,
+                is_ack,
+                ..
+            } => Action::Reset {
                 src_mac,
                 dst_mac,
                 ips,
@@ -938,9 +949,9 @@ impl Action {
                 ack,
                 payload_len,
                 is_ack,
-            }
-        } else {
-            self
+            },
+            // Inject already carries its own MAC addresses
+            other => other,
         }
     }
     pub fn add_ipid(self, ipid: u16) -> Self {
@@ -1024,6 +1035,7 @@ impl fmt::Display for Action {
             Action::Reset { .. } => {
                 "process up to before packet aggregation then send a RST packet to both sides"
             }
+            Action::Inject { .. } => "inject a forged UDP response packet",
             Action::Delay(_instant) => "delay the packet",
         })
     }
