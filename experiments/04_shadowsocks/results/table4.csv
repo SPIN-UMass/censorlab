@@ -1,5 +1,5 @@
 tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
-PyCL,8186,8190,718.0,7474,8910,3,46,
-CensorLang,1620,1616.7,27.2,1588,1642,3,5,entropy-only (no popcount/byte check)
-Zeek,564452,617283.3,91870.5,564032,723366,3,92,"fingerprint-only (passive, no entropy/popcount)"
-Scapy,11763,11787,83.6,11718,11880,3,112,
+PyCL,8140,8144.7,93.1,8054,8240,3,46,
+CensorLang,1765,1777,165.3,1618,1948,3,5,entropy-only (no popcount/byte check)
+Zeek,531821,536481.7,21638.8,517553,560071,3,92,"fingerprint-only (passive, no entropy/popcount)"
+Scapy,11835,11845.3,134.8,11716,11985,3,112,

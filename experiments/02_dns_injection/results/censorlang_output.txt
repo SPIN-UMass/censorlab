@@ -43,4 +43,4 @@
 98: Ok(Drop)
 99: Ok(Drop)
 101: Ok(Drop)
-Pcap mode took 2090us to process the file
+Pcap mode took 2150us to process the file

@@ -18,11 +18,13 @@ COPY src/ src/
 # Copy demos (referenced by build/configs)
 COPY demos/ demos/
 
-# Copy experiments
-COPY experiments/ experiments/
-
-# Materialize the experiments shell (expensive, cached by Docker layers)
+# Materialize the experiments shell (expensive, cached by Docker layers).
+# This must come BEFORE copying experiments so that editing experiment
+# scripts doesn't invalidate the Nix build cache.
 RUN nix develop .#experiments --profile /nix/var/nix/profiles/experiments --command true
+
+# Copy experiments last — changes here only rebuild this cheap layer
+COPY experiments/ experiments/
 
 ENTRYPOINT ["nix", "develop", ".#experiments", "--command"]
 CMD ["bash"]
