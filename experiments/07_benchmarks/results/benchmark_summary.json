@@ -1,0 +1,173 @@
+{
+  "table": "benchmark_summary",
+  "experiment": "07_benchmarks",
+  "censors": [
+    "entropy",
+    "null",
+    "sni_filter"
+  ],
+  "pcap_sizes": [
+    1000,
+    5000,
+    10000,
+    50000
+  ],
+  "rows": [
+    {
+      "censor": "entropy",
+      "pcap_size": 1000,
+      "median_us": 29883,
+      "mean_us": 29935.3,
+      "stdev_us": 872.7,
+      "min_us": 29090,
+      "max_us": 30833,
+      "n": 3,
+      "per_packet_us": 29.883,
+      "throughput_pps": 33464,
+      "overhead_vs_null": 1.472
+    },
+    {
+      "censor": "entropy",
+      "pcap_size": 5000,
+      "median_us": 103022,
+      "mean_us": 108215.3,
+      "stdev_us": 10370.1,
+      "min_us": 101468,
+      "max_us": 120156,
+      "n": 3,
+      "per_packet_us": 20.604,
+      "throughput_pps": 48533,
+      "overhead_vs_null": 1.424
+    },
+    {
+      "censor": "entropy",
+      "pcap_size": 10000,
+      "median_us": 197745,
+      "mean_us": 197929,
+      "stdev_us": 378.2,
+      "min_us": 197678,
+      "max_us": 198364,
+      "n": 3,
+      "per_packet_us": 19.774,
+      "throughput_pps": 50570,
+      "overhead_vs_null": 1.477
+    },
+    {
+      "censor": "entropy",
+      "pcap_size": 50000,
+      "median_us": 950761,
+      "mean_us": 956356,
+      "stdev_us": 11710.0,
+      "min_us": 948493,
+      "max_us": 969814,
+      "n": 3,
+      "per_packet_us": 19.015,
+      "throughput_pps": 52589,
+      "overhead_vs_null": 1.52
+    },
+    {
+      "censor": "null",
+      "pcap_size": 1000,
+      "median_us": 20307,
+      "mean_us": 20260.7,
+      "stdev_us": 544.0,
+      "min_us": 19695,
+      "max_us": 20780,
+      "n": 3,
+      "per_packet_us": 20.307,
+      "throughput_pps": 49244,
+      "overhead_vs_null": 1.0
+    },
+    {
+      "censor": "null",
+      "pcap_size": 5000,
+      "median_us": 72327,
+      "mean_us": 72962,
+      "stdev_us": 1434.1,
+      "min_us": 71955,
+      "max_us": 74604,
+      "n": 3,
+      "per_packet_us": 14.465,
+      "throughput_pps": 69130,
+      "overhead_vs_null": 1.0
+    },
+    {
+      "censor": "null",
+      "pcap_size": 10000,
+      "median_us": 133848,
+      "mean_us": 135112,
+      "stdev_us": 2605.1,
+      "min_us": 133380,
+      "max_us": 138108,
+      "n": 3,
+      "per_packet_us": 13.385,
+      "throughput_pps": 74712,
+      "overhead_vs_null": 1.0
+    },
+    {
+      "censor": "null",
+      "pcap_size": 50000,
+      "median_us": 625570,
+      "mean_us": 627333,
+      "stdev_us": 3704.7,
+      "min_us": 624839,
+      "max_us": 631590,
+      "n": 3,
+      "per_packet_us": 12.511,
+      "throughput_pps": 79927,
+      "overhead_vs_null": 1.0
+    },
+    {
+      "censor": "sni_filter",
+      "pcap_size": 1000,
+      "median_us": 41594,
+      "mean_us": 41521.3,
+      "stdev_us": 241.3,
+      "min_us": 41252,
+      "max_us": 41718,
+      "n": 3,
+      "per_packet_us": 41.594,
+      "throughput_pps": 24042,
+      "overhead_vs_null": 2.048
+    },
+    {
+      "censor": "sni_filter",
+      "pcap_size": 5000,
+      "median_us": 160569,
+      "mean_us": 161176.3,
+      "stdev_us": 2907.0,
+      "min_us": 158621,
+      "max_us": 164339,
+      "n": 3,
+      "per_packet_us": 32.114,
+      "throughput_pps": 31139,
+      "overhead_vs_null": 2.22
+    },
+    {
+      "censor": "sni_filter",
+      "pcap_size": 10000,
+      "median_us": 306972,
+      "mean_us": 307769.7,
+      "stdev_us": 2940.8,
+      "min_us": 305310,
+      "max_us": 311027,
+      "n": 3,
+      "per_packet_us": 30.697,
+      "throughput_pps": 32576,
+      "overhead_vs_null": 2.293
+    },
+    {
+      "censor": "sni_filter",
+      "pcap_size": 50000,
+      "median_us": 1524516,
+      "mean_us": 1511635,
+      "stdev_us": 23456.8,
+      "min_us": 1484560,
+      "max_us": 1525829,
+      "n": 3,
+      "per_packet_us": 30.49,
+      "throughput_pps": 32797,
+      "overhead_vs_null": 2.437
+    }
+  ]
+}

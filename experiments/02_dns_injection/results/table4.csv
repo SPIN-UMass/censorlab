@@ -1,0 +1,5 @@
+tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
+PyCL,11793,12421.3,2199.9,10604,14867,3,27,
+CensorLang,1942,1945.7,23.7,1924,1971,3,3,drop-only (no injection)
+Zeek,546908,547895.3,7229.7,541210,555568,3,53,detection-only (passive)
+Scapy,6484,6791.3,598.4,6409,7481,3,74,

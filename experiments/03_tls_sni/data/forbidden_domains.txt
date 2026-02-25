@@ -1,0 +1,38 @@
+# Domains commonly blocked via TLS SNI filtering
+# Curated from Citizen Lab test-lists, OONI reports, and documented SNI-based
+# blocking in China (GFW), Iran, Russia, and other censoring states.
+google.com
+facebook.com
+twitter.com
+youtube.com
+instagram.com
+whatsapp.com
+telegram.org
+signal.org
+wikipedia.org
+reddit.com
+discord.com
+medium.com
+soundcloud.com
+tumblr.com
+vimeo.com
+pinterest.com
+nytimes.com
+washingtonpost.com
+bbc.com
+theguardian.com
+reuters.com
+amnesty.org
+hrw.org
+rsf.org
+torproject.org
+psiphon.ca
+lanternvpn.org
+mullvad.net
+protonvpn.com
+nordvpn.com
+expressvpn.com
+github.com
+gitlab.com
+stackoverflow.com
+twitch.tv

@@ -1,0 +1,13 @@
+tool,iteration,time_us
+PyCL,1,14867
+PyCL,2,11793
+PyCL,3,10604
+CensorLang,1,1942
+CensorLang,2,1971
+CensorLang,3,1924
+Zeek,1,546908
+Zeek,2,541210
+Zeek,3,555568
+Scapy,1,7481
+Scapy,2,6409
+Scapy,3,6484

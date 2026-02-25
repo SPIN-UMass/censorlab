@@ -1,0 +1,50 @@
+{
+  "table": "table4",
+  "experiment": "04_shadowsocks",
+  "rows": [
+    {
+      "tool": "PyCL",
+      "median_us": 8092,
+      "mean_us": 8153.3,
+      "stdev_us": 1030.4,
+      "min_us": 7155,
+      "max_us": 9213,
+      "n": 3,
+      "loc": 46,
+      "note": ""
+    },
+    {
+      "tool": "CensorLang",
+      "median_us": 1607,
+      "mean_us": 1604.3,
+      "stdev_us": 30.1,
+      "min_us": 1573,
+      "max_us": 1633,
+      "n": 3,
+      "loc": 5,
+      "note": "entropy-only (no popcount/byte check)"
+    },
+    {
+      "tool": "Zeek",
+      "median_us": 548138,
+      "mean_us": 567972.3,
+      "stdev_us": 40712.5,
+      "min_us": 540978,
+      "max_us": 614801,
+      "n": 3,
+      "loc": 92,
+      "note": "fingerprint-only (passive, no entropy/popcount)"
+    },
+    {
+      "tool": "Scapy",
+      "median_us": 11793,
+      "mean_us": 11773,
+      "stdev_us": 48.2,
+      "min_us": 11718,
+      "max_us": 11808,
+      "n": 3,
+      "loc": 112,
+      "note": ""
+    }
+  ]
+}

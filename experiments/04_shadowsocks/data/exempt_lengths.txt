@@ -1,0 +1,16 @@
+# Exemption rules from Wu et al. 2023
+# "How the Great Firewall of China Detects and Blocks Fully Encrypted Traffic"
+#
+# These payload lengths are exempt from blocking because they commonly
+# appear in legitimate protocol handshakes.
+
+# TLS record sizes (ClientHello variants)
+517
+518
+519
+520
+521
+
+# SSH handshake typical sizes
+1460
+1500

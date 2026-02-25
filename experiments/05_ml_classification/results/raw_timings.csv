@@ -1,0 +1,10 @@
+tool,iteration,time_us
+CensorLang,1,13790
+CensorLang,2,14115
+CensorLang,3,14800
+Zeek,1,549312
+Zeek,2,556012
+Zeek,3,543478
+Scapy,1,78836
+Scapy,2,79119
+Scapy,3,80826

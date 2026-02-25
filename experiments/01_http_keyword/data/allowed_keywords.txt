@@ -1,0 +1,37 @@
+# Control set: common English words that should NOT trigger filtering
+# Used as negative examples for TPR/TNR evaluation
+hello
+world
+weather
+sports
+music
+travel
+cooking
+garden
+science
+technology
+education
+business
+finance
+health
+medicine
+shopping
+fashion
+movies
+books
+history
+geography
+mathematics
+physics
+chemistry
+biology
+computer
+internet
+software
+hardware
+network
+database
+server
+client
+browser
+website

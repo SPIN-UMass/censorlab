@@ -1,0 +1,59 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	shadowsocks_matches
+#open	2026-02-25-14-06-51
+#fields	ts	uid	orig_h	orig_p	resp_h	resp_p	payload_len	reason	action
+#types	time	string	addr	port	addr	port	count	string	string
+1771965901.073591	Ci2fXD4SnG6Qk16NPl	10.0.0.1	10043	10.0.0.2	443	1286	no_fingerprint_non_printable	would_drop
+1771965901.073591	CtyeNf1GljlXlR7yBd	10.0.0.1	10005	10.0.0.2	443	507	no_fingerprint_non_printable	would_drop
+1771965901.074189	Cfg1rzzmG8YNSPXfg	10.0.0.1	10044	10.0.0.2	443	591	no_fingerprint_non_printable	would_drop
+1771965901.079713	C9fBkw3Iy3wI9KFYa9	10.0.0.1	10018	10.0.0.2	443	1282	no_fingerprint_non_printable	would_drop
+1771965901.110353	Cp8KBQ3j5QzHdVRkKe	10.0.0.1	10009	10.0.0.2	443	228	no_fingerprint_non_printable	would_drop
+1771965901.110353	COh9MO2EyA4a699kkg	10.0.0.1	10006	10.0.0.2	443	335	no_fingerprint_non_printable	would_drop
+1771965901.110353	C6z8Vq1Y9RQiulhTS2	10.0.0.1	10024	10.0.0.2	443	909	no_fingerprint_non_printable	would_drop
+1771965901.110353	CAB6yt4sIBu0GZjyO1	10.0.0.1	10023	10.0.0.2	443	1166	no_fingerprint_non_printable	would_drop
+1771965901.110353	C2V4Ap4EvK4LFeYZ2f	10.0.0.1	10038	10.0.0.2	443	239	no_fingerprint_non_printable	would_drop
+1771965901.110353	CX0OkB21qNH6d1LfV4	10.0.0.1	10019	10.0.0.2	443	104	no_fingerprint_non_printable	would_drop
+1771965901.110353	CyU1doj1NM0c8Gfb	10.0.0.1	10022	10.0.0.2	443	1380	no_fingerprint_non_printable	would_drop
+1771965901.110353	CJ3NmC3HNlNxhxXRB1	10.0.0.1	10029	10.0.0.2	443	63	no_fingerprint_non_printable	would_drop
+1771965901.110353	CsEqsKldzXuUSdO5d	10.0.0.1	10020	10.0.0.2	443	1199	no_fingerprint_non_printable	would_drop
+1771965901.110353	CxL7t43JFsD3fAigp6	10.0.0.1	10028	10.0.0.2	443	619	no_fingerprint_non_printable	would_drop
+1771965901.110353	CD8YF44HN1fVT7IU2	10.0.0.1	10048	10.0.0.2	443	305	no_fingerprint_non_printable	would_drop
+1771965901.110353	CofyG5Wr7BaRkvXG8	10.0.0.1	10011	10.0.0.2	443	914	no_fingerprint_non_printable	would_drop
+1771965901.110353	CYebnUQ4zy7Z98Nkk	10.0.0.1	10049	10.0.0.2	443	825	no_fingerprint_non_printable	would_drop
+1771965901.110353	CuEsUl4crzIwRuMRK9	10.0.0.1	10012	10.0.0.2	443	115	no_fingerprint_non_printable	would_drop
+1771965901.110353	CJsxyl2QuAIam3PdFj	10.0.0.1	10026	10.0.0.2	443	969	no_fingerprint_non_printable	would_drop
+1771965901.110353	C0TKYL3228iIT0fxh	10.0.0.1	10042	10.0.0.2	443	754	no_fingerprint_non_printable	would_drop
+1771965901.110353	Cv37nG3Thm6wpM61pf	10.0.0.1	10036	10.0.0.2	443	739	no_fingerprint_non_printable	would_drop
+1771965901.110353	Cq0zu9480aRC8e0xzi	10.0.0.1	10034	10.0.0.2	443	368	no_fingerprint_non_printable	would_drop
+1771965901.110353	CqJvPE2RNLajnWVNA6	10.0.0.1	10013	10.0.0.2	443	111	no_fingerprint_non_printable	would_drop
+1771965901.110353	Cv4JSHvWkzl15FcEk	10.0.0.1	10017	10.0.0.2	443	1084	no_fingerprint_non_printable	would_drop
+1771965901.110353	Cg3qZx4m4ydWPEqnUk	10.0.0.1	10032	10.0.0.2	443	746	no_fingerprint_non_printable	would_drop
+1771965901.110353	CvlDQK1h8UyP1LwSFh	10.0.0.1	10003	10.0.0.2	443	613	no_fingerprint_non_printable	would_drop
+1771965901.110353	C22w272ANsY7e7rNej	10.0.0.1	10040	10.0.0.2	443	248	no_fingerprint_non_printable	would_drop
+1771965901.110353	CF3k9C3bR0geSs2Uqh	10.0.0.1	10045	10.0.0.2	443	138	no_fingerprint_non_printable	would_drop
+1771965901.111541	CoRYQC1dbkfIQDP3Yk	10.0.0.1	10035	10.0.0.2	443	490	no_fingerprint_non_printable	would_drop
+1771965901.111541	CSfMBA1Fctd8c0aQM4	10.0.0.1	10037	10.0.0.2	443	259	no_fingerprint_non_printable	would_drop
+1771965901.111541	CRWA4b4oCQ1eHZp0R4	10.0.0.1	10001	10.0.0.2	443	278	no_fingerprint_non_printable	would_drop
+1771965901.111541	Cp1LLJ31roMWuT0v2d	10.0.0.1	10004	10.0.0.2	443	551	no_fingerprint_non_printable	would_drop
+1771965901.111541	CUudlm46Dh2RS7cdvk	10.0.0.1	10031	10.0.0.2	443	915	no_fingerprint_non_printable	would_drop
+1771965901.111541	CCQCNj12Uqcruw9Lvh	10.0.0.1	10015	10.0.0.2	443	497	no_fingerprint_non_printable	would_drop
+1771965901.111541	CWsIgo3ahpSNwMG2dl	10.0.0.1	10047	10.0.0.2	443	1148	no_fingerprint_non_printable	would_drop
+1771965901.111541	C4zmql2FpvSG9zOdXk	10.0.0.1	10025	10.0.0.2	443	501	no_fingerprint_non_printable	would_drop
+1771965901.112721	CdBxKNdaY3Xv93rgk	10.0.0.1	10027	10.0.0.2	443	1256	no_fingerprint_non_printable	would_drop
+1771965901.112721	CK86vKkzUmNJfkgAg	10.0.0.1	10033	10.0.0.2	443	619	no_fingerprint_non_printable	would_drop
+1771965901.112721	CF5CR31bFFb1l27yg3	10.0.0.1	10021	10.0.0.2	443	457	no_fingerprint_non_printable	would_drop
+1771965901.112721	CIvsOa1e2TNoSkX348	10.0.0.1	10016	10.0.0.2	443	526	no_fingerprint_non_printable	would_drop
+1771965901.112721	Co9hns4LlfIJc5JLC5	10.0.0.1	10008	10.0.0.2	443	1166	no_fingerprint_non_printable	would_drop
+1771965901.112721	CWaZQzLjFksJFEGHe	10.0.0.1	10010	10.0.0.2	443	1259	no_fingerprint_non_printable	would_drop
+1771965901.112721	CWU8Z43EP4bJDClnpj	10.0.0.1	10007	10.0.0.2	443	259	no_fingerprint_non_printable	would_drop
+1771965901.112721	C9xLk1NridWY09Xe7	10.0.0.1	10030	10.0.0.2	443	376	no_fingerprint_non_printable	would_drop
+1771965901.112721	CJWoFG18GMcPY4bzs7	10.0.0.1	10039	10.0.0.2	443	828	no_fingerprint_non_printable	would_drop
+1771965901.112721	CuPg4n2KCzVpwqJy97	10.0.0.1	10046	10.0.0.2	443	990	no_fingerprint_non_printable	would_drop
+1771965901.112721	C6KMcUVEUWNFpHlP2	10.0.0.1	10014	10.0.0.2	443	241	no_fingerprint_non_printable	would_drop
+1771965901.112721	CmyMww291cochNNfLa	10.0.0.1	10002	10.0.0.2	443	101	no_fingerprint_non_printable	would_drop
+1771965901.112721	C4EViF4QMPRIUXXXle	10.0.0.1	10041	10.0.0.2	443	785	no_fingerprint_non_printable	would_drop
+1771965901.112721	CFucim3Kz56M9U87F8	10.0.0.1	10000	10.0.0.2	443	1359	no_fingerprint_non_printable	would_drop
+#close	2026-02-25-14-06-51

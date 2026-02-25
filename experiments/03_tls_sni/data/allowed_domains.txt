@@ -1,0 +1,37 @@
+# Control set: benign domains that should NOT trigger TLS SNI filtering
+# Common utility, infrastructure, and hardware vendor domains
+example.com
+example.org
+example.net
+iana.org
+ietf.org
+w3.org
+apache.org
+kernel.org
+gnu.org
+linuxfoundation.org
+mozilla.org
+python.org
+rust-lang.org
+golang.org
+nodejs.org
+ubuntu.com
+fedoraproject.org
+debian.org
+archlinux.org
+centos.org
+redhat.com
+ibm.com
+intel.com
+arm.com
+nvidia.com
+amd.com
+cisco.com
+dell.com
+hp.com
+lenovo.com
+samsung.com
+lg.com
+sony.com
+panasonic.com
+toshiba.com

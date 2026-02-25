@@ -1,0 +1,39 @@
+# GFW keyword list for HTTP keyword filtering experiment
+# Curated from public research: Citizen Lab test-lists, ConceptDoppler (Crandall et al. 2007),
+# GFW probing studies (Knockel et al. 2015, Anonymous 2015), and gfw-report.
+# These are well-documented historically blocked keywords in HTTP GET requests.
+falun
+falungong
+freegate
+ultrasurf
+dynaweb
+tiananmen
+dalailama
+tianwang
+tibetpost
+minghui
+epochtimes
+ntdtv
+wujie
+zhengjian
+edoors
+renminbao
+xinsheng
+aboluowang
+bannedbook
+boxun
+chinadigitaltimes
+dongtaiwang
+greatfire
+huaglad
+kanzhongguo
+minzhuzhongguo
+pincong
+rfa
+secretchina
+soundofhope
+voachinese
+wangzhuan
+weijingsheng
+weiquanwang
+zhuichaguoji
