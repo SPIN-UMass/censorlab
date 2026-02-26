@@ -39,5 +39,10 @@ RUN source /dev-env.sh && cd website && zola build
 # MOTD shown on interactive shell startup
 RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:  http://localhost:1116/\nDemos: ls demos/\nHelp:  censorlab --help\n\n' > /etc/motd
 
+# Build fingerprint — passed by censorlab.sh to detect when rebuilds are needed.
+# Must be last so it doesn't invalidate earlier cached layers.
+ARG BUILD_HASH=""
+LABEL censorlab.build_hash="${BUILD_HASH}"
+
 ENTRYPOINT ["bash", "-c", "source /dev-env.sh && { if [ \"$1\" = bash ] && [ $# -eq 1 ] && [ -t 0 ]; then python3 -m http.server 1116 --bind 0.0.0.0 -d /censorlab/website/public &>/dev/null & cat /etc/motd; fi; exec \"$@\"; }", "--"]
 CMD ["bash"]

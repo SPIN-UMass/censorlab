@@ -12,8 +12,9 @@
 #   bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
 #   bash docker/censorlab.sh -c censor.toml pcap traffic.pcap
 #
+# The image is automatically rebuilt when source files change.
+#
 # Environment variables:
-#   REBUILD=1      Force rebuild of the Docker image
 #   DOCKER_ARGS    Extra arguments passed to `docker compose run`
 #                  e.g. DOCKER_ARGS="-v /path/to/configs:/censorlab/custom"
 
@@ -21,12 +22,31 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-REBUILD="${REBUILD:-0}"
 
-# Build image if missing or rebuild requested
-if [ "$REBUILD" = "1" ] || ! docker image inspect censorlab:latest &>/dev/null; then
+# Ensure git submodules are initialized (needed for website assets like Font Awesome)
+if [ -f "$REPO_ROOT/.gitmodules" ] && command -v git &>/dev/null; then
+    git -C "$REPO_ROOT" submodule update --init --recursive 2>/dev/null || true
+fi
+
+# Compute a fingerprint of files that affect the Docker image.
+# Uses git so it's portable across Linux and macOS.
+compute_build_hash() {
+    (cd "$REPO_ROOT" && {
+        git rev-parse HEAD
+        git diff HEAD -- docker/ flake.nix flake.lock Cargo.toml Cargo.lock \
+            build.rs src/ demos/ website/ .gitmodules
+        git submodule status
+    } 2>/dev/null | git hash-object --stdin 2>/dev/null) || echo "unknown"
+}
+
+BUILD_HASH=$(compute_build_hash)
+STORED_HASH=$(docker inspect --format '{{index .Config.Labels "censorlab.build_hash"}}' \
+    censorlab:latest 2>/dev/null || echo "")
+
+if [ "$BUILD_HASH" = "unknown" ] || [ "$BUILD_HASH" != "$STORED_HASH" ]; then
     echo "=== Building CensorLab Docker image ==="
-    docker compose -f "$SCRIPT_DIR/docker-compose.yml" build censorlab
+    docker compose -f "$SCRIPT_DIR/docker-compose.yml" build \
+        --build-arg BUILD_HASH="$BUILD_HASH" censorlab
     echo ""
 fi
 
