@@ -30,6 +30,8 @@ fi
 
 # Compute a fingerprint of files that affect the Docker image.
 # Uses git so it's portable across Linux and macOS.
+# NOTE: These paths must match the COPY sources in the Dockerfile.
+# If the Dockerfile's COPY paths change, update the list here too.
 compute_build_hash() {
     (cd "$REPO_ROOT" && {
         git rev-parse HEAD

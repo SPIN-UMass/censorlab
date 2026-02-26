@@ -73,6 +73,7 @@
               pkgs.zeek
               pkgs.tcpdump
               pkgs.curl
+              pkgs.dnsutils
               pkgs.iptables
               pkgs.coreutils
               pkgs.bash
