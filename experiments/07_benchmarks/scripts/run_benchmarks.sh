@@ -19,7 +19,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPERIMENT_DIR="$(dirname "$SCRIPT_DIR")"
 RESULTS_DIR="$EXPERIMENT_DIR/results"
-ITERATIONS="${1:-5}"
+ITERATIONS="${1:-10}"
+WARMUP_RUNS=2
 
 mkdir -p "$RESULTS_DIR"
 
@@ -49,7 +50,8 @@ RESULTS_CSV="$RESULTS_DIR/benchmark_results.csv"
 echo "censor,pcap_size,iteration,time_us" > "$RESULTS_CSV"
 
 echo "=== Experiment 7: Throughput/Latency Benchmarks ==="
-echo "Iterations per configuration: $ITERATIONS"
+echo "Warmup runs per configuration: $WARMUP_RUNS"
+echo "Measured iterations per configuration: $ITERATIONS"
 echo "PCAP sizes: ${PCAP_SIZES[*]}"
 echo "Censors: ${CENSORS[*]}"
 echo ""
@@ -70,37 +72,58 @@ done
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 2: Run benchmarks
+# Step 2: Build randomized execution order
 # ---------------------------------------------------------------------------
-total_configs=$(( ${#CENSORS[@]} * ${#PCAP_SIZES[@]} ))
-current=0
-
+configs=()
 for censor in "${CENSORS[@]}"; do
     for size in "${PCAP_SIZES[@]}"; do
-        current=$((current + 1))
-        pcap_rel="pcap/bench_${size}.pcap"
-        config_rel="censors/${censor}.toml"
-
-        echo "--- [$current/$total_configs] $censor @ $size packets ---"
-
-        for i in $(seq 1 "$ITERATIONS"); do
-            output=$(run_censorlab "$config_rel" "$pcap_rel" 2>&1)
-            timing_us=$(extract_us "$output")
-            if [ -n "$timing_us" ]; then
-                echo "$censor,$size,$i,$timing_us" >> "$RESULTS_CSV"
-                echo "  Run $i: ${timing_us}us"
-            else
-                echo "  Run $i: (timing not found in output)"
-                # Save problematic output for debugging
-                echo "$output" > "$RESULTS_DIR/debug_${censor}_${size}_${i}.txt"
-            fi
-        done
-        echo ""
+        configs+=("${censor}:${size}")
     done
 done
 
+# Shuffle the configurations to avoid cache/ordering effects
+mapfile -t configs < <(printf '%s\n' "${configs[@]}" | shuf)
+
 # ---------------------------------------------------------------------------
-# Step 3: Summary
+# Step 3: Run benchmarks (randomized order)
+# ---------------------------------------------------------------------------
+total_configs=${#configs[@]}
+current=0
+
+for entry in "${configs[@]}"; do
+    censor="${entry%%:*}"
+    size="${entry##*:}"
+    current=$((current + 1))
+    pcap_rel="pcap/bench_${size}.pcap"
+    config_rel="censors/${censor}.toml"
+
+    echo "--- [$current/$total_configs] $censor @ $size packets ---"
+
+    # Warmup runs (not recorded)
+    for i in $(seq 1 "$WARMUP_RUNS"); do
+        output=$(run_censorlab "$config_rel" "$pcap_rel" 2>&1)
+        timing_us=$(extract_us "$output")
+        echo "  Warmup $i: ${timing_us:-N/A}us"
+    done
+
+    # Measured runs
+    for i in $(seq 1 "$ITERATIONS"); do
+        output=$(run_censorlab "$config_rel" "$pcap_rel" 2>&1)
+        timing_us=$(extract_us "$output")
+        if [ -n "$timing_us" ]; then
+            echo "$censor,$size,$i,$timing_us" >> "$RESULTS_CSV"
+            echo "  Run $i: ${timing_us}us"
+        else
+            echo "  Run $i: (timing not found in output)"
+            # Save problematic output for debugging
+            echo "$output" > "$RESULTS_DIR/debug_${censor}_${size}_${i}.txt"
+        fi
+    done
+    echo ""
+done
+
+# ---------------------------------------------------------------------------
+# Step 4: Summary
 # ---------------------------------------------------------------------------
 echo "=== Done ==="
 echo "Raw results: $RESULTS_CSV"

@@ -35,10 +35,10 @@ def parse_timing_file(path):
 def parse_censorlab_timing_us(output_text):
     """Parse CensorLab PCAP mode timing from its stdout/stderr.
 
-    CensorLab prints: "Pcap mode took <N>us to process the file"
-    Returns elapsed microseconds (int) or None if not found.
+    CensorLab prints: "Pcap mode took <N>us to process the file (<M>us including I/O)"
+    Returns elapsed microseconds including I/O (int) or None if not found.
     """
-    match = re.search(r"took (\d+)us to process", output_text)
+    match = re.search(r"\((\d+)us including I/O\)", output_text)
     if match:
         return int(match.group(1))
     return None

@@ -45,7 +45,16 @@ FAILED=()
 echo "=== Step 1: Generating PCAPs ==="
 for exp in "${SHOWCASE_EXPERIMENTS[@]}"; do
     pcap_path="$EXPERIMENTS_DIR/$exp/pcap/test.pcap"
-    if [ -f "$pcap_path" ]; then
+    # Exp 05 also needs train.pcap for the train/test split
+    if [ "$exp" = "05_ml_classification" ]; then
+        train_path="$EXPERIMENTS_DIR/$exp/pcap/train.pcap"
+        if [ -f "$pcap_path" ] && [ -f "$train_path" ]; then
+            echo "  [$exp] PCAPs already exist, skipping"
+        else
+            echo "  [$exp] Generating train + test PCAPs..."
+            python3 "$EXPERIMENTS_DIR/$exp/pcap/generate_pcap.py"
+        fi
+    elif [ -f "$pcap_path" ]; then
         echo "  [$exp] PCAP already exists, skipping"
     else
         echo "  [$exp] Generating PCAP..."

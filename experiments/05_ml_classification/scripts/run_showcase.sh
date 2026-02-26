@@ -56,7 +56,7 @@ echo "tool,iteration,time_us" > "$RAW_TIMINGS"
 
 # Helper: extract microseconds from CensorLab output
 extract_censorlab_us() {
-    echo "$1" | grep -oP 'took \K\d+(?=us)' || echo ""
+    echo "$1" | grep -oP '\(\K\d+(?=us including I/O\))' || echo ""
 }
 
 # ---------------------------------------------------------------------------
@@ -66,8 +66,7 @@ echo "--- CensorLab (PyCL) ---"
 
 if [ ! -f "$MODEL" ]; then
     echo "  model.onnx not found — training automatically..."
-    python3 "$EXPERIMENT_DIR/train_model.py" \
-        --pcap "$PCAP" --labels "$LABELS" --output "$MODEL"
+    python3 "$EXPERIMENT_DIR/train_model.py" --output "$MODEL"
     if [ ! -f "$MODEL" ]; then
         echo "  ERROR: Training failed. SKIPPED: PyCL benchmark requires model.onnx"
     fi

@@ -12,7 +12,6 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     image: censorlab:latest
-    network_mode: host
     cap_add:
       - NET_ADMIN
       - NET_RAW

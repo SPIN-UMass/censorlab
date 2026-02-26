@@ -51,7 +51,7 @@ echo "tool,iteration,time_us" > "$RAW_TIMINGS"
 
 # Helper: extract microseconds from CensorLab output
 extract_censorlab_us() {
-    echo "$1" | grep -oP 'took \K\d+(?=us)' || echo ""
+    echo "$1" | grep -oP '\(\K\d+(?=us including I/O\))' || echo ""
 }
 
 # ---------------------------------------------------------------------------

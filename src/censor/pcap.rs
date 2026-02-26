@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io;
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::Instant;
 use thiserror::Error;
 
 #[derive(Debug, Parser)]
@@ -30,13 +30,15 @@ pub struct Context {
 
 impl Censor {
     pub fn run_pcap(mut self, args: Args) -> Result<(), PcapModeError> {
-        // Start the timer
-        let start = SystemTime::now();
+        // Total timer includes file I/O (for cross-tool comparisons)
+        let start_total = Instant::now();
         // Open the pcap
         let pcap_file = File::open(args.pcap_path)?;
         let mut pcap_reader = pcap_parser::create_reader(usize::from(u16::MAX), pcap_file)
             .map_err(|err| err.to_string())
             .map_err(PcapModeError::Pcap)?;
+        // Processing timer excludes file I/O (for CensorLab-only benchmarks)
+        let start_processing = Instant::now();
         // Create our context. This will basically never change
         let mut context = Context {
             client_ip: args.client_ip.into(),
@@ -87,8 +89,9 @@ impl Censor {
             pcap_reader.consume(size);
         }
         println!(
-            "Pcap mode took {}us to process the file",
-            start.elapsed().unwrap().as_micros()
+            "Pcap mode took {}us to process the file ({}us including I/O)",
+            start_processing.elapsed().as_micros(),
+            start_total.elapsed().as_micros()
         );
         Ok(())
     }

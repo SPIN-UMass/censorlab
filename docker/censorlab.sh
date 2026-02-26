@@ -30,10 +30,15 @@ if [ "$REBUILD" = "1" ] || ! docker image inspect censorlab:latest &>/dev/null; 
 fi
 
 # --shell flag: drop into an interactive shell
-if [ "${1:-}" = "--shell" ]; then
+# Use --shell-nfq for a shell with host networking + NET_ADMIN/NET_RAW
+if [ "${1:-}" = "--shell" ] || [ "${1:-}" = "--shell-nfq" ]; then
+    SERVICE="censorlab"
+    if [ "${1:-}" = "--shell-nfq" ]; then
+        SERVICE="censorlab-nfq"
+    fi
     # shellcheck disable=SC2086
     exec docker compose -f "$SCRIPT_DIR/docker-compose.yml" run --rm \
-        ${DOCKER_ARGS:-} censorlab bash
+        ${DOCKER_ARGS:-} "$SERVICE" bash
 fi
 
 # Auto-detect NFQ mode by scanning args for "nfq"
