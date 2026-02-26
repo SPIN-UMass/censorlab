@@ -24,7 +24,7 @@ You can also run the steps separately:
 
 ```bash
 # Build the image
-docker build -f experiments/Dockerfile -t censorlab-experiments .
+docker build -f docker/Dockerfile -t censorlab-experiments .
 
 # Run all experiments
 docker run --rm -v $(pwd)/experiments:/censorlab/experiments censorlab-experiments bash experiments/scripts/run_all.sh

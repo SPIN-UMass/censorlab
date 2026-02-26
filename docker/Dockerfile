@@ -31,5 +31,8 @@ RUN nix print-dev-env .#experiments > /dev-env.sh
 # Copy experiments last — changes here only rebuild this cheap layer
 COPY experiments/ experiments/
 
-ENTRYPOINT ["bash", "-c", "source /dev-env.sh && exec \"$@\"", "--"]
+# MOTD shown on interactive shell startup
+RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:  https://censorlab.cs.umass.edu/\nDemos: ls demos/\nHelp:  censorlab --help\n\n' > /etc/motd
+
+ENTRYPOINT ["bash", "-c", "source /dev-env.sh && { [ \"$1\" = bash ] && [ $# -eq 1 ] && [ -t 0 ] && cat /etc/motd; exec \"$@\"; }", "--"]
 CMD ["bash"]

@@ -1,0 +1,20 @@
+services:
+  censorlab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: censorlab:latest
+    stdin_open: true
+    tty: true
+
+  censorlab-nfq:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: censorlab:latest
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    stdin_open: true
+    tty: true

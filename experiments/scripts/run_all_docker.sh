@@ -21,7 +21,7 @@ REBUILD="${REBUILD:-0}"
 
 if [ "$REBUILD" = "1" ] || ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
     echo "=== Building Docker image ==="
-    docker build -f "$REPO_ROOT/experiments/Dockerfile" -t "$IMAGE_NAME" "$REPO_ROOT"
+    docker build -f "$REPO_ROOT/docker/Dockerfile" -t "$IMAGE_NAME" "$REPO_ROOT"
     echo ""
 else
     echo "=== Docker image '$IMAGE_NAME' already exists (set REBUILD=1 to force rebuild) ==="
