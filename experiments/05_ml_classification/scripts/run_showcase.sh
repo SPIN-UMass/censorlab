@@ -16,9 +16,7 @@
 #
 # Usage:
 #   bash experiments/05_ml_classification/scripts/run_showcase.sh [ITERATIONS]
-#
-# Set USE_DOCKER=1 to run CensorLab via Docker (avoids capability issues):
-#   USE_DOCKER=1 bash experiments/05_ml_classification/scripts/run_showcase.sh [ITERATIONS]
+
 
 set -euo pipefail
 
@@ -29,26 +27,15 @@ PCAP="$EXPERIMENT_DIR/pcap/test.pcap"
 LABELS="$EXPERIMENT_DIR/pcap/labels.csv"
 MODEL="$EXPERIMENT_DIR/model.onnx"
 ITERATIONS="${1:-5}"
-USE_DOCKER="${USE_DOCKER:-0}"
-
-# Docker image name (built via: nix build .#experiment-image && docker load < result)
-DOCKER_IMAGE="censorlab-experiment:latest"
 
 mkdir -p "$RESULTS_DIR"
 
-# Helper: run censorlab, either natively or via Docker
+# Helper: run censorlab
 run_censorlab() {
     local config_base="$1"
     local pcap_rel="$2"
     local client_ip="$3"
-    if [ "$USE_DOCKER" = "1" ]; then
-        docker run --rm \
-            -v "$EXPERIMENT_DIR:/experiment:ro" \
-            "$DOCKER_IMAGE" \
-            censorlab -c "/experiment/$config_base" pcap "/experiment/$pcap_rel" "$client_ip"
-    else
-        censorlab -c "$EXPERIMENT_DIR/$config_base" pcap "$EXPERIMENT_DIR/$pcap_rel" "$client_ip"
-    fi
+    censorlab -c "$EXPERIMENT_DIR/$config_base" pcap "$EXPERIMENT_DIR/$pcap_rel" "$client_ip"
 }
 
 # Verify PCAP exists

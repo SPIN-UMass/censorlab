@@ -7,7 +7,7 @@
 #
 # Usage:
 #   # Build the censorlab image first:
-#   #   nix build .#experiment-image && docker load < result
+#   #   docker build -f docker/Dockerfile -t censorlab .
 #   # Or use a pre-built image:
 #   docker compose -f experiments/docker-compose.yml up
 
@@ -26,7 +26,7 @@ services:
       retries: 10
 
   censor:
-    image: censorlab-experiment:latest
+    image: censorlab:latest
     command: >
       bash -c "
         iptables -I FORWARD -p tcp --dport 8080 -j NFQUEUE --queue-num 0 &&
@@ -46,7 +46,7 @@ services:
         condition: service_healthy
 
   traffic-gen:
-    image: censorlab-experiment:latest
+    image: censorlab:latest
     command: >
       bash -c "
         sleep 3 &&

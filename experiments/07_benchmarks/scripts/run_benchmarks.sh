@@ -12,9 +12,7 @@
 #
 # Usage:
 #   bash experiments/07_benchmarks/scripts/run_benchmarks.sh [ITERATIONS]
-#
-# Set USE_DOCKER=1 to run CensorLab via Docker (avoids capability issues):
-#   USE_DOCKER=1 bash experiments/07_benchmarks/scripts/run_benchmarks.sh [ITERATIONS]
+
 
 set -euo pipefail
 
@@ -22,10 +20,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPERIMENT_DIR="$(dirname "$SCRIPT_DIR")"
 RESULTS_DIR="$EXPERIMENT_DIR/results"
 ITERATIONS="${1:-5}"
-USE_DOCKER="${USE_DOCKER:-0}"
-
-# Docker image name (built via: nix build .#experiment-image && docker load < result)
-DOCKER_IMAGE="censorlab-experiment:latest"
 
 mkdir -p "$RESULTS_DIR"
 
@@ -35,20 +29,13 @@ PCAP_SIZES=(1000 5000 10000 50000)
 # Censors to benchmark
 CENSORS=("null" "sni_filter" "entropy")
 
-# Helper: run censorlab, either natively or via Docker
+# Helper: run censorlab
 # Usage: run_censorlab <config_relpath> <pcap_relpath>
 # Paths are relative to EXPERIMENT_DIR.
 run_censorlab() {
     local config="$1"
     local pcap="$2"
-    if [ "$USE_DOCKER" = "1" ]; then
-        docker run --rm \
-            -v "$EXPERIMENT_DIR:/experiment:ro" \
-            "$DOCKER_IMAGE" \
-            censorlab -c "/experiment/$config" pcap "/experiment/$pcap" "10.0.0.1"
-    else
-        censorlab -c "$EXPERIMENT_DIR/$config" pcap "$EXPERIMENT_DIR/$pcap" "10.0.0.1"
-    fi
+    censorlab -c "$EXPERIMENT_DIR/$config" pcap "$EXPERIMENT_DIR/$pcap" "10.0.0.1"
 }
 
 # Helper: extract microseconds from CensorLab output

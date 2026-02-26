@@ -3,54 +3,54 @@
 #empty_field	(empty)
 #unset_field	-
 #path	ml_classification_matches
-#open	2026-02-26-01-00-31
+#open	2026-02-26-01-17-59
 #fields	ts	uid	orig_h	orig_p	resp_h	resp_p	orig_bytes	resp_bytes	action	note
 #types	time	string	addr	port	addr	port	count	count	string	string
-1771987777.208369	CH7pFG3qJ5vVdLDtD7	10.0.0.1	10003	10.0.0.2	443	6186	3439	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	Cwc1rk1OkSvOpEN63d	10.0.0.1	10047	10.0.0.2	443	3411	6322	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CuZhHn1hJPwBHzvvqi	10.0.0.1	10006	10.0.0.2	443	3600	5929	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CI7jqX1vI5DUwmlLj2	10.0.0.1	10005	10.0.0.2	443	2599	5590	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CzKQaU35GYob7eAEy	10.0.0.1	10028	10.0.0.2	443	6159	4061	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CP0VnI2MhJ6xWeaug7	10.0.0.1	10007	10.0.0.2	443	5623	4778	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CNSe0H1Uf1CqoGDyG1	10.0.0.1	10013	10.0.0.2	443	5307	1918	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CzqgpX1um13GIXb8c7	10.0.0.1	10030	10.0.0.2	443	3899	2449	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CKj6EI3Ps9UPq0RuUi	10.0.0.1	10026	10.0.0.2	443	6010	4955	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CqIVos3bAslY6ODZ7g	10.0.0.1	10040	10.0.0.2	443	2445	2974	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	C8g2HSkhR0HcmhFng	10.0.0.1	10038	10.0.0.2	443	4274	5880	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	C23qZ4393IHKE67abh	10.0.0.1	10039	10.0.0.2	443	5129	4276	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CJyKMgTz4zXjp10i	10.0.0.1	10045	10.0.0.2	443	5487	4897	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CmPDNH1dJTnMgfPPsd	10.0.0.1	10046	10.0.0.2	443	4749	3784	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CDwJ5R1CQm3Rgb8Ll4	10.0.0.1	10024	10.0.0.2	443	3389	4053	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CU0Vcv4MaJWmKwM3qa	10.0.0.1	10029	10.0.0.2	443	5592	3647	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CwMqaf2nh1vmh8mZck	10.0.0.1	10000	10.0.0.2	443	5197	3926	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CUSUMp2HJGMUVtfwge	10.0.0.1	10012	10.0.0.2	443	3452	5012	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CsVS303MvkPSpKmbd2	10.0.0.1	10037	10.0.0.2	443	4466	4681	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CB8ZpY1DAhvXo8Pqoi	10.0.0.1	10033	10.0.0.2	443	4734	6386	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	C3gjWd3QFAwOpXCTCa	10.0.0.1	10009	10.0.0.2	443	6614	1224	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CBGbTf4L5gsJmRDF8k	10.0.0.1	10036	10.0.0.2	443	4468	3663	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CLrMo1cXmdQV52mU6	10.0.0.1	10016	10.0.0.2	443	8165	621	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CyUd6Pcmy3vz4EYkj	10.0.0.1	10041	10.0.0.2	443	3472	6165	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CJka1t4bQX0czdWD6i	10.0.0.1	10031	10.0.0.2	443	3331	5048	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	Cv64RM4QSULKwBLH6	10.0.0.1	10004	10.0.0.2	443	3129	5098	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CWJdJy42qzqSwLy85a	10.0.0.1	10022	10.0.0.2	443	3813	4557	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CJRsYb4ydbqOF11cyh	10.0.0.1	10015	10.0.0.2	443	2122	4250	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CJw9otIDrAOFSMbAi	10.0.0.1	10018	10.0.0.2	443	3945	4854	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CaHBqL1zeqWxTSr5b3	10.0.0.1	10002	10.0.0.2	443	5595	2835	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CM0Byn211HBKqeWix9	10.0.0.1	10035	10.0.0.2	443	4814	3614	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CJEIU5Zje0lnc9TG7	10.0.0.1	10027	10.0.0.2	443	5082	4170	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	ChS0BDgAVpp2mufAl	10.0.0.1	10001	10.0.0.2	443	3547	5253	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CftQXy2v3Wo0WtA9Bl	10.0.0.1	10008	10.0.0.2	443	3155	5683	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	Cme5h53dgsEIE4ABYa	10.0.0.1	10049	10.0.0.2	443	3393	4014	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	Chxlu01VeJMWiB3CPi	10.0.0.1	10042	10.0.0.2	443	3867	6178	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CzvzGL24hT3NaJ9FO4	10.0.0.1	10017	10.0.0.2	443	2218	4682	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CnyZpT12i1UuCij5L6	10.0.0.1	10011	10.0.0.2	443	6795	2389	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CLw9zD1BnBpi0LukY7	10.0.0.1	10023	10.0.0.2	443	4858	4118	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CgN9Em1KCpduqPfDW1	10.0.0.1	10021	10.0.0.2	443	3063	3561	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CWHDWD3kdwpnF3C9Yg	10.0.0.1	10032	10.0.0.2	443	5294	3105	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CHBQwk1YBCQEk7HJig	10.0.0.1	10020	10.0.0.2	443	5703	4753	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CtLaVZ1q25JUwr91a2	10.0.0.1	10010	10.0.0.2	443	8009	2593	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CO17Raq7GDUCWvMr2	10.0.0.1	10034	10.0.0.2	443	6368	2838	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CID22V1rX0TxOcO9P7	10.0.0.1	10019	10.0.0.2	443	2500	4237	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CTc8Bm2Mtc2MSMZgh8	10.0.0.1	10014	10.0.0.2	443	2771	3689	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-1771987777.208369	CI7Ajp2t3OmH6CbbJk	10.0.0.1	10048	10.0.0.2	443	3667	3572	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
-#close	2026-02-26-01-00-31
+1771987777.208369	CvNvBY1PY1nqUQTDW6	10.0.0.1	10011	10.0.0.2	443	6795	2389	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CVyPbO33cpUYoEFJi3	10.0.0.1	10003	10.0.0.2	443	6186	3439	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	Cq8usDqCLsuVvYuTa	10.0.0.1	10009	10.0.0.2	443	6614	1224	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CsP9d3fuoOtXmEzqb	10.0.0.1	10018	10.0.0.2	443	3945	4854	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CZqGTT2hBgMrJo6I7h	10.0.0.1	10020	10.0.0.2	443	5703	4753	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C8kZqw4hU3XYwBi3n3	10.0.0.1	10047	10.0.0.2	443	3411	6322	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CL5Nbaa45iamsWCx6	10.0.0.1	10007	10.0.0.2	443	5623	4778	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CHTYc51v8TZc0jzwRk	10.0.0.1	10023	10.0.0.2	443	4858	4118	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CjSWgK3RYJsjhbGQGd	10.0.0.1	10026	10.0.0.2	443	6010	4955	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C76AST3h4N4Va6a4Dc	10.0.0.1	10013	10.0.0.2	443	5307	1918	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	Cn2OZr1rqpsvtkFjrd	10.0.0.1	10030	10.0.0.2	443	3899	2449	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CQoQyJ3FIx5uUNhvZ2	10.0.0.1	10040	10.0.0.2	443	2445	2974	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C1SP3m1iBSSW8UN9e	10.0.0.1	10038	10.0.0.2	443	4274	5880	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CDDLXdg07aBH3YAA2	10.0.0.1	10045	10.0.0.2	443	5487	4897	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C57xAV1TbiEZTCPLmk	10.0.0.1	10035	10.0.0.2	443	4814	3614	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CPSuNM0lACDQQGMsg	10.0.0.1	10000	10.0.0.2	443	5197	3926	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C9dHM21I3X8qhNrVal	10.0.0.1	10016	10.0.0.2	443	8165	621	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C5ktX7SlbLpbdkndf	10.0.0.1	10034	10.0.0.2	443	6368	2838	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	Cz0bRE1ex7yoKwIvh4	10.0.0.1	10037	10.0.0.2	443	4466	4681	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C0uEVP2XzNNkBGIFDc	10.0.0.1	10010	10.0.0.2	443	8009	2593	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CJpLl4eq0oSSzt4cb	10.0.0.1	10021	10.0.0.2	443	3063	3561	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	Cg5rOp4klDwxIhRkV5	10.0.0.1	10033	10.0.0.2	443	4734	6386	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CDuKf54XX3S62UCxy2	10.0.0.1	10031	10.0.0.2	443	3331	5048	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C8tb5S1EbZOGAIuEQl	10.0.0.1	10041	10.0.0.2	443	3472	6165	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	Ch08KV3StGP1gr0elg	10.0.0.1	10028	10.0.0.2	443	6159	4061	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CTygm94dwS37LJVap7	10.0.0.1	10046	10.0.0.2	443	4749	3784	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CS1gjO1dBut31QLKF6	10.0.0.1	10039	10.0.0.2	443	5129	4276	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CritXx4OvTcn7r9CUj	10.0.0.1	10002	10.0.0.2	443	5595	2835	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C8Zy7R1fqxuTnrJkA7	10.0.0.1	10024	10.0.0.2	443	3389	4053	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CcTBDX1L0Cf7yONpOb	10.0.0.1	10015	10.0.0.2	443	2122	4250	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C0akpU1SRWAiJnqJti	10.0.0.1	10001	10.0.0.2	443	3547	5253	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C2vCM049fhvMvXq5tb	10.0.0.1	10027	10.0.0.2	443	5082	4170	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CYRVKs37bHhPi380xc	10.0.0.1	10022	10.0.0.2	443	3813	4557	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	Cr4HQX1FKVrjBCUEca	10.0.0.1	10029	10.0.0.2	443	5592	3647	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CvgMzH3zD59V8oHhrj	10.0.0.1	10008	10.0.0.2	443	3155	5683	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	Cb8iz9tT901EtFLsd	10.0.0.1	10005	10.0.0.2	443	2599	5590	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CleoDG3unghSCpHrO2	10.0.0.1	10017	10.0.0.2	443	2218	4682	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CfHgl84UCgOXP6X6Al	10.0.0.1	10019	10.0.0.2	443	2500	4237	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CA3hW03wXqeAXT7GN5	10.0.0.1	10042	10.0.0.2	443	3867	6178	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C2k4m13IAF2zuGB2rg	10.0.0.1	10032	10.0.0.2	443	5294	3105	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CJAN6gU4Dq7vWHxX2	10.0.0.1	10004	10.0.0.2	443	3129	5098	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	C9QgYM3YWvCEVLnqZd	10.0.0.1	10006	10.0.0.2	443	3600	5929	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CT7IB52VZSmg5DMmx6	10.0.0.1	10048	10.0.0.2	443	3667	3572	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CtSa8T1bv8pi8FtqVh	10.0.0.1	10014	10.0.0.2	443	2771	3689	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CK4kMy3zaAyrjvQo6b	10.0.0.1	10012	10.0.0.2	443	3452	5012	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	Cxca8s3J8oTQhsellf	10.0.0.1	10049	10.0.0.2	443	3393	4014	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+1771987777.208369	CwRdSW1iC8gQaSKjnh	10.0.0.1	10036	10.0.0.2	443	4468	3663	would_drop	heuristic: balanced byte ratio suggests encrypted proxy
+#close	2026-02-26-01-17-59
