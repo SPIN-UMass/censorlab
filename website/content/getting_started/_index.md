@@ -84,7 +84,76 @@ Other demos you can try:
 | `demos/quic_blocking/` | Blocks QUIC connections by SNI |
 | `demos/shadowsocks_gfw/` | Detects Shadowsocks-like encrypted proxy traffic |
 
-## Step 4: Write Your First Censor Program
+## Step 4: See Censorship in Action
+
+Let's see what censorship actually feels like. We'll start CensorLab with the HTTPS/TLS blocking demo and try browsing the web with it running.
+
+The `demos/https_blocking_tls/` demo blocks HTTPS connections to `example.com` by inspecting the TLS ClientHello for its SNI (Server Name Indication). Connections to other sites pass through normally — just like a real national firewall that targets specific domains.
+
+### Using Docker
+
+```bash
+# Open the CensorLab shell (has host networking + capabilities for NFQ)
+bash docker/censorlab.sh --shell
+
+# Inside the container, start CensorLab in the background
+censorlab -c demos/https_blocking_tls/censor.toml nfq &
+
+# This works fine — google.com is not on the blocklist:
+curl https://google.com
+
+# This will hang — the TLS ClientHello is silently dropped:
+curl --max-time 5 https://example.com
+# curl: (28) Connection timed out
+
+# When you're done, bring CensorLab back to the foreground and stop it:
+fg
+# Then press Ctrl+C
+```
+
+### Using a local build
+
+```bash
+# Start CensorLab in the background
+censorlab -c demos/https_blocking_tls/censor.toml nfq &
+
+# This works fine — google.com is not on the blocklist:
+curl https://google.com
+
+# This will hang — the TLS ClientHello is silently dropped:
+curl --max-time 5 https://example.com
+# curl: (28) Connection timed out
+
+# When you're done, bring CensorLab back to the foreground and stop it:
+fg
+# Then press Ctrl+C
+```
+
+### What just happened?
+
+When you ran `curl https://google.com`, the TLS handshake completed normally because the SNI didn't match the blocklist. But when you tried `example.com`, CensorLab saw the TLS ClientHello, extracted the SNI field (`example.com`), matched it against the blocklist, and silently dropped the packet. The TCP connection was established, but the TLS handshake never completed — curl hung waiting for a response that would never come.
+
+This is exactly how real-world SNI-based censorship works: the censor inspects the (unencrypted) SNI in the TLS ClientHello and drops or resets connections to targeted domains.
+
+Take a look at the censor script that made this happen (`demos/https_blocking_tls/https_tls.py`):
+
+```python
+from tls import parse_client_hello
+
+def process(packet):
+    tcp = packet.tcp
+    if tcp and 443 in [tcp.src, tcp.dst]:
+        try:
+            hello = parse_client_hello(packet.payload)
+            if hello.sni and "example.com" in hello.sni:
+                return "drop"
+        except Exception:
+            pass
+```
+
+Try changing `"example.com"` to a different domain and re-running to block a different site. Or change `"drop"` to `"reset"` to see what happens when the censor actively tears down the connection instead of silently dropping it.
+
+## Step 5: Write Your First Censor Program
 
 Create a file called `my_censor.py`:
 
@@ -189,7 +258,7 @@ def process(packet):
 
 CensorLab can run ONNX models for ML-based censorship. See the [model demo](https://github.com/SPIN-UMass/censorlab/tree/main/demos/model) for a Jupyter notebook showing how to train and export a model.
 
-## Step 5: Explore Further
+## Step 6: Explore Further
 
 - **[Documentation](/docs/)** — Full reference for configuration, PyCL API, and CensorLang DSL
 - **[Demos](https://github.com/SPIN-UMass/censorlab/tree/main/demos)** — 11 example scenarios covering DNS, HTTP, HTTPS, QUIC, IP blocking, and ML-based detection
