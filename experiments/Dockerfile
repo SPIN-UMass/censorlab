@@ -21,10 +21,15 @@ COPY demos/ demos/
 # Materialize the experiments shell (expensive, cached by Docker layers).
 # This must come BEFORE copying experiments so that editing experiment
 # scripts doesn't invalidate the Nix build cache.
-RUN nix develop .#experiments --profile /nix/var/nix/profiles/experiments --command true
+RUN nix develop .#experiments --command true
+
+# Capture the shell environment so we can activate it at runtime without
+# re-evaluating the flake (which would trigger a rebuild when experiments
+# are bind-mounted with different content).
+RUN nix print-dev-env .#experiments > /dev-env.sh
 
 # Copy experiments last — changes here only rebuild this cheap layer
 COPY experiments/ experiments/
 
-ENTRYPOINT ["nix", "develop", ".#experiments", "--command"]
+ENTRYPOINT ["bash", "-c", "source /dev-env.sh && exec \"$@\"", "--"]
 CMD ["bash"]

@@ -11,6 +11,7 @@ Usage:
 import argparse
 import csv
 import os
+import re
 import sys
 import time
 
@@ -19,16 +20,14 @@ from scapy.all import rdpcap, TCP, Raw
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENT_DIR = os.path.dirname(SCRIPT_DIR)
 
-KEYWORDS = [
-    b"falun", b"falungong", b"freegate", b"ultrasurf", b"dynaweb",
-    b"tiananmen", b"dalailama", b"tianwang", b"tibetpost", b"minghui",
-    b"epochtimes", b"ntdtv", b"wujie", b"zhengjian", b"edoors",
-    b"renminbao", b"xinsheng", b"aboluowang", b"bannedbook", b"boxun",
-    b"chinadigitaltimes", b"dongtaiwang", b"greatfire", b"huaglad",
-    b"kanzhongguo", b"minzhuzhongguo", b"pincong", b"rfa",
-    b"secretchina", b"soundofhope", b"voachinese", b"wangzhuan",
-    b"weijingsheng", b"weiquanwang", b"zhuichaguoji",
-]
+KEYWORD_RE = re.compile(
+    rb"(?i)(falun|falungong|freegate|ultrasurf|dynaweb|tiananmen|dalailama|"
+    rb"tianwang|tibetpost|minghui|epochtimes|ntdtv|wujie|zhengjian|edoors|"
+    rb"renminbao|xinsheng|aboluowang|bannedbook|boxun|chinadigitaltimes|"
+    rb"dongtaiwang|greatfire|huaglad|kanzhongguo|minzhuzhongguo|pincong|rfa|"
+    rb"secretchina|soundofhope|voachinese|wangzhuan|weijingsheng|weiquanwang|"
+    rb"zhuichaguoji)"
+)
 
 
 def process_pcap(pcap_path):
@@ -42,11 +41,9 @@ def process_pcap(pcap_path):
         if pkt.haslayer(TCP) and pkt.haslayer(Raw):
             tcp = pkt[TCP]
             if tcp.dport == 80 or tcp.sport == 80:
-                payload = bytes(pkt[Raw].load).lower()
-                for kw in KEYWORDS:
-                    if kw in payload:
-                        action = "reset"
-                        break
+                payload = bytes(pkt[Raw].load)
+                if KEYWORD_RE.search(payload):
+                    action = "reset"
         decisions.append({"index": i, "action": action})
     elapsed = time.perf_counter() - start
 

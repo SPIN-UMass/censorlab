@@ -25,17 +25,8 @@ export {
         action:   string  &log;
     };
 
-    ## Set of blocked keywords (lowercase)
-    const blocked_keywords: set[string] = {
-        "falun", "falungong", "freegate", "ultrasurf", "dynaweb",
-        "tiananmen", "dalailama", "tianwang", "tibetpost", "minghui",
-        "epochtimes", "ntdtv", "wujie", "zhengjian", "edoors",
-        "renminbao", "xinsheng", "aboluowang", "bannedbook", "boxun",
-        "chinadigitaltimes", "dongtaiwang", "greatfire", "huaglad",
-        "kanzhongguo", "minzhuzhongguo", "pincong", "rfa",
-        "secretchina", "soundofhope", "voachinese", "wangzhuan",
-        "weijingsheng", "weiquanwang", "zhuichaguoji",
-    } &redef;
+    ## Combined regex pattern for all blocked keywords (case-insensitive)
+    const blocked_keyword_pat: pattern = /falun|falungong|freegate|ultrasurf|dynaweb|tiananmen|dalailama|tianwang|tibetpost|minghui|epochtimes|ntdtv|wujie|zhengjian|edoors|renminbao|xinsheng|aboluowang|bannedbook|boxun|chinadigitaltimes|dongtaiwang|greatfire|huaglad|kanzhongguo|minzhuzhongguo|pincong|rfa|secretchina|soundofhope|voachinese|wangzhuan|weijingsheng|weiquanwang|zhuichaguoji/ &redef;
 }
 
 event zeek_init()
@@ -48,24 +39,19 @@ event http_request(c: connection, method: string, original_URI: string,
                    unescaped_URI: string, version: string)
     {
     local uri_lower = to_lower(unescaped_URI);
-    local host_hdr  = "";
-    # Check URI for keywords
-    for ( kw in blocked_keywords )
+    # Check URI against keyword regex
+    if ( blocked_keyword_pat in uri_lower )
         {
-        if ( kw in uri_lower )
-            {
-            Log::write(HttpKeyword::LOG, [
-                $ts       = network_time(),
-                $uid      = c$uid,
-                $orig_h   = c$id$orig_h,
-                $orig_p   = c$id$orig_p,
-                $resp_h   = c$id$resp_h,
-                $resp_p   = c$id$resp_p,
-                $keyword  = kw,
-                $uri      = original_URI,
-                $action   = "reset"
-            ]);
-            break;
-            }
+        Log::write(HttpKeyword::LOG, [
+            $ts       = network_time(),
+            $uid      = c$uid,
+            $orig_h   = c$id$orig_h,
+            $orig_p   = c$id$orig_p,
+            $resp_h   = c$id$resp_h,
+            $resp_p   = c$id$resp_p,
+            $keyword  = "regex_match",
+            $uri      = original_URI,
+            $action   = "reset"
+        ]);
         }
     }

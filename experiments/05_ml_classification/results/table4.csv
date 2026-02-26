@@ -1,5 +1,5 @@
 tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
-PyCL,85204,85200.3,750.5,84448,85949,3,21,ONNX model classification
-CensorLang,14316,14162.3,595.6,13505,14666,3,2,entropy heuristic (no ML support)
-Zeek,554780,553103,18372.0,533950,570579,3,58,byte-ratio heuristic (no ML support)
-Scapy,81858,83442.7,2815.2,81777,86693,3,118,entropy+variance heuristic (no ML support)
+PyCL,85506,85180.7,786.2,84284,85752,3,21,ONNX model classification
+CensorLang,14542,14450.7,294.8,14121,14689,3,2,entropy heuristic (no ML support)
+Zeek,528021,528043.3,3238.6,524816,531293,3,58,byte-ratio heuristic (no ML support)
+Scapy,78601,79193.7,1397.7,78190,80790,3,118,entropy+variance heuristic (no ML support)
