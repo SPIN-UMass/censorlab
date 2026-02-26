@@ -79,7 +79,6 @@ def analyze_showcase():
 
     tool_order = ["PyCL", "CensorLang", "Zeek", "Scapy"]
     tool_notes = {
-        "CensorLang": "entropy-only (no popcount/byte check)",
         "Zeek": "fingerprint-only (passive, no entropy/popcount)",
     }
 
@@ -199,7 +198,7 @@ def analyze_live_eval(results_csv):
             "tn": None,
             "errors": None,
             "total": None,
-            "note": "entropy-only (no popcount/byte check)",
+            "note": "",
         },
     ]
 

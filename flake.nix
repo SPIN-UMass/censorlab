@@ -67,6 +67,7 @@
                 matplotlib
                 scikit-learn
                 onnx
+                onnxruntime
                 skl2onnx
               ]))
               pkgs.zeek

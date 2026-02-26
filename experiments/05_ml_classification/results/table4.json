@@ -4,22 +4,22 @@
   "rows": [
     {
       "tool": "PyCL",
-      "median_us": 84743,
-      "mean_us": 88735.7,
-      "stdev_us": 7278.7,
-      "min_us": 84327,
-      "max_us": 97137,
+      "median_us": 86005,
+      "mean_us": 85896,
+      "stdev_us": 1559.4,
+      "min_us": 84285,
+      "max_us": 87398,
       "n": 3,
       "loc": 21,
       "note": "ONNX model classification"
     },
     {
       "tool": "CensorLang",
-      "median_us": 13601,
-      "mean_us": 13413.3,
-      "stdev_us": 1087.7,
-      "min_us": 12244,
-      "max_us": 14395,
+      "median_us": 14516,
+      "mean_us": 14348.3,
+      "stdev_us": 302.6,
+      "min_us": 13999,
+      "max_us": 14530,
       "n": 3,
       "loc": 2,
       "note": "entropy heuristic (no ML support)"
