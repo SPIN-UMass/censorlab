@@ -54,6 +54,8 @@ pub Field: Field = {
   "ip6.traffic_class" => Field::Ip(IpField::V6(Ipv6Field::TrafficClass)),
   "ip6.flow_label" => Field::Ip(IpField::V6(Ipv6Field::FlowLabel)),
   "ip6.payload_len" => Field::Ip(IpField::V6(Ipv6Field::PayloadLen)),
+  "tcp.src" => Field::Tcp(TcpField::SrcPort),
+  "tcp.dst" => Field::Tcp(TcpField::DstPort),
   "tcp.seq" => Field::Tcp(TcpField::Seq),
   "tcp.ack" => Field::Tcp(TcpField::Ack),
   "tcp.flag.fin" => Field::Tcp(TcpField::Flag(TcpFlag::Fin)),
@@ -70,9 +72,12 @@ pub Field: Field = {
   "tcp.payload.len" => Field::Tcp(TcpField::PayloadLength),
   "tcp.urgent_at" => Field::Tcp(TcpField::UrgentAt),
   "tcp.window_len" => Field::Tcp(TcpField::WindowLength),
+  "udp.src" => Field::Udp(UdpField::SrcPort),
+  "udp.dst" => Field::Udp(UdpField::DstPort),
   "udp.length" => Field::Udp(UdpField::Length),
   "udp.checksum" => Field::Udp(UdpField::Checksum),
   "transport.payload.entropy" => Field::PayloadEntropy,
+  "transport.payload.avg_popcount" => Field::PayloadAveragePopcount,
 }
 
 Float : f64 = {
@@ -137,6 +142,8 @@ pub Action: Action = {
   "ALLOW" => Action::Allow,  
   "allow_all" => Action::AllowAll, 
   "ALLOW_ALL" => Action::AllowAll, 
-  "terminate" => Action::TerminateAll, 
-  "TERMINATE" => Action::TerminateAll, 
+  "terminate" => Action::TerminateAll,
+  "TERMINATE" => Action::TerminateAll,
+  "reset" => Action::ResetAll,
+  "RESET" => Action::ResetAll,
 }

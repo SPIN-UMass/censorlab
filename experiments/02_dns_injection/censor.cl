@@ -6,7 +6,7 @@
 # (e.g., \x06google\x03com\x00) rather than dot notation.
 # We match the label text without dots.
 
-regex "(?i)(google|facebook|twitter|youtube|wikipedia|instagram|whatsapp|telegram|signal|reddit|nytimes|bbc|reuters|theguardian|washingtonpost|amnesty|torproject|psiphon|lanternvpn|protonvpn|mullvad|github|medium|blogspot|wordpress|tumblr|dropbox|soundcloud|vimeo|twitch|discord)"
+regex "(?i)(google|facebook|twitter|youtube|wikipedia|instagram|whatsapp|telegram|signal|reddit|nytimes|bbc|reuters|theguardian|washingtonpost|amnesty|hrw|rsf|torproject|eff|vpngate|psiphon|lanternvpn|protonvpn|mullvad|github|medium|blogspot|wordpress|tumblr|dropbox|soundcloud|vimeo|twitch|discord)"
 
 # Test regex against payload (UDP DNS queries)
 REGEX 0 -> reg:b.0

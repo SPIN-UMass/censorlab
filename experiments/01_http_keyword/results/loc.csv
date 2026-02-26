@@ -1,5 +1,5 @@
 tool,file,loc
 PyCL,censor.py,19
-CensorLang,censor.cl,4
+CensorLang,censor.cl,5
 Zeek,zeek_http_keyword.zeek,40
 Scapy,scapy_http_keyword.py,65

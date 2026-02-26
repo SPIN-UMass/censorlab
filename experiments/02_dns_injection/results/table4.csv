@@ -1,5 +1,5 @@
 tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
-PyCL,12028,12174.3,277.2,12001,12494,3,27,
-CensorLang,2070,2075.3,19.6,2059,2097,3,3,drop-only (no injection)
-Zeek,525961,531909.7,12291.7,523724,546044,3,53,detection-only (passive)
-Scapy,6329,6321.7,34.6,6284,6352,3,74,
+PyCL,11718,11009.7,1393.8,9404,11907,3,27,
+CensorLang,2238,2250.7,165.4,2092,2422,3,3,drop-only (no injection)
+Zeek,506852,506027.7,1861.8,503896,507335,3,53,detection-only (passive)
+Scapy,6309,6325.3,37.3,6299,6368,3,74,

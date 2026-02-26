@@ -402,6 +402,27 @@ impl TransportState {
                         ProgramAction::Allow => Action::None,
                         ProgramAction::AllowAll => Action::Ignore,
                         ProgramAction::TerminateAll => Action::Drop,
+                        ProgramAction::ResetAll => {
+                            if let TransportMetadataExtra::Tcp(tcp_metadata) =
+                                packet.transport.extra
+                            {
+                                Action::Reset {
+                                    src_mac: [0; 6],
+                                    dst_mac: [0; 6],
+                                    ips,
+                                    ipid: None,
+                                    src_port: packet.transport.src,
+                                    dst_port: packet.transport.dst,
+                                    seq: tcp_metadata.seq,
+                                    ack: tcp_metadata.ack,
+                                    payload_len: packet.payload.len(),
+                                    is_ack: tcp_metadata.flags.ack,
+                                }
+                            } else {
+                                // Reset is only meaningful for TCP; fall back to Drop for UDP
+                                Action::Drop
+                            }
+                        }
                     }
                 } else {
                     Action::None

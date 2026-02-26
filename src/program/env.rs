@@ -198,6 +198,7 @@ mod tcp {
             match self.default_action {
                 Action::AllowAll => Action::Allow,
                 Action::TerminateAll => Action::TerminateAll,
+                Action::ResetAll => Action::ResetAll,
                 Action::Allow => {
                     if let TransportMetadataExtra::Tcp(_) = packet.transport.extra {
                         // First calculate the direction
@@ -214,6 +215,9 @@ mod tcp {
                                 }
                                 Ok(Action::TerminateAll) => {
                                     self.default_action = Action::TerminateAll;
+                                }
+                                Ok(Action::ResetAll) => {
+                                    self.default_action = Action::ResetAll;
                                 }
                                 Err(err) => {
                                     error!("Error processing packet through program: {err}");
@@ -298,6 +302,7 @@ mod udp {
             match self.default_action {
                 Action::AllowAll => Action::Allow,
                 Action::TerminateAll => Action::TerminateAll,
+                Action::ResetAll => Action::ResetAll,
                 Action::Allow => {
                     if let TransportMetadataExtra::Udp(_) = packet.transport.extra {
                         // First calculate the direction
@@ -314,6 +319,9 @@ mod udp {
                                 }
                                 Ok(Action::TerminateAll) => {
                                     self.default_action = Action::TerminateAll;
+                                }
+                                Ok(Action::ResetAll) => {
+                                    self.default_action = Action::ResetAll;
                                 }
                                 Err(err) => {
                                     error!("Error processing packet through program: {err}");

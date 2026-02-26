@@ -764,6 +764,8 @@ pub mod field {
         Udp(udp::Field),
         /// Entropy of the transport-layer payload
         PayloadEntropy,
+        /// Average popcount (bits per byte) of the transport-layer payload
+        PayloadAveragePopcount,
     }
     impl Field {
         pub fn eval(
@@ -792,6 +794,7 @@ pub mod field {
                     .eval(packet, default_on_error)
                     .map_err(FieldError::Udp),
                 Field::PayloadEntropy => Ok(Value::Float(packet.payload_entropy())),
+                Field::PayloadAveragePopcount => Ok(Value::Float(packet.payload_average_popcount())),
             }
         }
         pub fn all() -> Vec<Field> {
@@ -806,6 +809,7 @@ pub mod field {
                 fields.push(Field::Udp(field));
             }
             fields.push(Field::PayloadEntropy);
+            fields.push(Field::PayloadAveragePopcount);
             fields
         }
     }
@@ -977,6 +981,8 @@ pub mod field {
 
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
+            SrcPort,
+            DstPort,
             Seq,
             Ack,
             Flag(Flag),
@@ -1009,6 +1015,8 @@ pub mod field {
                 let result =
                     if let TransportMetadataExtra::Tcp(ref tcp_metadata) = packet.transport.extra {
                         match self {
+                            SrcPort => Ok(Value::Int(packet.transport.src.into())),
+                            DstPort => Ok(Value::Int(packet.transport.dst.into())),
                             Seq => Ok(Value::Int(tcp_metadata.seq.0.into())),
                             Ack => Ok(Value::Int(tcp_metadata.ack.0.into())),
                             Flag(flag) => Ok(flag.eval(&tcp_metadata.flags)),
@@ -1037,6 +1045,8 @@ pub mod field {
             }
             pub fn all() -> Vec<Field> {
                 vec![
+                    Field::SrcPort,
+                    Field::DstPort,
                     Field::Seq,
                     Field::Ack,
                     Field::Flag(Flag::Fin),
@@ -1084,12 +1094,14 @@ pub mod field {
         use super::{Packet, TransportMetadataExtra, TryFromIntError, Value};
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
+            SrcPort,
+            DstPort,
             Length,
             Checksum,
         }
         impl Field {
-            pub fn all() -> [Field; 2] {
-                [Field::Length, Field::Checksum]
+            pub fn all() -> Vec<Field> {
+                vec![Field::SrcPort, Field::DstPort, Field::Length, Field::Checksum]
             }
             pub fn eval(
                 &self,
@@ -1100,6 +1112,8 @@ pub mod field {
                 let result =
                     if let TransportMetadataExtra::Udp(ref udp_metadata) = packet.transport.extra {
                         match self {
+                            SrcPort => Ok(Value::Int(packet.transport.src.into())),
+                            DstPort => Ok(Value::Int(packet.transport.dst.into())),
                             Length => Ok(Value::Int(udp_metadata.length.into())),
                             Checksum => Ok(Value::Int(udp_metadata.checksum.into())),
                         }
@@ -1595,9 +1609,10 @@ pub enum Action {
     Allow,
     AllowAll,
     TerminateAll,
+    ResetAll,
 }
 impl Action {
-    enum_all! { Action::Allow, Action::AllowAll, Action::TerminateAll }
+    enum_all! { Action::Allow, Action::AllowAll, Action::TerminateAll, Action::ResetAll }
 }
 impl FromStr for Action {
     type Err = String;
@@ -1614,6 +1629,7 @@ impl fmt::Display for Action {
             Allow => "allow",
             AllowAll => "allow_all",
             TerminateAll => "terminate",
+            ResetAll => "reset",
         })
     }
 }
@@ -1701,12 +1717,13 @@ mod tests {
     // --- Action tests ---
 
     #[test]
-    fn action_all_contains_three_variants() {
+    fn action_all_contains_four_variants() {
         let all = Action::all();
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 4);
         assert!(all.contains(&Action::Allow));
         assert!(all.contains(&Action::AllowAll));
         assert!(all.contains(&Action::TerminateAll));
+        assert!(all.contains(&Action::ResetAll));
     }
 
     #[test]
@@ -1734,6 +1751,23 @@ mod tests {
     #[test]
     fn action_display_terminate() {
         assert_eq!(format!("{}", Action::TerminateAll), "terminate");
+    }
+
+    #[test]
+    fn action_from_str_reset() {
+        let action = Action::from_str("reset").unwrap();
+        assert_eq!(action, Action::ResetAll);
+    }
+
+    #[test]
+    fn action_from_str_reset_uppercase() {
+        let action = Action::from_str("RESET").unwrap();
+        assert_eq!(action, Action::ResetAll);
+    }
+
+    #[test]
+    fn action_display_reset() {
+        assert_eq!(format!("{}", Action::ResetAll), "reset");
     }
 
     // --- i64_to_f64 ---
@@ -2303,5 +2337,188 @@ mod tests {
         let prog = Program::new_with_regexes(prog.lines, prog.regexes);
         // The REGEX line writes reg:b.0 but nothing reads it, so it should be optimized away
         assert_eq!(prog.lines.len(), 0);
+    }
+
+    // =========================================================================
+    // Port field tests
+    // =========================================================================
+
+    #[test]
+    fn field_tcp_src_port() {
+        let pkt = make_tcp_packet(b"data");
+        let field = field::Field::Tcp(field::tcp::Field::SrcPort);
+        let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+        assert!(matches!(result, Value::Int(12345)));
+    }
+
+    #[test]
+    fn field_tcp_dst_port() {
+        let pkt = make_tcp_packet(b"data");
+        let field = field::Field::Tcp(field::tcp::Field::DstPort);
+        let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+        assert!(matches!(result, Value::Int(80)));
+    }
+
+    #[test]
+    fn field_udp_src_port() {
+        let pkt = make_udp_packet(b"data");
+        let field = field::Field::Udp(field::udp::Field::SrcPort);
+        let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+        assert!(matches!(result, Value::Int(12345)));
+    }
+
+    #[test]
+    fn field_udp_dst_port() {
+        let pkt = make_udp_packet(b"data");
+        let field = field::Field::Udp(field::udp::Field::DstPort);
+        let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+        assert!(matches!(result, Value::Int(53)));
+    }
+
+    #[test]
+    fn field_tcp_port_wrong_protocol() {
+        let pkt = make_udp_packet(b"data");
+        let field = field::Field::Tcp(field::tcp::Field::SrcPort);
+        // Should error when trying to read TCP field from UDP packet
+        let result = field.eval(&pkt, &default_env_fields(), false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn field_tcp_port_wrong_protocol_default_on_error() {
+        let pkt = make_udp_packet(b"data");
+        let field = field::Field::Tcp(field::tcp::Field::SrcPort);
+        // With default_on_error, should return 0
+        let result = field.eval(&pkt, &default_env_fields(), true).unwrap();
+        assert!(matches!(result, Value::Int(0)));
+    }
+
+    // =========================================================================
+    // Popcount field tests
+    // =========================================================================
+
+    #[test]
+    fn field_payload_average_popcount() {
+        // 0xFF has popcount 8, 0x00 has popcount 0 -> avg = 4.0
+        let pkt = make_tcp_packet(&[0xFF, 0x00]);
+        let field = field::Field::PayloadAveragePopcount;
+        let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+        assert!(matches!(result, Value::Float(f) if f == 4.0));
+    }
+
+    #[test]
+    fn field_payload_average_popcount_all_ones() {
+        let pkt = make_tcp_packet(&[0xFF, 0xFF, 0xFF]);
+        let field = field::Field::PayloadAveragePopcount;
+        let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+        assert!(matches!(result, Value::Float(f) if f == 8.0));
+    }
+
+    // =========================================================================
+    // Port field grammar parse tests
+    // =========================================================================
+
+    #[test]
+    fn parse_field_tcp_src() {
+        let field: field::Field = "tcp.src".parse().unwrap();
+        assert_eq!(field, field::Field::Tcp(field::tcp::Field::SrcPort));
+    }
+
+    #[test]
+    fn parse_field_tcp_dst() {
+        let field: field::Field = "tcp.dst".parse().unwrap();
+        assert_eq!(field, field::Field::Tcp(field::tcp::Field::DstPort));
+    }
+
+    #[test]
+    fn parse_field_udp_src() {
+        let field: field::Field = "udp.src".parse().unwrap();
+        assert_eq!(field, field::Field::Udp(field::udp::Field::SrcPort));
+    }
+
+    #[test]
+    fn parse_field_udp_dst() {
+        let field: field::Field = "udp.dst".parse().unwrap();
+        assert_eq!(field, field::Field::Udp(field::udp::Field::DstPort));
+    }
+
+    #[test]
+    fn parse_field_payload_avg_popcount() {
+        let field: field::Field = "transport.payload.avg_popcount".parse().unwrap();
+        assert_eq!(field, field::Field::PayloadAveragePopcount);
+    }
+
+    // =========================================================================
+    // Reset action program tests
+    // =========================================================================
+
+    #[test]
+    fn program_parse_return_reset() {
+        let prog: Program = "RETURN reset".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        assert!(matches!(
+            prog.lines[0].operation,
+            Operation::Return(Action::ResetAll)
+        ));
+    }
+
+    #[test]
+    fn program_run_returns_reset() {
+        let prog: Program = "if field:tcp.payload.len > 0: RETURN reset".parse().unwrap();
+        let pkt = make_tcp_packet(b"data");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::ResetAll);
+    }
+
+    // =========================================================================
+    // Port-based conditional program tests
+    // =========================================================================
+
+    #[test]
+    fn program_tcp_port_filter() {
+        let source = "if field:tcp.dst == 80: RETURN reset";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"GET / HTTP/1.1");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::ResetAll);
+    }
+
+    #[test]
+    fn program_tcp_port_filter_no_match() {
+        let source = "if field:tcp.dst == 443: RETURN reset";
+        let prog: Program = source.parse().unwrap();
+        // Test packet has dst=80, not 443
+        let pkt = make_tcp_packet(b"GET / HTTP/1.1");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::Allow);
+    }
+
+    #[test]
+    fn program_udp_port_filter() {
+        let source = "if field:udp.dst == 53: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_udp_packet(b"\x00\x00");
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_popcount_threshold() {
+        let source = "if field:transport.payload.avg_popcount > 3.4: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        // 0xFF bytes have popcount 8, well above 3.4
+        let pkt = make_tcp_packet(&[0xFF, 0xFF]);
+        let mut regs = default_registers();
+        let fields = default_env_fields();
+        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        assert_eq!(result, Action::TerminateAll);
     }
 }

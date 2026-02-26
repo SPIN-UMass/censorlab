@@ -4,47 +4,36 @@
   "rows": [
     {
       "tool": "PyCL",
-      "median_us": 81245,
-      "mean_us": 82043,
-      "stdev_us": 1855.5,
-      "min_us": 80720,
-      "max_us": 84164,
+      "median_us": 84743,
+      "mean_us": 88735.7,
+      "stdev_us": 7278.7,
+      "min_us": 84327,
+      "max_us": 97137,
       "n": 3,
       "loc": 21,
       "note": "ONNX model classification"
     },
     {
       "tool": "CensorLang",
-      "median_us": 14800,
-      "mean_us": 14683.3,
-      "stdev_us": 236.7,
-      "min_us": 14411,
-      "max_us": 14839,
+      "median_us": 13601,
+      "mean_us": 13413.3,
+      "stdev_us": 1087.7,
+      "min_us": 12244,
+      "max_us": 14395,
       "n": 3,
       "loc": 2,
       "note": "entropy heuristic (no ML support)"
     },
     {
-      "tool": "Zeek",
-      "median_us": 521297,
-      "mean_us": 525677,
-      "stdev_us": 13165.3,
-      "min_us": 515260,
-      "max_us": 540474,
-      "n": 3,
-      "loc": 58,
-      "note": "byte-ratio heuristic (no ML support)"
-    },
-    {
       "tool": "Scapy",
-      "median_us": 79876,
-      "mean_us": 79379.7,
-      "stdev_us": 938.7,
-      "min_us": 78297,
-      "max_us": 79966,
-      "n": 3,
+      "median_us": null,
+      "mean_us": null,
+      "stdev_us": null,
+      "min_us": null,
+      "max_us": null,
+      "n": 0,
       "loc": 118,
-      "note": "entropy+variance heuristic (no ML support)"
+      "note": "ONNX model classification"
     }
   ]
 }

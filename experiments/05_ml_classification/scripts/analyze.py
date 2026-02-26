@@ -77,12 +77,11 @@ def analyze_showcase():
     print("=" * 72)
     print()
 
-    tool_order = ["PyCL", "CensorLang", "Zeek", "Scapy"]
+    tool_order = ["PyCL", "CensorLang", "Scapy"]
     tool_notes = {
         "PyCL": "ONNX model classification",
         "CensorLang": "entropy heuristic (no ML support)",
-        "Zeek": "byte-ratio heuristic (no ML support)",
-        "Scapy": "entropy+variance heuristic (no ML support)",
+        "Scapy": "ONNX model classification",
     }
 
     rows = []

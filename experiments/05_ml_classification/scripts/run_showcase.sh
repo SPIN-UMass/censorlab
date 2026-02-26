@@ -112,34 +112,7 @@ for i in $(seq 1 "$ITERATIONS"); do
 done
 
 # ---------------------------------------------------------------------------
-# 3. Zeek — byte-ratio heuristic (no ML support)
-# ---------------------------------------------------------------------------
-echo ""
-echo "--- Zeek ---"
-
-if command -v zeek &> /dev/null; then
-    ZEEK_WORKDIR=$(mktemp -d)
-    for i in $(seq 1 "$ITERATIONS"); do
-        pushd "$ZEEK_WORKDIR" > /dev/null
-        start_time=$(date +%s%N)
-        zeek -C -r "$PCAP" "$EXPERIMENT_DIR/comparison/zeek_ml_classification.zeek" 2>&1 || true
-        end_time=$(date +%s%N)
-        elapsed_us=$(( (end_time - start_time) / 1000 ))
-        echo "Zeek,$i,$elapsed_us" >> "$RAW_TIMINGS"
-        echo "  Run $i: ${elapsed_us}us"
-        if [ "$i" -eq 1 ] && [ -f ml_classification_matches.log ]; then
-            cp ml_classification_matches.log "$RESULTS_DIR/zeek_matches.log"
-        fi
-        rm -f *.log
-        popd > /dev/null
-    done
-    rm -rf "$ZEEK_WORKDIR"
-else
-    echo "  SKIPPED: zeek not found in PATH"
-fi
-
-# ---------------------------------------------------------------------------
-# 4. Scapy — entropy+variance heuristic (no ML support)
+# 3. Scapy — ONNX model classification (same model as PyCL)
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- Scapy ---"
@@ -174,10 +147,6 @@ echo "  PyCL (censor.py): $pycl_loc"
 cl_loc=$(count_loc "$EXPERIMENT_DIR/censor.cl")
 echo "CensorLang,censor.cl,$cl_loc" >> "$LOC_FILE"
 echo "  CensorLang (censor.cl): $cl_loc"
-
-zeek_loc=$(count_loc "$EXPERIMENT_DIR/comparison/zeek_ml_classification.zeek")
-echo "Zeek,zeek_ml_classification.zeek,$zeek_loc" >> "$LOC_FILE"
-echo "  Zeek (zeek_ml_classification.zeek): $zeek_loc"
 
 scapy_loc=$(count_loc "$EXPERIMENT_DIR/comparison/scapy_ml_classification.py")
 echo "Scapy,scapy_ml_classification.py,$scapy_loc" >> "$LOC_FILE"
