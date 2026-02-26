@@ -1,5 +1,39 @@
 {% extends "base.html" %}
 {% block content %}
+<script>document.body.classList.add('page-light');</script>
+<style>
+  #docs-tabs, #docs-tabs .tabs, #docs-tabs .tabs ul { background-color: #fff !important; }
+  #docs-tabs .tabs li a { color: #111 !important; font-weight: 500; background-color: #f5f5f5 !important; }
+  #docs-tabs .tabs li.is-active a { color: #0f81cc !important; font-weight: 600; background-color: #fff !important; border-bottom-color: #0f81cc !important; }
+</style>
+<!-- Navbar -->
+<nav class="navbar is-light" role="navigation" aria-label="main navigation">
+  <div class="container is-max-desktop">
+    <div class="navbar-brand">
+      <a class="navbar-item has-text-weight-bold" href="{{ get_url(path="/") }}">
+        <img src="{{ get_url(path="images/censorlab.png") }}" alt="CensorLab" style="height: 28px; margin-right: 0.5rem;">
+        CensorLab
+      </a>
+      <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="docsNavbar">
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </a>
+    </div>
+    <div id="docsNavbar" class="navbar-menu">
+      <div class="navbar-end">
+        <a class="navbar-item" href="{{ get_url(path="/") }}">Home</a>
+        <a class="navbar-item" href="{{ get_url(path="getting_started") }}">Getting Started</a>
+        <a class="navbar-item is-active" href="{{ get_url(path="docs") }}">Documentation</a>
+        <a class="navbar-item" href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank">Examples</a>
+        <a class="navbar-item" href="https://github.com/SPIN-UMass/censorlab" target="_blank">
+          <span class="icon"><i class="fab fa-github"></i></span>
+        </a>
+      </div>
+    </div>
+  </div>
+</nav>
+
 <section class="section">
   <div class="container is-max-desktop">
     <h1 class="title is-2 has-text-centered docs-page-title">CensorLab Documentation</h1>
@@ -98,5 +132,15 @@
     }
   }
 })();
+
+// Navbar burger toggle for mobile
+var burger = document.querySelector('.navbar-burger');
+if (burger) {
+  burger.addEventListener('click', function() {
+    var target = document.getElementById(burger.dataset.target);
+    burger.classList.toggle('is-active');
+    target.classList.toggle('is-active');
+  });
+}
 </script>
 {% endblock content %}

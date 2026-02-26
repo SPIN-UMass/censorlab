@@ -4,6 +4,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     image: censorlab:latest
+    ports:
+      - "1116:1116"
     stdin_open: true
     tty: true
 
@@ -12,6 +14,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     image: censorlab:latest
+    ports:
+      - "1116:1116"
     cap_add:
       - NET_ADMIN
       - NET_RAW

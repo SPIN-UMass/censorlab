@@ -31,14 +31,14 @@
   {% elif page %}
     <title>{{ page.title }}</title>
   {% endif %}
-  <link rel="icon" type="image/png" href="images/censorlab.png">
+  <link rel="icon" type="image/png" href="{{ get_url(path="images/censorlab.png") }}">
   <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
 
-  <link rel="stylesheet" href="{{ get_url(path="/style.css") }}">
+  <link rel="stylesheet" href="{{ get_url(path="css/bulma.min.css") }}">
   <link rel="stylesheet" href="{{ get_url(path="css/academicons.min.css") }}">
-  <link rel="stylesheet" href="css/bulma.min.css">
+  <link rel="stylesheet" href="{{ get_url(path="style.css") }}">
   <!-- jQuery -->
-  <script src="js/jquery/jquery-3.7.1.min.js"></script>
+  <script src="{{ get_url(path="js/jquery/jquery-3.7.1.min.js") }}"></script>
 </head>
 <body>
 {% block content %} {% endblock %}

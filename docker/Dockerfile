@@ -31,8 +31,12 @@ RUN nix print-dev-env .#experiments > /dev-env.sh
 # Copy experiments last — changes here only rebuild this cheap layer
 COPY experiments/ experiments/
 
-# MOTD shown on interactive shell startup
-RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:  https://censorlab.cs.umass.edu/\nDemos: ls demos/\nHelp:  censorlab --help\n\n' > /etc/motd
+# Copy website source and build with zola
+COPY website/ website/
+RUN source /dev-env.sh && cd website && zola build
 
-ENTRYPOINT ["bash", "-c", "source /dev-env.sh && { [ \"$1\" = bash ] && [ $# -eq 1 ] && [ -t 0 ] && cat /etc/motd; exec \"$@\"; }", "--"]
+# MOTD shown on interactive shell startup
+RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:  http://localhost:1116/\nDemos: ls demos/\nHelp:  censorlab --help\n\n' > /etc/motd
+
+ENTRYPOINT ["bash", "-c", "source /dev-env.sh && { if [ \"$1\" = bash ] && [ $# -eq 1 ] && [ -t 0 ]; then python3 -m http.server 1116 --bind 0.0.0.0 -d /censorlab/website/public &>/dev/null & cat /etc/motd; fi; exec \"$@\"; }", "--"]
 CMD ["bash"]

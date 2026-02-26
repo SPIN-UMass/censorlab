@@ -1,27 +1,67 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-		{% if section %}
-    	<meta name="description" content="{{ section.description }}">
-		{% elif page %}
-    	<meta name="description" content="{{ page.description }}">
-		{% endif %}
-		{% if section %}
-			<title>{{ section.title }}</title>
-		{% elif page %}
-			<title>{{ page.title }}</title>
-		{% endif %}
-</head>
-<body>
-    <main>
-			{% if section %}
-				{{ section.content | safe }}
-			{% elif page %}
-				{{ page.content | safe }}
-			{% endif %}
-    </main>
-</body>
-</html>
+{% extends "base.html" %}
+{% block content %}
+<script>document.body.classList.add('page-light');</script>
+<!-- Navbar -->
+<nav class="navbar is-light" role="navigation" aria-label="main navigation">
+  <div class="container is-max-desktop">
+    <div class="navbar-brand">
+      <a class="navbar-item has-text-weight-bold" href="{{ get_url(path="/") }}">
+        <img src="{{ get_url(path="images/censorlab.png") }}" alt="CensorLab" style="height: 28px; margin-right: 0.5rem;">
+        CensorLab
+      </a>
+      <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="mainNavbar">
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </a>
+    </div>
+    <div id="mainNavbar" class="navbar-menu">
+      <div class="navbar-end">
+        <a class="navbar-item" href="{{ get_url(path="/") }}">Home</a>
+        <a class="navbar-item" href="{{ get_url(path="getting_started") }}">Getting Started</a>
+        <a class="navbar-item" href="{{ get_url(path="docs") }}">Documentation</a>
+        <a class="navbar-item" href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank">Examples</a>
+        <a class="navbar-item" href="https://github.com/SPIN-UMass/censorlab" target="_blank">
+          <span class="icon"><i class="fab fa-github"></i></span>
+        </a>
+      </div>
+    </div>
+  </div>
+</nav>
 
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="markdown-content">
+      {% if section %}
+        {{ section.content | safe }}
+      {% elif page %}
+        {{ page.content | safe }}
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="columns is-centered">
+      <div class="column is-8 has-text-centered">
+        <p>Questions? Contact us at <a href="mailto:censorlab@cs.umass.edu">censorlab@cs.umass.edu</a>.</p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+// Navbar burger toggle for mobile
+document.addEventListener('DOMContentLoaded', function() {
+  var burger = document.querySelector('.navbar-burger');
+  if (burger) {
+    burger.addEventListener('click', function() {
+      var target = document.getElementById(burger.dataset.target);
+      burger.classList.toggle('is-active');
+      target.classList.toggle('is-active');
+    });
+  }
+});
+</script>
+{% endblock content %}

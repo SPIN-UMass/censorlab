@@ -77,6 +77,7 @@
               pkgs.coreutils
               pkgs.bash
               pkgs.time
+              pkgs.zola
             ];
           };
           devShells.website = import ./website/devshell.nix { inherit pkgs; };

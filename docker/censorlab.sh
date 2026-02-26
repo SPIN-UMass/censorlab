@@ -7,7 +7,8 @@
 #
 # Usage:
 #   bash docker/censorlab.sh [censorlab args...]
-#   bash docker/censorlab.sh --shell
+#   bash docker/censorlab.sh --shell          (NFQ-capable shell, host networking)
+#   bash docker/censorlab.sh --shell-no-nfq   (isolated shell, no host networking)
 #   bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
 #   bash docker/censorlab.sh -c censor.toml pcap traffic.pcap
 #
@@ -29,16 +30,16 @@ if [ "$REBUILD" = "1" ] || ! docker image inspect censorlab:latest &>/dev/null; 
     echo ""
 fi
 
-# --shell flag: drop into an interactive shell
-# Use --shell-nfq for a shell with host networking + NET_ADMIN/NET_RAW
-if [ "${1:-}" = "--shell" ] || [ "${1:-}" = "--shell-nfq" ]; then
-    SERVICE="censorlab"
-    if [ "${1:-}" = "--shell-nfq" ]; then
-        SERVICE="censorlab-nfq"
+# --shell flag: drop into an interactive shell (with host networking + NET_ADMIN/NET_RAW by default)
+# Use --shell-no-nfq for a shell without host networking/capabilities
+if [ "${1:-}" = "--shell" ] || [ "${1:-}" = "--shell-no-nfq" ]; then
+    SERVICE="censorlab-nfq"
+    if [ "${1:-}" = "--shell-no-nfq" ]; then
+        SERVICE="censorlab"
     fi
     # shellcheck disable=SC2086
     exec docker compose -f "$SCRIPT_DIR/docker-compose.yml" run --rm \
-        ${DOCKER_ARGS:-} "$SERVICE" bash
+        --service-ports ${DOCKER_ARGS:-} "$SERVICE" bash
 fi
 
 # Auto-detect NFQ mode by scanning args for "nfq"

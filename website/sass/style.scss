@@ -13,6 +13,11 @@ body {
   font-family: 'Noto Sans', sans-serif;
 }
 
+body.page-light {
+  background-color: #fff;
+  color: #1a1a1a;
+}
+
 
 .footer .icon-link {
     font-size: 25px;
@@ -144,11 +149,208 @@ body {
   font-size: smaller;
 }
 
+// ---- Navbar ----
+
+.navbar.is-light {
+  border-bottom: 1px solid #e8e8e8;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+
+  .navbar-item {
+    font-size: 0.95rem;
+    font-family: 'Google Sans', 'Noto Sans', sans-serif;
+
+    &.is-active {
+      color: hsl(204, 86%, 53%);
+      font-weight: 600;
+    }
+  }
+
+  .navbar-item img {
+    max-height: 28px;
+  }
+}
+
+// ---- Shared content styles (markdown + docs pages) ----
+
+@mixin rich-content {
+  color: #1a1a1a;
+
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-top: 0;
+    margin-bottom: 1.25rem;
+    font-family: 'Google Sans', 'Noto Sans', sans-serif;
+    color: #111;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 2px solid #e0e0e0;
+    font-family: 'Google Sans', 'Noto Sans', sans-serif;
+    color: #111;
+  }
+
+  h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-top: 1.75rem;
+    margin-bottom: 0.5rem;
+    color: #1a1a1a;
+  }
+
+  h4 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-top: 1.25rem;
+    margin-bottom: 0.4rem;
+    color: #1a1a1a;
+  }
+
+  p {
+    margin-bottom: 0.85rem;
+    line-height: 1.75;
+    color: #1a1a1a;
+  }
+
+  > a, p a, li a, td a {
+    color: hsl(204, 86%, 43%);
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  strong {
+    color: #111;
+  }
+
+  table {
+    width: 100%;
+    margin-bottom: 1.25rem;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 0 0 1px #d0d0d0;
+    border: none;
+
+    th {
+      background: #f5f5f5;
+      font-weight: 600;
+      text-align: left;
+      padding: 0.6rem 0.85rem;
+      border: none;
+      border-bottom: 2px solid #d0d0d0;
+      color: #111;
+      font-size: 0.88rem;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    td {
+      padding: 0.5rem 0.85rem;
+      border: none;
+      border-bottom: 1px solid #eee;
+      vertical-align: top;
+      color: #1a1a1a;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover td {
+      background: #f9f9f9;
+    }
+
+    code {
+      font-size: 0.85em;
+      background: #eef1f6;
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      color: #1a4a6e;
+      font-weight: 500;
+    }
+  }
+
+  pre {
+    margin-bottom: 1.25rem;
+    border-radius: 8px;
+    padding: 1.1rem 1.25rem;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    border: 1px solid #d0d0d0;
+
+    code {
+      background: none;
+      color: inherit;
+      padding: 0;
+      font-size: inherit;
+      border-radius: 0;
+      font-weight: normal;
+    }
+  }
+
+  code {
+    font-size: 0.88em;
+    background: #eef1f6;
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    color: #1a4a6e;
+    font-weight: 500;
+    font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+  }
+
+  ul, ol {
+    margin-bottom: 0.85rem;
+    margin-left: 1.5rem;
+
+    li {
+      margin-bottom: 0.35rem;
+      line-height: 1.7;
+      color: #1a1a1a;
+    }
+  }
+
+  blockquote {
+    background: #f5f5f5;
+    border-left: 4px solid hsl(204, 86%, 53%);
+    padding: 0.85rem 1.25rem;
+    margin-bottom: 1.25rem;
+    border-radius: 0 6px 6px 0;
+
+    p {
+      margin-bottom: 0.25rem;
+      color: #1a1a1a;
+    }
+  }
+
+  hr {
+    display: none;
+  }
+}
+
+// ---- Getting Started / Markdown pages ----
+
+.markdown-content {
+  @include rich-content;
+  padding-top: 0.5rem;
+  padding-bottom: 2rem;
+}
+
 // ---- Docs page ----
 
 .docs-page-title {
   margin-bottom: 1.5rem !important;
   font-family: 'Google Sans', sans-serif;
+  color: #111 !important;
 }
 
 #docs-tabs {
@@ -158,10 +360,22 @@ body {
   z-index: 30;
   background: #fff;
   padding-top: 0.5rem;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 #docs-tabs .tabs ul {
   border-bottom-color: #dbdbdb;
+}
+
+#docs-tabs .tabs a {
+  color: #111 !important;
+  font-weight: 500;
+}
+
+#docs-tabs .tabs li.is-active a {
+  border-bottom-color: hsl(204, 86%, 43%);
+  color: hsl(204, 86%, 43%);
+  font-weight: 600;
 }
 
 .docs-tab-pane {
@@ -173,98 +387,21 @@ body {
 }
 
 .docs-content {
+  @include rich-content;
   padding-top: 1.5rem;
-
-  h2 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin-top: 2rem;
-    margin-bottom: 0.75rem;
-    padding-bottom: 0.3rem;
-    border-bottom: 1px solid #ededed;
-  }
-
-  h3 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin-top: 1.5rem;
-    margin-bottom: 0.5rem;
-  }
-
-  h4 {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin-top: 1.25rem;
-    margin-bottom: 0.4rem;
-  }
-
-  p {
-    margin-bottom: 0.75rem;
-    line-height: 1.7;
-  }
-
-  table {
-    width: 100%;
-    margin-bottom: 1rem;
-    border-collapse: collapse;
-    font-size: 0.92rem;
-
-    th {
-      background: #f5f5f5;
-      font-weight: 600;
-      text-align: left;
-      padding: 0.5rem 0.75rem;
-      border: 1px solid #dbdbdb;
-    }
-
-    td {
-      padding: 0.4rem 0.75rem;
-      border: 1px solid #dbdbdb;
-      vertical-align: top;
-    }
-
-    code {
-      font-size: 0.85em;
-      background: #f0f0f0;
-      padding: 0.1em 0.3em;
-      border-radius: 3px;
-    }
-  }
-
-  pre {
-    margin-bottom: 1rem;
-    border-radius: 6px;
-    padding: 1rem;
-    overflow-x: auto;
-    background: #f5f5f5;
-    font-size: 0.88rem;
-    line-height: 1.5;
-  }
-
-  code {
-    font-size: 0.88em;
-  }
-
-  ul, ol {
-    margin-bottom: 0.75rem;
-    margin-left: 1.5rem;
-
-    li {
-      margin-bottom: 0.25rem;
-    }
-  }
-
-  blockquote {
-    background: #f9f9f9;
-    border-left: 4px solid #dbdbdb;
-    padding: 0.75rem 1rem;
-    margin-bottom: 1rem;
-  }
-
-  hr {
-    display: none;
-  }
 }
 
+// ---- Footer ----
 
+.footer {
+  background: #f5f5f5;
+  padding: 2rem 1.5rem;
+  border-top: 1px solid #e0e0e0;
+  font-size: 0.9rem;
+  color: #333;
+
+  a {
+    color: hsl(204, 86%, 43%);
+  }
+}
 

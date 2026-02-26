@@ -15,9 +15,29 @@ CensorLab is a censorship emulation testbed that intercepts network packets and 
 
 ## Installation
 
-The easiest way to get started is with the pre-built VM images available on the [VM Info](/vm-info/) page. These provide a self-contained environment with everything pre-configured.
+### Docker (Recommended)
 
-To build from source, you need a Rust toolchain. Nix users can run `nix develop` for a complete environment.
+The fastest way to get started. No Rust toolchain or system dependencies required.
+
+```bash
+git clone https://github.com/SPIN-UMass/censorlab.git
+cd censorlab
+
+# Interactive shell
+bash docker/censorlab.sh --shell
+
+# Run directly (NFQ mode — requires sudo for live interception)
+sudo bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
+
+# Run directly (PCAP mode — no special permissions needed)
+bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap traffic.pcap 192.168.1.100
+```
+
+The Docker wrapper auto-detects NFQ vs PCAP mode and configures networking and capabilities accordingly. Set `REBUILD=1` to force a rebuild after source changes.
+
+### Build from Source
+
+You need a Rust toolchain. Nix users can run `nix develop` for a complete environment.
 
 ```bash
 # Build (release mode recommended for performance)
@@ -34,6 +54,10 @@ cargo test --verbose
 ```
 
 The `set_permissions.sh` script grants `CAP_NET_ADMIN` and `CAP_NET_RAW` capabilities to the binary, which are required for packet interception.
+
+### Pre-built VM
+
+Pre-built VM images with everything pre-installed are available on the [VM Info](/vm-info/) page. Useful for classroom environments or fully isolated setups.
 
 ## Environment Setup
 
