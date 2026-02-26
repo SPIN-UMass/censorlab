@@ -1,4 +1,4 @@
 tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
-PyCL,86005,85896,1559.4,84285,87398,3,21,ONNX model classification
-CensorLang,14516,14348.3,302.6,13999,14530,3,2,entropy heuristic (no ML support)
-Scapy,,,,,,0,118,ONNX model classification
+PyCL,84751,84959.7,544.8,84550,85578,3,21,ONNX model classification
+CensorLang,14603,14537.3,260.8,14250,14759,3,2,entropy heuristic (no ML support)
+Scapy,73666,81804.7,27486.1,59307,112441,3,106,ONNX model classification

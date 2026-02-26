@@ -4,35 +4,35 @@
   "rows": [
     {
       "tool": "PyCL",
-      "median_us": 86005,
-      "mean_us": 85896,
-      "stdev_us": 1559.4,
-      "min_us": 84285,
-      "max_us": 87398,
+      "median_us": 84751,
+      "mean_us": 84959.7,
+      "stdev_us": 544.8,
+      "min_us": 84550,
+      "max_us": 85578,
       "n": 3,
       "loc": 21,
       "note": "ONNX model classification"
     },
     {
       "tool": "CensorLang",
-      "median_us": 14516,
-      "mean_us": 14348.3,
-      "stdev_us": 302.6,
-      "min_us": 13999,
-      "max_us": 14530,
+      "median_us": 14603,
+      "mean_us": 14537.3,
+      "stdev_us": 260.8,
+      "min_us": 14250,
+      "max_us": 14759,
       "n": 3,
       "loc": 2,
       "note": "entropy heuristic (no ML support)"
     },
     {
       "tool": "Scapy",
-      "median_us": null,
-      "mean_us": null,
-      "stdev_us": null,
-      "min_us": null,
-      "max_us": null,
-      "n": 0,
-      "loc": 118,
+      "median_us": 73666,
+      "mean_us": 81804.7,
+      "stdev_us": 27486.1,
+      "min_us": 59307,
+      "max_us": 112441,
+      "n": 3,
+      "loc": 106,
       "note": "ONNX model classification"
     }
   ]

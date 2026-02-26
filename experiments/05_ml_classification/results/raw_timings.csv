@@ -1,7 +1,10 @@
 tool,iteration,time_us
-PyCL,1,86005
-PyCL,2,84285
-PyCL,3,87398
-CensorLang,1,13999
-CensorLang,2,14530
-CensorLang,3,14516
+PyCL,1,85578
+PyCL,2,84751
+PyCL,3,84550
+CensorLang,1,14759
+CensorLang,2,14603
+CensorLang,3,14250
+Scapy,1,59307
+Scapy,2,73666
+Scapy,3,112441

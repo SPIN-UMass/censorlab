@@ -95,6 +95,10 @@
               # Integration tests reference demo scripts not in the clean source
               doCheck = false;
             });
-          } // (import ./vm/packages.nix { inherit pkgs; });
-        }) // (import ./vm/outputs.nix { inherit self nixpkgs home-manager deploy-rs; });
+          } // (if builtins.pathExists ./vm/packages.nix
+               then import ./vm/packages.nix { inherit pkgs; }
+               else {});
+        }) // (if builtins.pathExists ./vm/outputs.nix
+              then import ./vm/outputs.nix { inherit self nixpkgs home-manager deploy-rs; }
+              else {});
 }
