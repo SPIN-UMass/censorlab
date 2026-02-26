@@ -6,4 +6,4 @@
 	url = https://github.com/jgthms/bulma
 [submodule "website/3party/Font-Awesome"]
 	path = website/3party/Font-Awesome
-	url = git@github.com:FortAwesome/Font-Awesome.git
+	url = https://github.com/FortAwesome/Font-Awesome.git
