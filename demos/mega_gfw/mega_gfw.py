@@ -252,38 +252,99 @@ def check_quic_sni(packet):
 # =============================================================================
 # In late 2022, the GFW began detecting and blocking "fully encrypted"
 # proxy protocols (Shadowsocks, VMess, etc.) that lack identifiable protocol
-# fingerprints. The detection heuristic checks:
-#   - High Shannon entropy (close to 1.0, indicating random/encrypted data)
-#   - No recognizable protocol header (not TLS, HTTP, SSH, etc.)
-#   - High average popcount (bits-per-byte near 4.0, consistent with
-#     uniformly random bytes)
+# fingerprints. The GFW applies five exemption rules (Algorithm 1 in the
+# paper); traffic that does NOT match any exemption is blocked:
+#   Ex1: Average popcount per byte <= 3.4 or >= 4.6
+#   Ex2: First 6+ bytes are printable ASCII [0x20, 0x7e]
+#   Ex3: More than 50% of bytes are printable ASCII
+#   Ex4: Longest contiguous run of printable ASCII > 20 bytes
+#   Ex5: Matches a known protocol fingerprint (TLS or HTTP)
 #
 # References:
 #   - Wu et al., "How the Great Firewall of China Detects and Blocks Fully
 #     Encrypted Traffic" (USENIX Security 2023)
 #   - Alice et al., "How China Detects and Blocks Shadowsocks" (IMC 2020)
 
+PRINTABLE_ASCII = set(range(0x20, 0x7f))
+
+def _num_beginning_ascii(data):
+    """Count printable ASCII bytes at the start of data."""
+    for i in range(len(data)):
+        if data[i] not in PRINTABLE_ASCII:
+            return i
+    return len(data)
+
+def _longest_printable_run(data):
+    """Find the longest contiguous run of printable ASCII bytes."""
+    max_run = 0
+    run = 0
+    for b in data:
+        if b in PRINTABLE_ASCII:
+            run += 1
+        else:
+            if run > max_run:
+                max_run = run
+            run = 0
+    if run > max_run:
+        max_run = run
+    return max_run
+
+def _frac_printable(data):
+    """Return the fraction of bytes that are printable ASCII."""
+    count = 0
+    for b in data:
+        if b in PRINTABLE_ASCII:
+            count += 1
+    return count / len(data)
+
+def _match_protocol_fingerprint(data):
+    """Check for TLS or HTTP protocol fingerprints."""
+    # TLS: [\x15-\x17]\x03[\x00-\x0f]
+    if len(data) >= 3:
+        if data[0] in (0x15, 0x16, 0x17) and data[1] == 0x03 and data[2] in range(0x00, 0x10):
+            return "TLS"
+    # HTTP: GET, PUT, POST, HEAD followed by space
+    if len(data) >= 5:
+        if data[0:4] == b"GET " or data[0:4] == b"PUT ":
+            return "HTTP"
+        if data[0:5] == b"POST " or data[0:5] == b"HEAD ":
+            return "HTTP"
+    return None
+
 def check_encrypted_traffic(packet):
     tcp = packet.tcp
     if not tcp:
         return None
-    if packet.payload_len < 64:
+    if packet.payload_len == 0:
         return None
 
-    # Known protocol fingerprints are already handled by earlier checks
-    # (DNS, HTTP, TLS, QUIC, SSH). If we reach here, the payload doesn't
-    # match any known protocol. Check if it looks fully encrypted.
+    payload = packet.payload
 
-    # Check entropy + popcount thresholds
-    # High entropy (>0.9 on 0-1 scale) combined with high average popcount
-    # (>3.4 bits/byte) strongly indicates fully encrypted / random data.
-    entropy = packet.payload_entropy
+    # Ex5: Protocol fingerprint exemption (TLS, HTTP)
+    proto = _match_protocol_fingerprint(payload)
+    if proto:
+        return None
+
+    # Ex1: Popcount exemption — average bits set per byte <= 3.4 or >= 4.6
     popcount = packet.payload_avg_popcount
-    if entropy > 0.9 and popcount > 3.4:
-        print("[Encrypted traffic] Blocked fully encrypted traffic (entropy=" + str(entropy) + ", popcount=" + str(popcount) + ")")
-        return "drop"
+    if popcount <= 3.4 or popcount >= 4.6:
+        return None
 
-    return None
+    # Ex2: First 6+ bytes are printable ASCII [0x20, 0x7e]
+    if _num_beginning_ascii(payload) >= 6:
+        return None
+
+    # Ex3: More than 50% of bytes are printable ASCII
+    if _frac_printable(payload) > 0.5:
+        return None
+
+    # Ex4: Longest contiguous run of printable ASCII > 20 bytes
+    if _longest_printable_run(payload) > 20:
+        return None
+
+    # No exemption matched — traffic looks fully encrypted
+    print("[Encrypted traffic] Blocked fully encrypted traffic (popcount=" + str(popcount) + ")")
+    return "drop"
 
 
 # =============================================================================
