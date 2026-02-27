@@ -37,7 +37,8 @@
 #   [11] Zohaib et al., "Exposing and Circumventing SNI-based QUIC Censorship
 #       of the Great Firewall of China" (USENIX Security 2025)
 
-from dns import parse as parse_dns
+from rust import log_info
+from dns import parse as parse_dns, craft_response as craft_dns_response
 from tls import parse_client_hello
 from quic import parse_initial
 
@@ -80,7 +81,7 @@ def check_ip(packet):
     ip = packet.ip
     for blocked in BLOCKED_IPS:
         if blocked in [ip.src, ip.dst]:
-            print("[IP blocklist] Blocked IP: " + blocked)
+            log_info("[IP blocklist] Blocked IP: " + blocked)
             return "drop"
     return None
 
@@ -90,13 +91,17 @@ def check_ip(packet):
 # =============================================================================
 # The GFW inspects DNS queries traversing international links and injects
 # forged responses for blocked domains. It operates on UDP port 53 traffic,
-# matching queried domain names against a blocklist.
+# matching queried domain names against a blocklist. Rather than dropping
+# the query, the GFW injects a forged DNS response pointing to a decoy IP,
+# racing against the legitimate response.
 #
 # References:
 #   - Anonymous, "Towards a Comprehensive Picture of the Great Firewall's
 #     DNS Censorship" (FOCI 2014)
 #   - Hoang et al., "How Great is the Great Firewall? Measuring China's
 #     DNS Censorship" (USENIX Security 2021)
+
+POISON_IP = "104.18.27.120"
 
 def check_dns(packet):
     udp = packet.udp
@@ -112,8 +117,8 @@ def check_dns(packet):
         qname = question.qname.lower().encode()
         for blocked in BLOCKED_DOMAINS:
             if blocked in qname:
-                print("[DNS blocking] Blocked query: " + str(qname))
-                return "drop"
+                log_info("[DNS inject] Injecting forged response for: " + str(qname))
+                return craft_dns_response(packet.payload, POISON_IP)
     return None
 
 
@@ -147,13 +152,13 @@ def check_http(packet):
     # Check Host header against domain blocklist (byte-level matching)
     for blocked in BLOCKED_DOMAINS:
         if blocked in payload:
-            print("[HTTP DPI] Blocked domain in HTTP request: " + str(blocked))
+            log_info("[HTTP DPI] Blocked domain in HTTP request: " + str(blocked))
             return "reset"
 
     # Check for sensitive keywords anywhere in the request
     for keyword in BLOCKED_KEYWORDS:
         if keyword in payload:
-            print("[HTTP DPI] Blocked keyword in HTTP request: " + str(keyword))
+            log_info("[HTTP DPI] Blocked keyword in HTTP request: " + str(keyword))
             return "reset"
 
     return None
@@ -189,7 +194,7 @@ def check_tls_sni(packet):
     sni_lower = hello.sni.lower().encode()
     for blocked in BLOCKED_DOMAINS:
         if blocked in sni_lower:
-            print("[TLS SNI] Blocked SNI: " + str(sni_lower))
+            log_info("[TLS SNI] Blocked SNI: " + str(sni_lower))
             return "reset"
 
     return None
@@ -227,7 +232,7 @@ def check_quic_sni(packet):
     sni_lower = info.sni.lower().encode()
     for blocked in BLOCKED_DOMAINS:
         if blocked in sni_lower:
-            print("[QUIC SNI] Blocked SNI: " + str(sni_lower))
+            log_info("[QUIC SNI] Blocked SNI: " + str(sni_lower))
             return "drop"
 
     return None
@@ -333,7 +338,7 @@ def check_encrypted_traffic(packet):
         return None
 
     # No exemption matched — traffic looks fully encrypted
-    print("[Encrypted traffic] Blocked fully encrypted traffic (popcount=" + str(popcount) + ")")
+    log_info("[Encrypted traffic] Blocked fully encrypted traffic (popcount=" + str(popcount) + ")")
     return "drop"
 
 
@@ -358,7 +363,7 @@ def check_ssh(packet):
         return None
 
     if b"SSH-" in packet.payload[:10]:
-        print("[SSH detection] Blocked SSH connection")
+        log_info("[SSH detection] Blocked SSH connection")
         return "reset"
 
     return None

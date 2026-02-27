@@ -862,10 +862,10 @@ fn test_mega_gfw_combined_censorship() {
     // Assertions
     // -----------------------------------------------------------------------
 
-    // Flow 1: DNS blocked.example.com -> Drop (frame 0)
+    // Flow 1: DNS blocked.example.com -> Inject (forged response) (frame 0)
     assert!(
-        result.action_lines.iter().any(|l| l.packet_index == frame_idx(0) && l.action.contains("Drop")),
-        "Flow 1: expected Drop for DNS query to blocked.example.com (frame 0)"
+        result.action_lines.iter().any(|l| l.packet_index == frame_idx(0) && l.action.contains("Inject")),
+        "Flow 1: expected Inject for DNS query to blocked.example.com (frame 0)"
     );
 
     // Flow 2: DNS safe.example.com -> no action (frame 1)

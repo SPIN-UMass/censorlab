@@ -407,6 +407,7 @@ pub mod rust_packet {
         convert::IntoPyException, pyclass, PyObjectRef, PyPayload, PyResult,
         VirtualMachine,
     };
+    use tracing;
     
     use std::io;
     use std::sync::mpsc;
@@ -794,6 +795,26 @@ pub mod rust_packet {
             let out: Vec<PyObjectRef> = out.into_iter().map(|f| f.to_pyobject(vm)).collect();
             Ok(PyList::new_ref(out, &vm.ctx))
         }
+    }
+
+    #[pyfunction]
+    fn log_info(msg: String) {
+        tracing::info!("{}", msg);
+    }
+
+    #[pyfunction]
+    fn log_error(msg: String) {
+        tracing::error!("{}", msg);
+    }
+
+    #[pyfunction]
+    fn log_warn(msg: String) {
+        tracing::warn!("{}", msg);
+    }
+
+    #[pyfunction]
+    fn log_debug(msg: String) {
+        tracing::debug!("{}", msg);
     }
 }
 
