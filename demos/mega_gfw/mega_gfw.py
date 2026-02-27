@@ -25,13 +25,17 @@
 #       Analysis of TOM-Skype Censorship and Surveillance" (FOCI 2011)
 #   [5] Clayton et al., "Ignoring the Great Firewall of China" (PET 2006)
 #   [6] Bock et al., "Exposing and Circumventing China's Censorship of ESNI"
-#       (FOCI 2020)
+#       (GFW Report, August 2020)
 #   [7] Elmenhorst et al., "Web Censorship Measurements of HTTP/3 over QUIC"
-#       (IMC 2022)
+#       (IMC 2021)
 #   [8] Wu et al., "How the Great Firewall of China Detects and Blocks Fully
 #       Encrypted Traffic" (USENIX Security 2023)
-#   [9] Dunna et al., "Analyzing China's Blocking of Unpublished Tor Bridges"
+#   [9] Alice et al., "How China Detects and Blocks Shadowsocks"
+#       (IMC 2020)
+#   [10] Dunna et al., "Analyzing China's Blocking of Unpublished Tor Bridges"
 #       (FOCI 2018)
+#   [11] Zohaib et al., "Exposing and Circumventing SNI-based QUIC Censorship
+#       of the Great Firewall of China" (USENIX Security 2025)
 
 from dns import parse as parse_dns
 from tls import parse_client_hello
@@ -90,6 +94,7 @@ def check_ip(packet):
     ip = packet.ip
     for blocked in BLOCKED_IPS:
         if blocked in [ip.src, ip.dst]:
+            print("[IP blocklist] Blocked IP: " + blocked)
             return "drop"
     return None
 
@@ -121,6 +126,7 @@ def check_dns(packet):
         qname = question.qname.lower()
         for blocked in BLOCKED_DOMAINS:
             if blocked in qname:
+                print("[DNS blocking] Blocked query: " + qname)
                 return "drop"
     return None
 
@@ -155,11 +161,13 @@ def check_http(packet):
     # Check Host header against domain blocklist (byte-level matching)
     for blocked_bytes in BLOCKED_DOMAINS_BYTES:
         if blocked_bytes in payload:
+            print("[HTTP DPI] Blocked domain in HTTP request: " + str(blocked_bytes))
             return "reset"
 
     # Check for sensitive keywords anywhere in the request
     for keyword_bytes in BLOCKED_KEYWORDS_BYTES:
         if keyword_bytes in payload:
+            print("[HTTP DPI] Blocked keyword in HTTP request: " + str(keyword_bytes))
             return "reset"
 
     return None
@@ -175,7 +183,7 @@ def check_http(packet):
 #
 # Reference:
 #   - Bock et al., "Exposing and Circumventing China's Censorship of ESNI"
-#     (FOCI 2020)
+#     (GFW Report, August 2020)
 
 def check_tls_sni(packet):
     tcp = packet.tcp
@@ -195,6 +203,7 @@ def check_tls_sni(packet):
     sni_lower = hello.sni.lower()
     for blocked in BLOCKED_DOMAINS:
         if blocked in sni_lower:
+            print("[TLS SNI] Blocked SNI: " + sni_lower)
             return "reset"
 
     return None
@@ -208,9 +217,11 @@ def check_tls_sni(packet):
 # from the embedded TLS ClientHello within the CRYPTO frame.
 # Some censors also block QUIC entirely by dropping all UDP/443 traffic.
 #
-# Reference:
+# References:
 #   - Elmenhorst et al., "Web Censorship Measurements of HTTP/3 over QUIC"
-#     (IMC 2022)
+#     (IMC 2021)
+#   - Zohaib et al., "Exposing and Circumventing SNI-based QUIC Censorship
+#     of the Great Firewall of China" (USENIX Security 2025)
 
 def check_quic_sni(packet):
     udp = packet.udp
@@ -230,6 +241,7 @@ def check_quic_sni(packet):
     sni_lower = info.sni.lower()
     for blocked in BLOCKED_DOMAINS:
         if blocked in sni_lower:
+            print("[QUIC SNI] Blocked SNI: " + sni_lower)
             return "drop"
 
     return None
@@ -246,9 +258,10 @@ def check_quic_sni(packet):
 #   - High average popcount (bits-per-byte near 4.0, consistent with
 #     uniformly random bytes)
 #
-# Reference:
+# References:
 #   - Wu et al., "How the Great Firewall of China Detects and Blocks Fully
 #     Encrypted Traffic" (USENIX Security 2023)
+#   - Alice et al., "How China Detects and Blocks Shadowsocks" (IMC 2020)
 
 def check_encrypted_traffic(packet):
     tcp = packet.tcp
@@ -267,6 +280,7 @@ def check_encrypted_traffic(packet):
     entropy = packet.payload_entropy
     popcount = packet.payload_avg_popcount
     if entropy > 0.9 and popcount > 3.4:
+        print("[Encrypted traffic] Blocked fully encrypted traffic (entropy=" + str(entropy) + ", popcount=" + str(popcount) + ")")
         return "drop"
 
     return None
@@ -284,8 +298,6 @@ def check_encrypted_traffic(packet):
 # Reference:
 #   - Dunna et al., "Analyzing China's Blocking of Unpublished Tor Bridges"
 #     (FOCI 2018)
-#   - (SSH tunneling is a common circumvention method; the GFW actively
-#     probes servers detected speaking SSH on non-standard ports)
 
 def check_ssh(packet):
     tcp = packet.tcp
@@ -295,6 +307,7 @@ def check_ssh(packet):
         return None
 
     if b"SSH-" in packet.payload[:10]:
+        print("[SSH detection] Blocked SSH connection")
         return "reset"
 
     return None
