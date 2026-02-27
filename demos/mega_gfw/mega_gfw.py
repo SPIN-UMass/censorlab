@@ -48,26 +48,12 @@ from quic import parse_initial
 # These are representative examples for demonstration purposes.
 
 BLOCKED_DOMAINS = [
-    "blocked.example.com",
-    "forbidden.test",
-    "sensitive.example.org",
-]
-
-# Byte-encoded versions for matching inside raw packet payloads (HTTP DPI)
-BLOCKED_DOMAINS_BYTES = [
     b"blocked.example.com",
     b"forbidden.test",
     b"sensitive.example.org",
 ]
 
 BLOCKED_KEYWORDS = [
-    "ultrasurf",
-    "freegate",
-    "falun",
-    "dynaweb",
-]
-
-BLOCKED_KEYWORDS_BYTES = [
     b"ultrasurf",
     b"freegate",
     b"falun",
@@ -123,10 +109,10 @@ def check_dns(packet):
         return None
 
     for question in dns.questions:
-        qname = question.qname.lower()
+        qname = question.qname.lower().encode()
         for blocked in BLOCKED_DOMAINS:
             if blocked in qname:
-                print("[DNS blocking] Blocked query: " + qname)
+                print("[DNS blocking] Blocked query: " + str(qname))
                 return "drop"
     return None
 
@@ -159,15 +145,15 @@ def check_http(packet):
         return None
 
     # Check Host header against domain blocklist (byte-level matching)
-    for blocked_bytes in BLOCKED_DOMAINS_BYTES:
-        if blocked_bytes in payload:
-            print("[HTTP DPI] Blocked domain in HTTP request: " + str(blocked_bytes))
+    for blocked in BLOCKED_DOMAINS:
+        if blocked in payload:
+            print("[HTTP DPI] Blocked domain in HTTP request: " + str(blocked))
             return "reset"
 
     # Check for sensitive keywords anywhere in the request
-    for keyword_bytes in BLOCKED_KEYWORDS_BYTES:
-        if keyword_bytes in payload:
-            print("[HTTP DPI] Blocked keyword in HTTP request: " + str(keyword_bytes))
+    for keyword in BLOCKED_KEYWORDS:
+        if keyword in payload:
+            print("[HTTP DPI] Blocked keyword in HTTP request: " + str(keyword))
             return "reset"
 
     return None
@@ -200,10 +186,10 @@ def check_tls_sni(packet):
     if not hello.sni:
         return None
 
-    sni_lower = hello.sni.lower()
+    sni_lower = hello.sni.lower().encode()
     for blocked in BLOCKED_DOMAINS:
         if blocked in sni_lower:
-            print("[TLS SNI] Blocked SNI: " + sni_lower)
+            print("[TLS SNI] Blocked SNI: " + str(sni_lower))
             return "reset"
 
     return None
@@ -238,10 +224,10 @@ def check_quic_sni(packet):
     if not info.sni:
         return None
 
-    sni_lower = info.sni.lower()
+    sni_lower = info.sni.lower().encode()
     for blocked in BLOCKED_DOMAINS:
         if blocked in sni_lower:
-            print("[QUIC SNI] Blocked SNI: " + sni_lower)
+            print("[QUIC SNI] Blocked SNI: " + str(sni_lower))
             return "drop"
 
     return None
