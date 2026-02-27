@@ -33,7 +33,7 @@ in
   # Nix stuff
   nix = {
     # Use flakes
-    package = pkgs.nixFlakes;
+    package = pkgs.lixPackageSets.stable.lix;
     # Other settings
     settings = {
       sandbox = true;
@@ -46,27 +46,15 @@ in
   boot.tmp.cleanOnBoot = true;
 
   # Enable the X11 windowing system.
-  services.xserver = {
-    enable = true;
-    # Use KDE
-    desktopManager.plasma5 = {
-      enable = true;
-    };
-  };
-  # Cut out a bunch of the default packages
-  environment.plasma5.excludePackages = with pkgs.plasma5Packages; [
-    ark
-    elisa
-    gwenview
-    okular
-    khelpcenter
-    print-manager
-  ];
+  services.xserver.enable = true;
+  # Use KDE Plasma 6
+  services.desktopManager.plasma6.enable = true;
   # Autologin into censorlab
   services.displayManager.autoLogin = {
     enable = true;
     user = "censorlab";
   };
+  services.displayManager.defaultSession = "plasma";
 
   # Use mutable users
   users.mutableUsers = false;

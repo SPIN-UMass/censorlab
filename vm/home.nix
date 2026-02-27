@@ -28,7 +28,7 @@ in
     censorlab-demos = {
       name = "CensorLab Demos";
       comment = "Open a terminal in the demos directory";
-      exec = "${pkgs.konsole}/bin/konsole --workdir /etc/censorlab-demos";
+      exec = "${pkgs.kdePackages.konsole}/bin/konsole --workdir /etc/censorlab-demos";
       icon = "utilities-terminal";
       terminal = false;
       categories = [ "Development" ];
