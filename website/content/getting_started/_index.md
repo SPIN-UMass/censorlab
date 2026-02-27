@@ -19,6 +19,7 @@ Docker is the fastest way to get started. You don't need to install Rust or any 
 # Clone the repository
 git clone https://github.com/SPIN-UMass/censorlab.git
 cd censorlab
+git submodule update --init
 
 # Open an interactive shell inside the container
 bash docker/censorlab.sh --shell
@@ -33,6 +34,7 @@ If you prefer to build natively, you need a Rust toolchain. Nix users can run `n
 ```bash
 git clone https://github.com/SPIN-UMass/censorlab.git
 cd censorlab
+git submodule update --init
 cargo build --release
 sudo ./set_permissions.sh   # grants CAP_NET_ADMIN + CAP_NET_RAW
 ```
@@ -83,6 +85,7 @@ Other demos you can try:
 | `demos/ip_blocking/` | Blocks traffic to/from specific IP addresses |
 | `demos/quic_blocking/` | Blocks QUIC connections by SNI |
 | `demos/shadowsocks_gfw/` | Detects Shadowsocks-like encrypted proxy traffic |
+| `demos/mega_gfw/` | Comprehensive GFW emulation (7 techniques combined) |
 
 ## Step 4: See Censorship in Action
 
@@ -261,5 +264,5 @@ CensorLab can run ONNX models for ML-based censorship. See the [model demo](http
 ## Step 6: Explore Further
 
 - **[Documentation](/docs/)** — Full reference for configuration, PyCL API, and CensorLang DSL
-- **[Demos](https://github.com/SPIN-UMass/censorlab/tree/main/demos)** — 11 example scenarios covering DNS, HTTP, HTTPS, QUIC, IP blocking, and ML-based detection
+- **[Demos](https://github.com/SPIN-UMass/censorlab/tree/main/demos)** — 12 example scenarios covering DNS, HTTP, HTTPS, QUIC, IP blocking, SSH detection, encrypted proxy detection, and ML-based classification
 - **[Paper](https://arxiv.org/abs/2412.16349)** — The research paper describing CensorLab's design and evaluation

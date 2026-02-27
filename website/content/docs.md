@@ -22,6 +22,7 @@ The fastest way to get started. No Rust toolchain or system dependencies require
 ```bash
 git clone https://github.com/SPIN-UMass/censorlab.git
 cd censorlab
+git submodule update --init
 
 # Interactive shell
 bash docker/censorlab.sh --shell
@@ -40,6 +41,10 @@ The Docker wrapper auto-detects NFQ vs PCAP mode and configures networking and c
 You need a Rust toolchain. Nix users can run `nix develop` for a complete environment.
 
 ```bash
+git clone https://github.com/SPIN-UMass/censorlab.git
+cd censorlab
+git submodule update --init
+
 # Build (release mode recommended for performance)
 cargo build --release
 
@@ -167,6 +172,20 @@ If a packet matches a blocklist at any layer, the configured action is taken imm
 
 The [demos directory](https://github.com/SPIN-UMass/censorlab/tree/main/demos) contains example scenarios, each with a `censor.toml` and associated scripts/models:
 
+| Demo | Description |
+|------|-------------|
+| `dns_blocking/` | Block DNS queries by domain name |
+| `http_blocking/` | Block HTTP requests by keyword in the Host header |
+| `https_blocking/` | Block HTTPS connections (simple) |
+| `https_blocking_tls/` | Block HTTPS by TLS ClientHello SNI |
+| `ip_blocking/` | Block traffic to/from specific IP addresses |
+| `quic_blocking/` | Block QUIC connections by SNI |
+| `shadowsocks_gfw/` | Detect Shadowsocks-like encrypted proxy traffic via entropy heuristics |
+| `mega_gfw/` | Comprehensive GFW emulation combining 7 censorship techniques |
+| `model/` | ML model-based traffic classification (ONNX) |
+| `null/` | No-op passthrough (baseline) |
+| `print/` | Debug logging of all packets |
+
 ```bash
 # DNS blocking
 censorlab -c demos/dns_blocking/censor.toml nfq
@@ -174,8 +193,8 @@ censorlab -c demos/dns_blocking/censor.toml nfq
 # HTTP blocking
 censorlab -c demos/http_blocking/censor.toml nfq
 
-# IP blocking
-censorlab -c demos/ip_blocking/censor.toml nfq
+# Comprehensive GFW emulation (DNS + HTTP + TLS + QUIC + IP + SSH + entropy)
+censorlab -c demos/mega_gfw/censor.toml nfq
 ```
 
 Paths in `censor.toml` are relative to the TOML file itself, including paths to censor scripts and ML models.
@@ -288,8 +307,8 @@ hash_seed = 1337
 reset_repeat = 5
 
 [ip.blocklist]
-list = ["192.168.31.1"]
-action = "Reset"
+list = ["198.51.100.1", "203.0.113.0"]
+action = "Drop"
 
 [tcp.port_blocklist]
 list = [80]
@@ -298,9 +317,22 @@ action = "Reset"
 [tcp]
 ip_port_allowlist = { list = ["10.0.0.1:443"] }
 
+[tcp.ip_port_blocklist]
+list = ["93.184.216.34:443"]
+action = "Reset"
+
+[udp.port_blocklist]
+list = [53]
+action = "Drop"
+
+[udp]
+ip_port_allowlist = { list = [] }
+
 [models.classifier]
 path = "models/classifier.onnx.ml"
 ```
+
+**Note:** `"Reset"` is only valid on `[tcp]` lists. Using it on `[ip]`, `[ethernet]`, `[arp]`, `[udp]`, or `[icmp]` sections will produce a validation error at startup. Use `"Drop"` for non-TCP layers.
 
 ---
 
