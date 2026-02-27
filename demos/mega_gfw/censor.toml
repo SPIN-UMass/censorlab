@@ -1,0 +1,64 @@
+# =============================================================================
+# Mega-GFW Demo: Emulating China's Great Firewall
+# =============================================================================
+#
+# This configuration combines multiple censorship techniques used by the
+# Chinese Great Firewall (GFW) into a single CensorLab setup. It demonstrates
+# both config-level and script-level censorship.
+#
+# Techniques implemented (all in mega_gfw.py):
+#   1. IP blocklist                       - Xu et al., 2011
+#   2. DNS query blocking                 - Anonymous, 2014; Hoang et al., 2021
+#   3. HTTP Host/keyword blocking         - Knockel et al., 2011; Clayton et al., 2006
+#   4. TLS SNI filtering                  - Bock et al., 2020
+#   5. QUIC SNI blocking                  - Elmenhorst et al., 2022
+#   6. Encrypted traffic detection        - Wu et al., 2023
+#   7. SSH banner detection               - Dunna et al., 2018
+#
+# See mega_gfw.py for implementations with full academic citations.
+
+[execution]
+mode = "Python"
+script = "mega_gfw.py"
+
+[ethernet]
+[ethernet.allowlist]
+list = []
+[ethernet.blocklist]
+list = []
+
+[arp]
+
+[ip]
+# Technique 1: IP blocklist
+# The GFW maintains blocklists of IP addresses belonging to known
+# circumvention services, foreign media, and other "sensitive" destinations.
+# Reference: Xu et al., "Internet Censorship in China: Where Does the
+# Filtering Occur?" (PAM 2011)
+[ip.blocklist]
+list = ["198.51.100.1"]
+action = "Drop"
+[ip.allowlist]
+list = []
+
+[icmp]
+
+[tcp]
+[tcp.port_allowlist]
+list = []
+[tcp.port_blocklist]
+list = []
+[tcp.ip_port_allowlist]
+list = []
+[tcp.ip_port_blocklist]
+list = []
+
+[udp]
+[udp.port_allowlist]
+list = []
+[udp.port_blocklist]
+list = []
+[udp.ip_port_allowlist]
+list = []
+[udp.ip_port_blocklist]
+list = []

@@ -275,6 +275,24 @@ fn tls_client_hello_message(sni: &str) -> Vec<u8> {
     buf
 }
 
+/// Build an SSH version banner payload (e.g. "SSH-2.0-OpenSSH_8.9\r\n").
+pub fn ssh_banner() -> Vec<u8> {
+    b"SSH-2.0-OpenSSH_8.9\r\n".to_vec()
+}
+
+/// Build a deterministic high-entropy payload of the given length.
+///
+/// For lengths <= 256, produces a permutation of byte values using a
+/// linear congruential map `(i * 167 + 89) mod 256`, guaranteeing
+/// maximum Shannon entropy (each byte value appears exactly once).
+/// For longer payloads, the pattern repeats with different offsets.
+/// Average popcount is ~4.0 (half of 8 bits).
+pub fn high_entropy_payload(len: usize) -> Vec<u8> {
+    (0..len)
+        .map(|i| ((i.wrapping_mul(167).wrapping_add(89)) & 0xFF) as u8)
+        .collect()
+}
+
 /// Build a QUIC Initial packet (unencrypted) wrapping a TLS ClientHello with the given SNI.
 ///
 /// The payload is NOT encrypted — suitable for testing the QUIC parser.

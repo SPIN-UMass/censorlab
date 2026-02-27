@@ -108,9 +108,7 @@ pub struct Censor {
     /// TCP allow/blocklist for ip-port pairs
     tcp_ip_port_list: AllowBlockList<HashSet<crate::config::IpPort>>,
     // UDP
-    /// UDP allow/blocklist for ports.
-    /// Loaded from config but not yet used in process_transport (see TODO.md).
-    #[allow(dead_code)]
+    /// UDP allow/blocklist for ports
     udp_port_list: AllowBlockList<PortVec>,
     /// UDP allow/blocklist for ip-port pairs
     udp_ip_port_list: AllowBlockList<HashSet<crate::config::IpPort>>,
@@ -492,6 +490,18 @@ impl Censor {
     ) -> Result<Action, SmoltcpError> {
         // Just make sure the packet is indeed ipv4
         let ipv4_packet = Ipv4Packet::new_checked(data.as_ref())?;
+        // Check config-level IP allow/blocklist
+        match self
+            .ipv4_list
+            .recommend_either(&ipv4_packet.src_addr(), &ipv4_packet.dst_addr())
+        {
+            Some(Action::None) | None => {}
+            Some(Action::Reset { .. }) => {
+                warn!("Reset is not valid for IP allow/blocklist. Dropping instead");
+                return Ok(Action::Drop);
+            }
+            Some(action) => return Ok(action),
+        }
         // Figure out our direction
         let direction = match censor_ctx {
             // For wire mode we always know the direction
@@ -539,6 +549,18 @@ impl Censor {
     ) -> Result<Action, SmoltcpError> {
         // Just make sure the packet is indeed ipv6
         let ipv6_packet = Ipv6Packet::new_checked(data.as_ref())?;
+        // Check config-level IP allow/blocklist
+        match self
+            .ipv6_list
+            .recommend_either(&ipv6_packet.src_addr(), &ipv6_packet.dst_addr())
+        {
+            Some(Action::None) | None => {}
+            Some(Action::Reset { .. }) => {
+                warn!("Reset is not valid for IP allow/blocklist. Dropping instead");
+                return Ok(Action::Drop);
+            }
+            Some(action) => return Ok(action),
+        }
         // Figure out our direction
         let direction = match censor_ctx {
             // For wire mode we always know the direction
@@ -659,16 +681,52 @@ impl Censor {
         direction: Direction,
         packet: Packet,
     ) -> Result<Action, SmoltcpError> {
-        // First, process using the port list
-        match self
-            .tcp_port_list
-            .recommend_either(&packet.transport.src, &packet.transport.dst)
-        {
-            // If we pass the whitelist, process our packet normally
-            Some(Action::None) | None => self.transport_state.process(ips, direction, packet),
-            // Any other action must return immediately
-            Some(action) => Ok(action),
+        let is_tcp = matches!(
+            packet.transport.extra,
+            crate::program::packet::TransportMetadataExtra::Tcp(_)
+        );
+
+        if is_tcp {
+            // TCP port allow/blocklist
+            match self
+                .tcp_port_list
+                .recommend_either(&packet.transport.src, &packet.transport.dst)
+            {
+                Some(Action::None) | None => {}
+                Some(action) => return Ok(action),
+            }
+            // TCP ip:port allow/blocklist
+            let src_ipport = crate::config::IpPort(ips.src_std(), packet.transport.src);
+            let dst_ipport = crate::config::IpPort(ips.dst_std(), packet.transport.dst);
+            match self
+                .tcp_ip_port_list
+                .recommend_either(&src_ipport, &dst_ipport)
+            {
+                Some(Action::None) | None => {}
+                Some(action) => return Ok(action),
+            }
+        } else {
+            // UDP port allow/blocklist
+            match self
+                .udp_port_list
+                .recommend_either(&packet.transport.src, &packet.transport.dst)
+            {
+                Some(Action::None) | None => {}
+                Some(action) => return Ok(action),
+            }
+            // UDP ip:port allow/blocklist
+            let src_ipport = crate::config::IpPort(ips.src_std(), packet.transport.src);
+            let dst_ipport = crate::config::IpPort(ips.dst_std(), packet.transport.dst);
+            match self
+                .udp_ip_port_list
+                .recommend_either(&src_ipport, &dst_ipport)
+            {
+                Some(Action::None) | None => {}
+                Some(action) => return Ok(action),
+            }
         }
+
+        self.transport_state.process(ips, direction, packet)
     }
 }
 impl fmt::Display for Censor {
@@ -733,6 +791,18 @@ impl IpPair {
         match self {
             IpPair::V4 { dst, .. } => (*dst).into(),
             IpPair::V6 { dst, .. } => (*dst).into(),
+        }
+    }
+    pub fn src_std(&self) -> std::net::IpAddr {
+        match self {
+            IpPair::V4 { src, .. } => std::net::IpAddr::V4((*src).into()),
+            IpPair::V6 { src, .. } => std::net::IpAddr::V6((*src).into()),
+        }
+    }
+    pub fn dst_std(&self) -> std::net::IpAddr {
+        match self {
+            IpPair::V4 { dst, .. } => std::net::IpAddr::V4((*dst).into()),
+            IpPair::V6 { dst, .. } => std::net::IpAddr::V6((*dst).into()),
         }
     }
     pub fn swap(&self) -> Self {
