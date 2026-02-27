@@ -318,6 +318,10 @@ def check_encrypted_traffic(packet):
     if packet.payload_len == 0:
         return None
 
+    # Exempt well-known ports (HTTP/HTTPS are handled by other techniques)
+    if tcp.uses_port(443) or tcp.uses_port(80):
+        return None
+
     payload = packet.payload
 
     # Ex5: Protocol fingerprint exemption (TLS, HTTP)
