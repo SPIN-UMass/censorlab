@@ -273,6 +273,40 @@ def generate_latex_macros(table4, table3, benchmarks):
 
         lines.append("")
 
+    # --- Comparison percentages ---
+    lines.append("% ============================================================")
+    lines.append("% Comparison Percentages (for introduction / showcase text)")
+    lines.append("% ============================================================")
+    lines.append("% Command format: \\Comp<Scenario><Tool>Vs<Baseline><Metric>")
+    lines.append("% Formula: round((baseline - censorlab) / baseline * 100)")
+    lines.append("")
+
+    COMPARISONS = [
+        ("Shadowsocks", "PyCL", "Zeek"),
+        ("SniFiltering", "PyCL", "Zeek"),
+        ("MlClassification", "PyCL", "Scapy"),
+    ]
+
+    for scenario, tool, baseline in COMPARISONS:
+        tool_cmd = TOOL_NAMES[tool]
+        baseline_cmd = TOOL_NAMES[baseline]
+        tool_key = (scenario, tool)
+        baseline_key = (scenario, baseline)
+        tool_entry = table4.get(tool_key)
+        baseline_entry = table4.get(baseline_key)
+
+        for metric, extract in [("Loc", "loc"), ("Time", "median_us")]:
+            cmd_name = f"Comp{sanitize_cmd(scenario)}{sanitize_cmd(tool_cmd)}Vs{sanitize_cmd(baseline_cmd)}{metric}"
+            tool_val = tool_entry.get(extract) if tool_entry else None
+            base_val = baseline_entry.get(extract) if baseline_entry else None
+
+            if tool_val is not None and base_val is not None and base_val != 0:
+                pct = round((base_val - tool_val) / base_val * 100)
+                lines.append(f"\\newcommand{{\\{cmd_name}}}{{{pct}}}")
+            else:
+                lines.append(f"\\newcommand{{\\{cmd_name}}}{{N/A}}")
+
+    lines.append("")
     lines.append("% End of auto-generated results")
     lines.append("")
     return "\n".join(lines)

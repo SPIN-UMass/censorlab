@@ -1,7 +1,5 @@
 # CensorLang Shadowsocks/encrypted protocol detection
 # GFW heuristics from Wu et al. 2023
-# Note: CensorLang lacks port fields for per-port filtering,
-# but the GFW applies these heuristics to all TCP connections.
 
 # Regex 0: Known protocol fingerprints (whitelist)
 regex "^(\x16\x03|\x14\x03|\x15\x03|\x17\x03|GET |POST |HEAD |PUT |HTTP/|SSH-|\x00\x00)"

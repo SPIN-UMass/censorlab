@@ -48,3 +48,18 @@ docker run --rm \
     -v "$REPO_ROOT/experiments:/censorlab/experiments" \
     "$IMAGE_NAME" \
     bash experiments/scripts/run_all.sh "$ITERATIONS"
+
+# Copy results.tex to paper repo if available
+PAPER_RESULTS="$REPO_ROOT/../clab-paper/experiments/results.tex"
+EXP_RESULTS="$REPO_ROOT/experiments/results.tex"
+if [ -f "$EXP_RESULTS" ]; then
+    if [ -d "$(dirname "$PAPER_RESULTS")" ]; then
+        cp "$EXP_RESULTS" "$PAPER_RESULTS"
+        echo "=== Copied results.tex → clab-paper/experiments/results.tex ==="
+    else
+        echo ""
+        echo "=== ACTION REQUIRED ==="
+        echo "Copy results.tex to your paper repo:"
+        echo "  cp $EXP_RESULTS <paper-repo>/experiments/results.tex"
+    fi
+fi
