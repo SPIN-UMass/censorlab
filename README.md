@@ -1,8 +1,8 @@
-# CensorLab: A Generic Testbed for Censorship Emulation
+#todocite CensorLab: A Generic Testbed for Censorship Emulation
 
 **[Documentation](https://censorlab.cs.umass.edu/)** | **[Getting Started](https://censorlab.cs.umass.edu/getting_started/)** | **[API Reference](https://censorlab.cs.umass.edu/docs/)**
 
-CensorLab is a censorship emulation testbed that intercepts network packets and processes them through configurable layers with optional Python scripts or ML models for custom censorship logic. See the [paper](https://arxiv.org/abs/2412.16349) for design and evaluation details.
+CensorLab is a censorship emulation testbed that intercepts network packets and processes them through configurable layers with optional Python scripts or ML models for custom censorship logic. 
 
 ## Quick Start (Docker)
 
