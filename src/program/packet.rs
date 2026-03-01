@@ -797,6 +797,39 @@ pub mod rust_packet {
         }
     }
 
+    #[pyattr]
+    #[pyclass(module = "rust", name = "Host")]
+    #[derive(Debug, PyPayload)]
+    pub struct Host {
+        num_connections: u32,
+        num_packets: u32,
+        state: PyObjectRef,
+    }
+    impl Host {
+        pub fn new(num_connections: u32, num_packets: u32, state: PyObjectRef) -> Self {
+            Self {
+                num_connections,
+                num_packets,
+                state,
+            }
+        }
+    }
+    #[pyclass]
+    impl Host {
+        #[pygetset]
+        fn num_connections(&self) -> u32 {
+            self.num_connections
+        }
+        #[pygetset]
+        fn num_packets(&self) -> u32 {
+            self.num_packets
+        }
+        #[pygetset]
+        fn state(&self) -> PyObjectRef {
+            self.state.clone()
+        }
+    }
+
     #[pyfunction]
     fn log_info(msg: String) {
         tracing::info!("{}", msg);

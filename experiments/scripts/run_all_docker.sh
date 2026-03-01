@@ -8,8 +8,7 @@
 # Usage:
 #   bash experiments/scripts/run_all_docker.sh [ITERATIONS]
 #
-# Options (via environment variables):
-#   REBUILD=1  Force rebuild of the Docker image even if it exists
+# The Docker image is automatically rebuilt when source files change.
 
 set -euo pipefail
 
@@ -17,14 +16,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ITERATIONS="${1:-3}"
 IMAGE_NAME="censorlab-experiments"
-REBUILD="${REBUILD:-0}"
 
-if [ "$REBUILD" = "1" ] || ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
-    echo "=== Building Docker image ==="
-    docker build -f "$REPO_ROOT/docker/Dockerfile" -t "$IMAGE_NAME" "$REPO_ROOT"
+# Compute a fingerprint of files that affect the Docker image.
+# Uses git so it's portable across Linux and macOS.
+# NOTE: These paths must match the COPY sources in the Dockerfile.
+compute_build_hash() {
+    (cd "$REPO_ROOT" && {
+        git rev-parse HEAD
+        git diff HEAD -- docker/ flake.nix flake.lock Cargo.toml Cargo.lock \
+            build.rs src/ demos/ website/ .gitmodules
+        git submodule status
+    } 2>/dev/null | git hash-object --stdin 2>/dev/null) || echo "unknown"
+}
+
+BUILD_HASH=$(compute_build_hash)
+STORED_HASH=$(docker inspect --format '{{index .Config.Labels "censorlab.build_hash"}}' \
+    "$IMAGE_NAME" 2>/dev/null || echo "")
+
+if [ "$BUILD_HASH" = "unknown" ] || [ "$BUILD_HASH" != "$STORED_HASH" ]; then
+    echo "=== Building Docker image (source changes detected) ==="
+    docker build -f "$REPO_ROOT/docker/Dockerfile" \
+        --build-arg BUILD_HASH="$BUILD_HASH" \
+        -t "$IMAGE_NAME" "$REPO_ROOT"
     echo ""
 else
-    echo "=== Docker image '$IMAGE_NAME' already exists (set REBUILD=1 to force rebuild) ==="
+    echo "=== Docker image '$IMAGE_NAME' is up to date ==="
 fi
 
 echo "=== Running all experiments (iterations=$ITERATIONS) ==="

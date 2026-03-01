@@ -1,4 +1,4 @@
-use crate::program::env::{EnvFields, RegisterWriteError, Registers};
+use crate::program::env::{EnvFields, RegisterBanks, RegisterWriteError};
 use crate::program::packet::Packet;
 use crate::program::packet::{IpVersionMetadata, TcpFlags, TransportMetadataExtra};
 use fnv::FnvHashSet;
@@ -7,12 +7,32 @@ use num::Zero;
 use regex::bytes::Regex as BytesRegex;
 use serde::Deserialize;
 use serde_with::DeserializeFromStr;
+use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::num::TryFromIntError;
 use std::path::PathBuf;
 use std::str::FromStr;
 use thiserror::Error;
+
+/// Storage for model input/output values during CensorLang execution
+#[derive(Debug, Default)]
+pub struct ModelIO {
+    pub inputs: HashMap<String, Vec<f64>>,
+    pub outputs: HashMap<String, Vec<f64>>,
+}
+impl ModelIO {
+    pub fn set_input(&mut self, name: &str, index: usize, value: f64) {
+        let vec = self.inputs.entry(name.to_string()).or_default();
+        if index >= vec.len() {
+            vec.resize(index + 1, 0.0);
+        }
+        vec[index] = value;
+    }
+    pub fn get_output(&self, name: &str, index: usize) -> Option<f64> {
+        self.outputs.get(name).and_then(|v| v.get(index)).copied()
+    }
+}
 
 /// Generates an `all()` method that returns a `Vec` of all listed variants.
 macro_rules! enum_all {
@@ -79,13 +99,13 @@ impl Program {
         self.lines
             .iter()
             .enumerate()
-            .filter(|(_, line)| !matches!(line.operation, Operation::Model | Operation::Return(_)))
+            .filter(|(_, line)| !matches!(line.operation, Operation::Model { .. } | Operation::Return(_)))
     }
     pub fn return_points(&self) -> impl Iterator<Item = (usize, &Line)> {
         self.lines
             .iter()
             .enumerate()
-            .filter(|(_, line)| matches!(line.operation, Operation::Model | Operation::Return(_)))
+            .filter(|(_, line)| matches!(line.operation, Operation::Model { .. } | Operation::Return(_)))
     }
     pub fn read_register_indices_also_fix(
         &mut self,
@@ -96,7 +116,9 @@ impl Program {
         for line in &mut self.lines {
             if let Some(ref mut condition) = line.condition {
                 if let Input::Register(ref reg) = condition.lhs {
-                    if written.contains(&reg.index) {
+                    if reg.host {
+                        // Host registers are always considered "live" -- skip optimization
+                    } else if written.contains(&reg.index) {
                         regs.insert(reg.index);
                     } else {
                         condition.lhs = reg.as_uninitialized_value().into();
@@ -104,7 +126,9 @@ impl Program {
                     }
                 }
                 if let Input::Register(ref reg) = condition.rhs {
-                    if written.contains(&reg.index) {
+                    if reg.host {
+                        // Host registers are always considered "live" -- skip optimization
+                    } else if written.contains(&reg.index) {
                         regs.insert(reg.index);
                     } else {
                         condition.rhs = reg.as_uninitialized_value().into();
@@ -114,9 +138,11 @@ impl Program {
             }
             use Operation::*;
             match line.operation {
-                Copy { ref mut from, .. } => {
+                Copy { ref mut from, .. } | CopyToModel { ref mut from, .. } => {
                     if let Input::Register(ref reg) = from {
-                        if written.contains(&reg.index) {
+                        if reg.host {
+                            // Host registers are always considered "live" -- skip optimization
+                        } else if written.contains(&reg.index) {
                             regs.insert(reg.index);
                         } else {
                             *from = reg.as_uninitialized_value().into();
@@ -165,7 +191,9 @@ impl Program {
                     ..
                 } => {
                     if let Input::Register(ref reg) = lhs {
-                        if written.contains(&reg.index) {
+                        if reg.host {
+                            // Host registers are always considered "live" -- skip optimization
+                        } else if written.contains(&reg.index) {
                             regs.insert(reg.index);
                         } else {
                             *lhs = reg.as_uninitialized_value().into();
@@ -173,7 +201,9 @@ impl Program {
                         }
                     }
                     if let Input::Register(ref reg) = rhs {
-                        if written.contains(&reg.index) {
+                        if reg.host {
+                            // Host registers are always considered "live" -- skip optimization
+                        } else if written.contains(&reg.index) {
                             regs.insert(reg.index);
                         } else {
                             *rhs = reg.as_uninitialized_value().into();
@@ -192,7 +222,7 @@ impl Program {
             use Operation::*;
             match line.operation {
                 Copy { ref to, .. } => {
-                    regs.push(Some(to.index));
+                    regs.push(if to.host { None } else { Some(to.index) });
                 }
                 Add { ref out, .. }
                 | Sub { ref out, .. }
@@ -203,7 +233,7 @@ impl Program {
                 | Or { ref out, .. }
                 | Xor { ref out, .. }
                 | Regex { ref out, .. } => {
-                    regs.push(Some(out.index));
+                    regs.push(if out.host { None } else { Some(out.index) });
                 }
                 _ => {
                     regs.push(None);
@@ -291,13 +321,15 @@ impl Program {
     pub fn run(
         &self,
         packet: &Packet,
-        registers: &mut Registers,
+        registers: &mut RegisterBanks,
         fields: &EnvFields,
         field_default_on_error: bool,
+        model_io: &mut ModelIO,
+        model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
     ) -> Result<Action, LineExecutionError> {
         let mut action = Action::default();
         for line in &self.lines {
-            action = line.run(packet, registers, fields, field_default_on_error, &self.regexes)?;
+            action = line.run(packet, registers, fields, field_default_on_error, &self.regexes, model_io, model_sender)?;
             if action != Action::default() {
                 break;
             }
@@ -361,6 +393,10 @@ impl Line {
             Copy {
                 from: Input::Register(ref reg),
                 ..
+            }
+            | CopyToModel {
+                from: Input::Register(ref reg),
+                ..
             } => {
                 registers.push(reg.clone());
             }
@@ -418,23 +454,25 @@ impl Line {
     pub fn run(
         &self,
         packet: &Packet,
-        registers: &mut Registers,
+        registers: &mut RegisterBanks,
         fields: &EnvFields,
         field_default_on_error: bool,
         regexes: &[BytesRegex],
+        model_io: &mut ModelIO,
+        model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
     ) -> Result<Action, LineExecutionError> {
         // Only execute the line if the condition evaluates to true
         if self
             .condition
             .as_ref()
-            .map(|cond| cond.eval(packet, &*registers, fields, field_default_on_error))
+            .map(|cond| cond.eval(packet, registers, fields, field_default_on_error, model_io))
             .transpose()?
             .unwrap_or(true)
         {
             use Operation::*;
             match &self.operation {
                 Copy { from, to } => {
-                    let val = from.eval(packet, &*registers, fields, field_default_on_error)?;
+                    let val = from.eval(packet, registers, fields, field_default_on_error, model_io)?;
                     registers.set(to, &val)?;
                 }
                 Add { lhs, rhs, out } => {
@@ -447,6 +485,7 @@ impl Line {
                         rhs,
                         out,
                         field_default_on_error,
+                        model_io,
                     )?;
                 }
                 Sub { lhs, rhs, out } => {
@@ -459,6 +498,7 @@ impl Line {
                         rhs,
                         out,
                         field_default_on_error,
+                        model_io,
                     )?;
                 }
                 Mul { lhs, rhs, out } => {
@@ -471,6 +511,7 @@ impl Line {
                         rhs,
                         out,
                         field_default_on_error,
+                        model_io,
                     )?;
                 }
                 Div { lhs, rhs, out } => {
@@ -483,6 +524,7 @@ impl Line {
                         rhs,
                         out,
                         field_default_on_error,
+                        model_io,
                     )?;
                 }
                 Mod { lhs, rhs, out } => {
@@ -495,6 +537,7 @@ impl Line {
                         rhs,
                         out,
                         field_default_on_error,
+                        model_io,
                     )?;
                 }
                 And { lhs, rhs, out } => {
@@ -507,6 +550,7 @@ impl Line {
                         rhs,
                         out,
                         field_default_on_error,
+                        model_io,
                     )?;
                 }
                 Or { lhs, rhs, out } => {
@@ -519,6 +563,7 @@ impl Line {
                         rhs,
                         out,
                         field_default_on_error,
+                        model_io,
                     )?;
                 }
                 Xor { lhs, rhs, out } => {
@@ -531,6 +576,7 @@ impl Line {
                         rhs,
                         out,
                         field_default_on_error,
+                        model_io,
                     )?;
                 }
                 Regex { index, out } => {
@@ -544,7 +590,41 @@ impl Line {
                     return Ok(*action);
                 }
                 Noop => {}
-                Model => {}
+                Model { ref name } => {
+                    if let Some(sender) = model_sender {
+                        let inputs = model_io.inputs.remove(name).unwrap_or_default();
+                        let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(1);
+                        sender
+                            .send(crate::model::ModelThreadMessage::Request {
+                                name: name.clone(),
+                                data: inputs.into_iter().map(|v| v as f32).collect(),
+                                response_channel: resp_tx,
+                            })
+                            .map_err(|_| LineExecutionError::ModelSendError)?;
+                        match resp_rx.recv() {
+                            Ok(Ok(outputs)) => {
+                                model_io.outputs.insert(name.clone(), outputs);
+                            }
+                            Ok(Err(err)) => return Err(LineExecutionError::ModelError(err)),
+                            Err(_) => return Err(LineExecutionError::ModelRecvError),
+                        }
+                    }
+                }
+                CopyToModel { from, name, index } => {
+                    let val = from.eval(packet, registers, fields, field_default_on_error, model_io)?;
+                    let f = match val {
+                        Value::Float(f) => f,
+                        Value::Int(i) => i as f64,
+                        Value::Bool(b) => {
+                            if b {
+                                1.0
+                            } else {
+                                0.0
+                            }
+                        }
+                    };
+                    model_io.set_input(name, *index, f);
+                }
             };
             Ok(Action::default())
         } else {
@@ -553,16 +633,17 @@ impl Line {
     }
     fn run_math_operator(
         packet: &Packet,
-        registers: &mut Registers,
+        registers: &mut RegisterBanks,
         fields: &EnvFields,
         math_operator: MathOperator,
         lhs: &Input,
         rhs: &Input,
         out: &Register,
         field_default_on_error: bool,
+        model_io: &ModelIO,
     ) -> Result<(), LineExecutionError> {
-        let lhs = lhs.eval(packet, &*registers, fields, field_default_on_error)?;
-        let rhs = rhs.eval(packet, &*registers, fields, field_default_on_error)?;
+        let lhs = lhs.eval(packet, registers, fields, field_default_on_error, model_io)?;
+        let rhs = rhs.eval(packet, registers, fields, field_default_on_error, model_io)?;
         let val = math_operator.call(&lhs, &rhs);
         registers.set(out, &val)?;
         Ok(())
@@ -578,6 +659,12 @@ pub enum LineExecutionError {
     RegisterWrite(#[from] RegisterWriteError),
     #[error("Regex index {0} out of bounds")]
     RegexIndex(usize),
+    #[error("Failed to send request to model thread")]
+    ModelSendError,
+    #[error("Failed to receive response from model thread")]
+    ModelRecvError,
+    #[error("Model inference error: {0}")]
+    ModelError(crate::model::ModelThreadError),
 }
 impl fmt::Display for Line {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -608,19 +695,20 @@ impl Condition {
     pub fn eval(
         &self,
         packet: &Packet,
-        registers: &Registers,
+        registers: &RegisterBanks,
         fields: &EnvFields,
         field_default_on_error: bool,
+        model_io: &ModelIO,
     ) -> Result<bool, ConditionError> {
         // Evaluate the value of the LHS
         let lhs = self
             .lhs
-            .eval(packet, registers, fields, field_default_on_error)
+            .eval(packet, registers, fields, field_default_on_error, model_io)
             .map_err(ConditionError::Lhs)?;
         // Evaluate the value of the RHS
         let rhs = self
             .rhs
-            .eval(packet, registers, fields, field_default_on_error)
+            .eval(packet, registers, fields, field_default_on_error, model_io)
             .map_err(ConditionError::Rhs)?;
         // Compare lhs and rhs
         Ok(self.operator.call(&lhs, &rhs))
@@ -639,7 +727,7 @@ impl Condition {
     pub fn enhance_readability(&mut self) {
         match self.lhs {
             Input::Float(_) | Input::Int(_) | Input::Bool(_) => match self.rhs {
-                Input::Field(_) | Input::Register(_) => {
+                Input::Field(_) | Input::Register(_) | Input::ModelOutput(_) => {
                     let tmp = self.lhs.clone();
                     self.lhs = self.rhs.clone();
                     self.rhs = tmp;
@@ -668,6 +756,7 @@ pub enum ConditionError {
 pub enum Input {
     Field(field::Field),
     Register(Register),
+    ModelOutput(ModelSlot),
     Float(f64),
     Int(i64),
     Bool(bool),
@@ -693,15 +782,16 @@ impl Input {
             Input::Float(flt) => Some(Value::Float(*flt)),
             Input::Int(i) => Some(Value::Int(*i)),
             Input::Bool(b) => Some(Value::Bool(*b)),
-            _ => None,
+            Input::Field(_) | Input::Register(_) | Input::ModelOutput(_) => None,
         }
     }
     pub fn eval(
         &self,
         packet: &Packet,
-        registers: &Registers,
+        registers: &RegisterBanks,
         fields: &EnvFields,
         field_default_on_error: bool,
+        model_io: &ModelIO,
     ) -> Result<Value, InputError> {
         match self {
             Input::Field(field) => field
@@ -710,6 +800,9 @@ impl Input {
             Input::Register(reg) => registers
                 .get(reg)
                 .ok_or(InputError::RegisterIndex(reg.index)),
+            Input::ModelOutput(slot) => Ok(Value::Float(
+                model_io.get_output(&slot.name, slot.index).unwrap_or(0.0),
+            )),
             Input::Float(flt) => Ok(Value::Float(*flt)),
             Input::Int(i) => Ok(Value::Int(*i)),
             Input::Bool(b) => Ok(Value::Bool(*b)),
@@ -731,6 +824,7 @@ impl fmt::Display for Input {
         match self {
             Field(field) => write!(f, "field:{field:?}"),
             Register(reg) => reg.fmt(f),
+            ModelOutput(slot) => write!(f, "model:{}:out:{}", slot.name, slot.index),
             Float(flt) => flt.fmt(f),
             Int(i) => i.fmt(f),
             Bool(b) => b.fmt(f),
@@ -837,6 +931,10 @@ pub mod field {
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
             NumPackets,
+            HostNumConnections,
+            HostNumPackets,
+            DstHostNumConnections,
+            DstHostNumPackets,
         }
 
         impl Field {
@@ -844,6 +942,10 @@ pub mod field {
                 use Field::*;
                 match self {
                     NumPackets => Value::Int(fields.num_packets.into()),
+                    HostNumConnections => Value::Int(fields.host_num_connections.into()),
+                    HostNumPackets => Value::Int(fields.host_num_packets.into()),
+                    DstHostNumConnections => Value::Int(fields.dst_host_num_connections.into()),
+                    DstHostNumPackets => Value::Int(fields.dst_host_num_packets.into()),
                 }
             }
         }
@@ -1141,10 +1243,12 @@ pub mod field {
 pub struct Register {
     pub ty: RegisterType,
     pub index: usize,
+    pub host: bool,
 }
 impl Register {
     pub fn to_label(&self) -> String {
-        format!("reg_{}_{}", self.ty, self.index)
+        let prefix = if self.host { "hreg" } else { "reg" };
+        format!("{}_{}_{}", prefix, self.ty, self.index)
     }
     pub fn as_uninitialized_value(&self) -> Value {
         match self.ty {
@@ -1156,7 +1260,8 @@ impl Register {
 }
 impl fmt::Display for Register {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "reg:{}.{}", self.ty, self.index)
+        let prefix = if self.host { "hreg" } else { "reg" };
+        write!(f, "{}:{}.{}", prefix, self.ty, self.index)
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -1175,6 +1280,18 @@ impl fmt::Display for RegisterType {
         })
     }
 }
+/// Reference to a model input or output slot
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelSlot {
+    pub name: String,
+    pub index: usize,
+}
+impl fmt::Display for ModelSlot {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "model:{}:{}", self.name, self.index)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeserializeFromStr)]
 pub enum Operator {
     Comparison(ComparisonOperator),
@@ -1518,7 +1635,14 @@ pub enum Operation {
     },
     Return(Action),
     Noop,
-    Model,
+    Model {
+        name: String,
+    },
+    CopyToModel {
+        from: Input,
+        name: String,
+        index: usize,
+    },
 }
 impl Operation {
     fn has_constant_math_value(&self) -> Option<(Value, Register)> {
@@ -1572,23 +1696,8 @@ impl Operation {
 impl fmt::Display for Operation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Operation::*;
-        f.write_str(match self {
-            Copy { .. } => "COPY",
-            Add { .. } => "ADD",
-            Sub { .. } => "SUB",
-            Mul { .. } => "MUL",
-            Div { .. } => "DIV",
-            Mod { .. } => "MOD",
-            And { .. } => "AND",
-            Or { .. } => "OR",
-            Xor { .. } => "XOR",
-            Regex { .. } => "REGEX",
-            Return(_) => "RETURN ",
-            Noop => "NOOP",
-            Model => "MODEL",
-        })?;
         match self {
-            Copy { from, to } => write!(f, " {from}->{to}"),
+            Copy { from, to } => write!(f, "COPY {from}->{to}"),
             Add { lhs, rhs, out }
             | Sub { lhs, rhs, out }
             | Mul { lhs, rhs, out }
@@ -1596,10 +1705,27 @@ impl fmt::Display for Operation {
             | Mod { lhs, rhs, out }
             | And { lhs, rhs, out }
             | Or { lhs, rhs, out }
-            | Xor { lhs, rhs, out } => write!(f, " {lhs},{rhs}->{out}"),
-            Regex { index, out } => write!(f, " {index}->{out}"),
-            Return(action) => action.fmt(f),
-            _ => Ok(()),
+            | Xor { lhs, rhs, out } => {
+                let name = match self {
+                    Add { .. } => "ADD",
+                    Sub { .. } => "SUB",
+                    Mul { .. } => "MUL",
+                    Div { .. } => "DIV",
+                    Mod { .. } => "MOD",
+                    And { .. } => "AND",
+                    Or { .. } => "OR",
+                    Xor { .. } => "XOR",
+                    _ => unreachable!(),
+                };
+                write!(f, "{name} {lhs},{rhs}->{out}")
+            }
+            Regex { index, out } => write!(f, "REGEX {index}->{out}"),
+            Return(action) => write!(f, "RETURN {action}"),
+            Noop => write!(f, "NOOP"),
+            Model { ref name } => write!(f, "MODEL {name}"),
+            CopyToModel { from, name, index } => {
+                write!(f, "COPY {from}->model:{name}:in:{index}")
+            }
         }
     }
 }
@@ -1853,7 +1979,7 @@ mod tests {
         IpMetadata, IpVersionMetadata, Packet, TcpFlags, TcpMetadata, TransportMetadata,
         TransportMetadataExtra, UdpMetadata,
     };
-    use crate::program::env::{EnvFields, Registers};
+    use crate::program::env::{EnvFields, RegisterBanks, Registers};
     use smoltcp::wire::{Ipv4Address, TcpSeqNumber};
 
     fn make_tcp_packet(payload: &[u8]) -> Packet {
@@ -1948,8 +2074,12 @@ mod tests {
         Registers::new(16, false)
     }
 
+    fn default_host_registers() -> Registers {
+        Registers::new(16, false)
+    }
+
     fn default_env_fields() -> EnvFields {
-        EnvFields { num_packets: 0 }
+        EnvFields::default()
     }
 
     // =========================================================================
@@ -2006,8 +2136,10 @@ mod tests {
         let prog = Program::default();
         let pkt = make_tcp_packet(b"hello");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::Allow);
     }
 
@@ -2016,8 +2148,10 @@ mod tests {
         let prog: Program = "RETURN terminate".parse().unwrap();
         let pkt = make_tcp_packet(b"hello");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2026,8 +2160,10 @@ mod tests {
         let prog: Program = "if field:tcp.payload.len > 0: RETURN terminate".parse().unwrap();
         let pkt = make_tcp_packet(b"hello");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2036,8 +2172,10 @@ mod tests {
         let prog: Program = "if field:tcp.payload.len > 0: RETURN terminate".parse().unwrap();
         let pkt = make_tcp_packet(b"");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::Allow);
     }
 
@@ -2047,8 +2185,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2058,8 +2198,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2114,11 +2256,31 @@ mod tests {
     #[test]
     fn field_eval_env_num_packets() {
         let pkt = make_tcp_packet(b"");
-        let fields = EnvFields { num_packets: 5 };
+        let fields = EnvFields { num_packets: 5, ..Default::default() };
         let val = field::Field::Env(field::env::Field::NumPackets)
             .eval(&pkt, &fields, false)
             .unwrap();
         assert!(matches!(val, Value::Int(5)));
+    }
+
+    #[test]
+    fn field_eval_host_num_connections() {
+        let pkt = make_tcp_packet(b"");
+        let fields = EnvFields { host_num_connections: 42, ..Default::default() };
+        let val = field::Field::Env(field::env::Field::HostNumConnections)
+            .eval(&pkt, &fields, false)
+            .unwrap();
+        assert!(matches!(val, Value::Int(42)));
+    }
+
+    #[test]
+    fn field_eval_host_num_packets() {
+        let pkt = make_tcp_packet(b"");
+        let fields = EnvFields { host_num_packets: 100, ..Default::default() };
+        let val = field::Field::Env(field::env::Field::HostNumPackets)
+            .eval(&pkt, &fields, false)
+            .unwrap();
+        assert!(matches!(val, Value::Int(100)));
     }
 
     #[test]
@@ -2236,8 +2398,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2247,8 +2411,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2258,9 +2424,12 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        prog.run(&pkt, &mut regs, &fields, false).unwrap();
-        let val = regs.get(&Register { ty: RegisterType::Float, index: 0 }).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
+        drop(banks);
+        let val = regs.get(&Register { ty: RegisterType::Float, index: 0, host: false }).unwrap();
         assert!(matches!(val, Value::Float(f) if (f - 3.5).abs() < f64::EPSILON));
     }
 
@@ -2282,8 +2451,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"GET http://example.com/ HTTP/1.1");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2293,8 +2464,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"GET http://other.org/ HTTP/1.1");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::Allow);
     }
 
@@ -2306,8 +2479,10 @@ mod tests {
         // Match second pattern
         let pkt = make_tcp_packet(b"this is forbidden content");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2317,8 +2492,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"data");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false);
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None);
         assert!(result.is_err());
     }
 
@@ -2449,6 +2626,61 @@ mod tests {
     }
 
     // =========================================================================
+    // Per-host field parsing tests
+    // =========================================================================
+
+    #[test]
+    fn parse_field_host_num_connections() {
+        let field: field::Field = "host.num_connections".parse().unwrap();
+        assert_eq!(field, field::Field::Env(field::env::Field::HostNumConnections));
+    }
+
+    #[test]
+    fn parse_field_host_num_packets() {
+        let field: field::Field = "host.num_packets".parse().unwrap();
+        assert_eq!(field, field::Field::Env(field::env::Field::HostNumPackets));
+    }
+
+    #[test]
+    fn program_host_num_connections_condition() {
+        let prog: Program = "if field:host.num_connections > 10 : RETURN terminate"
+            .parse()
+            .unwrap();
+        let pkt = make_tcp_packet(b"data");
+        let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
+
+        // Below threshold: allow
+        let fields = EnvFields { host_num_connections: 5, ..Default::default() };
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
+        assert_eq!(result, Action::Allow);
+
+        // Above threshold: terminate
+        let fields = EnvFields { host_num_connections: 15, ..Default::default() };
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_host_num_packets_copy_to_register() {
+        let prog: Program = "COPY field:host.num_packets -> reg:i.0"
+            .parse()
+            .unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
+        let fields = EnvFields { host_num_packets: 42, ..Default::default() };
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let _ = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
+        drop(banks);
+        assert!(matches!(
+            regs.get(&Register { ty: RegisterType::Int, index: 0, host: false }),
+            Some(Value::Int(42))
+        ));
+    }
+
+    // =========================================================================
     // Reset action program tests
     // =========================================================================
 
@@ -2467,8 +2699,10 @@ mod tests {
         let prog: Program = "if field:tcp.payload.len > 0: RETURN reset".parse().unwrap();
         let pkt = make_tcp_packet(b"data");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::ResetAll);
     }
 
@@ -2482,8 +2716,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_tcp_packet(b"GET / HTTP/1.1");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::ResetAll);
     }
 
@@ -2494,8 +2730,10 @@ mod tests {
         // Test packet has dst=80, not 443
         let pkt = make_tcp_packet(b"GET / HTTP/1.1");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::Allow);
     }
 
@@ -2505,8 +2743,10 @@ mod tests {
         let prog: Program = source.parse().unwrap();
         let pkt = make_udp_packet(b"\x00\x00");
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
     }
 
@@ -2517,8 +2757,107 @@ mod tests {
         // 0xFF bytes have popcount 8, well above 3.4
         let pkt = make_tcp_packet(&[0xFF, 0xFF]);
         let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
         let fields = default_env_fields();
-        let result = prog.run(&pkt, &mut regs, &fields, false).unwrap();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
+    }
+
+    // =========================================================================
+    // Destination host field parsing tests
+    // =========================================================================
+
+    #[test]
+    fn parse_field_dst_host_num_connections() {
+        let field: field::Field = "dst_host.num_connections".parse().unwrap();
+        assert_eq!(field, field::Field::Env(field::env::Field::DstHostNumConnections));
+    }
+
+    #[test]
+    fn parse_field_dst_host_num_packets() {
+        let field: field::Field = "dst_host.num_packets".parse().unwrap();
+        assert_eq!(field, field::Field::Env(field::env::Field::DstHostNumPackets));
+    }
+
+    // =========================================================================
+    // Host register parsing and execution tests
+    // =========================================================================
+
+    #[test]
+    fn program_parse_host_register() {
+        let prog: Program = "COPY True -> hreg:b.0".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        match &prog.lines[0].operation {
+            Operation::Copy { from, to } => {
+                assert_eq!(*from, Input::Bool(true));
+                assert_eq!(to.ty, RegisterType::Bool);
+                assert_eq!(to.index, 0);
+                assert!(to.host);
+            }
+            other => panic!("Expected Copy, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn program_host_register_write_and_read() {
+        // Write True to hreg:b.0 then check it conditionally
+        let source = "COPY True -> hreg:b.0\nif hreg:b.0 == True: RETURN terminate";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
+        let fields = default_env_fields();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
+        assert_eq!(result, Action::TerminateAll);
+        drop(banks);
+        // Verify host register was written
+        let hreg = Register { ty: RegisterType::Bool, index: 0, host: false };
+        let val = host_regs.get(&hreg).unwrap();
+        assert!(matches!(val, Value::Bool(true)));
+    }
+
+    // =========================================================================
+    // Model operation parsing tests
+    // =========================================================================
+
+    #[test]
+    fn program_parse_model_copy_to_input() {
+        let prog: Program = "COPY 10 -> model:wf:in:0".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        match &prog.lines[0].operation {
+            Operation::CopyToModel { from, name, index } => {
+                assert_eq!(*from, Input::Int(10));
+                assert_eq!(name, "wf");
+                assert_eq!(*index, 0);
+            }
+            other => panic!("Expected CopyToModel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn program_parse_model_output_read() {
+        let prog: Program = "COPY model:wf:out:0 -> reg:f.0".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        match &prog.lines[0].operation {
+            Operation::Copy { from, to } => {
+                assert!(
+                    matches!(from, Input::ModelOutput(slot) if slot.name == "wf" && slot.index == 0)
+                );
+                assert_eq!(to.ty, RegisterType::Float);
+                assert_eq!(to.index, 0);
+            }
+            other => panic!("Expected Copy, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn program_parse_model_operation() {
+        let prog: Program = "MODEL wf".parse().unwrap();
+        assert_eq!(prog.lines.len(), 1);
+        assert!(
+            matches!(&prog.lines[0].operation, Operation::Model { name } if name == "wf")
+        );
     }
 }

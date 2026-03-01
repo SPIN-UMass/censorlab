@@ -1,5 +1,5 @@
 tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
-PyCL,11565,11338,434.5,10837,11612,3,24,
-CensorLang,3210,3301,171.7,3194,3499,3,5,regex on raw payload (no TLS parsing)
-Zeek,521528,520692,9028.1,511275,529273,3,56,detection-only (passive)
-Scapy,3644,3631,66.5,3559,3690,3,136,
+PyCL,11408,11028,1236.6,9646,12030,3,24,
+CensorLang,3255,3115.7,341.1,2727,3365,3,5,regex on raw payload (no TLS parsing)
+Zeek,607405,575099.3,62987.1,502514,615379,3,56,detection-only (passive)
+Scapy,3702,3801.7,176.1,3698,4005,3,136,

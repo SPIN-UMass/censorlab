@@ -2,13 +2,32 @@ use crate::program::config::Config;
 use crate::program::packet::{
     ConnectionIdentifier, Direction, Packet, TransportMetadataExtra, TransportProtocol,
 };
-use crate::program::program::{Action, Program, Register, RegisterType, Value};
+use crate::program::program::{Action, ModelIO, Program, Register, RegisterType, Value};
+
+/// Combined view of connection-level and host-level register banks.
+pub struct RegisterBanks<'a> {
+    conn: &'a mut Registers,
+    host: &'a mut Registers,
+}
+
+impl<'a> RegisterBanks<'a> {
+    pub fn new(conn: &'a mut Registers, host: &'a mut Registers) -> Self {
+        Self { conn, host }
+    }
+    pub fn get(&self, register: &Register) -> Option<Value> {
+        if register.host { self.host.get(register) } else { self.conn.get(register) }
+    }
+    pub fn set(&mut self, register: &Register, value: &Value) -> Result<(), RegisterWriteError> {
+        if register.host { self.host.set(register, value) } else { self.conn.set(register, value) }
+    }
+}
 
 /// Environment that handles a single connection
 #[derive(Debug)]
 pub struct ProgramEnv {
     registers: Registers,
     fields: EnvFields,
+    model_io: ModelIO,
     inner: ProgramEnvInner,
 }
 
@@ -25,7 +44,8 @@ impl ProgramEnv {
         };
         ProgramEnv {
             registers,
-            fields: EnvFields { num_packets: 0 },
+            fields: EnvFields::default(),
+            model_io: ModelIO::default(),
             inner,
         }
     }
@@ -34,14 +54,27 @@ impl ProgramEnv {
         packet: &Packet,
         program: &Program,
         field_default_on_error: bool,
+        host_num_connections: u32,
+        host_num_packets: u32,
+        dst_host_num_connections: u32,
+        dst_host_num_packets: u32,
+        host_registers: &mut Registers,
+        model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
     ) -> Action {
         self.fields.num_packets += 1;
+        self.fields.host_num_connections = host_num_connections;
+        self.fields.host_num_packets = host_num_packets;
+        self.fields.dst_host_num_connections = dst_host_num_connections;
+        self.fields.dst_host_num_packets = dst_host_num_packets;
         self.inner.process(
             packet,
             program,
             &mut self.registers,
             &self.fields,
             field_default_on_error,
+            host_registers,
+            &mut self.model_io,
+            model_sender,
         )
     }
     /// Check whether the connection has finished (both FIN-ACKs seen for TCP).
@@ -119,9 +152,13 @@ pub enum RegisterWriteError {
     #[error("Attempted to write a value to an out-of-bounds index")]
     InvalidIndex,
 }
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct EnvFields {
     pub num_packets: u32,
+    pub host_num_connections: u32,
+    pub host_num_packets: u32,
+    pub dst_host_num_connections: u32,
+    pub dst_host_num_packets: u32,
 }
 #[derive(Debug)]
 pub enum ProgramEnvInner {
@@ -136,11 +173,14 @@ impl ProgramEnvInner {
         registers: &mut Registers,
         fields: &EnvFields,
         field_default_on_error: bool,
+        host_registers: &mut Registers,
+        model_io: &mut ModelIO,
+        model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
     ) -> Action {
         use ProgramEnvInner::*;
         match self {
-            Tcp(env) => env.process(packet, program, registers, fields, field_default_on_error),
-            Udp(env) => env.process(packet, program, registers, fields, field_default_on_error),
+            Tcp(env) => env.process(packet, program, registers, fields, field_default_on_error, host_registers, model_io, model_sender),
+            Udp(env) => env.process(packet, program, registers, fields, field_default_on_error, host_registers, model_io, model_sender),
         }
     }
     /// Check whether the connection has finished (both FIN-ACKs seen for TCP).
@@ -164,8 +204,8 @@ impl ProgramEnvInner {
 
 mod tcp {
     use super::{
-        Action, ConnectionIdentifier, Direction, EnvFields, Packet, Program, Registers,
-        TransportMetadataExtra,
+        Action, ConnectionIdentifier, Direction, EnvFields, ModelIO, Packet, Program,
+        RegisterBanks, Registers, TransportMetadataExtra,
     };
     use tracing::{error, warn};
     #[derive(Debug)]
@@ -193,6 +233,9 @@ mod tcp {
             registers: &mut Registers,
             fields: &EnvFields,
             field_default_on_error: bool,
+            host_registers: &mut Registers,
+            model_io: &mut ModelIO,
+            model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
         ) -> Action {
             self.total_processed += 1;
             match self.default_action {
@@ -208,7 +251,8 @@ mod tcp {
                             // Do secret processing
                             self.hidden.process(packet, &direction);
                             // Run the program using the packet
-                            match program.run(packet, registers, fields, field_default_on_error) {
+                            let mut banks = RegisterBanks::new(registers, host_registers);
+                            match program.run(packet, &mut banks, fields, field_default_on_error, model_io, model_sender) {
                                 Ok(Action::Allow) => {}
                                 Ok(Action::AllowAll) => {
                                     self.default_action = Action::AllowAll;
@@ -269,7 +313,8 @@ mod tcp {
 }
 mod udp {
     use super::{
-        Action, ConnectionIdentifier, EnvFields, Packet, Program, Registers, TransportMetadataExtra,
+        Action, ConnectionIdentifier, EnvFields, ModelIO, Packet, Program, RegisterBanks,
+        Registers, TransportMetadataExtra,
     };
     use tracing::{error, warn};
     #[derive(Debug)]
@@ -297,6 +342,9 @@ mod udp {
             registers: &mut Registers,
             fields: &EnvFields,
             field_default_on_error: bool,
+            host_registers: &mut Registers,
+            model_io: &mut ModelIO,
+            model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
         ) -> Action {
             self.total_processed += 1;
             match self.default_action {
@@ -312,7 +360,8 @@ mod udp {
                             // Do secret processing
                             self.hidden.process(packet);
                             // Run the program using the packet
-                            match program.run(packet, registers, fields, field_default_on_error) {
+                            let mut banks = RegisterBanks::new(registers, host_registers);
+                            match program.run(packet, &mut banks, fields, field_default_on_error, model_io, model_sender) {
                                 Ok(Action::Allow) => {}
                                 Ok(Action::AllowAll) => {
                                     self.default_action = Action::AllowAll;
@@ -365,11 +414,11 @@ mod tests {
     fn registers_new_initializes_to_defaults() {
         let regs = Registers::new(4, false);
         for i in 0..4 {
-            let f = regs.get(&Register { ty: RegisterType::Float, index: i });
+            let f = regs.get(&Register { ty: RegisterType::Float, index: i, host: false });
             assert!(matches!(f, Some(Value::Float(v)) if v == 0.0));
-            let int = regs.get(&Register { ty: RegisterType::Int, index: i });
+            let int = regs.get(&Register { ty: RegisterType::Int, index: i, host: false });
             assert!(matches!(int, Some(Value::Int(0))));
-            let b = regs.get(&Register { ty: RegisterType::Bool, index: i });
+            let b = regs.get(&Register { ty: RegisterType::Bool, index: i, host: false });
             assert!(matches!(b, Some(Value::Bool(false))));
         }
     }
@@ -377,7 +426,7 @@ mod tests {
     #[test]
     fn registers_get_set_float() {
         let mut regs = Registers::new(4, false);
-        let reg = Register { ty: RegisterType::Float, index: 1 };
+        let reg = Register { ty: RegisterType::Float, index: 1, host: false };
         regs.set(&reg, &Value::Float(3.14)).unwrap();
         let val = regs.get(&reg).unwrap();
         assert!(matches!(val, Value::Float(f) if (f - 3.14).abs() < f64::EPSILON));
@@ -386,7 +435,7 @@ mod tests {
     #[test]
     fn registers_get_set_int() {
         let mut regs = Registers::new(4, false);
-        let reg = Register { ty: RegisterType::Int, index: 2 };
+        let reg = Register { ty: RegisterType::Int, index: 2, host: false };
         regs.set(&reg, &Value::Int(42)).unwrap();
         assert!(matches!(regs.get(&reg), Some(Value::Int(42))));
     }
@@ -394,7 +443,7 @@ mod tests {
     #[test]
     fn registers_get_set_bool() {
         let mut regs = Registers::new(4, false);
-        let reg = Register { ty: RegisterType::Bool, index: 0 };
+        let reg = Register { ty: RegisterType::Bool, index: 0, host: false };
         regs.set(&reg, &Value::Bool(true)).unwrap();
         assert!(matches!(regs.get(&reg), Some(Value::Bool(true))));
     }
@@ -402,7 +451,7 @@ mod tests {
     #[test]
     fn registers_set_wrong_type_strict() {
         let mut regs = Registers::new(4, false);
-        let int_reg = Register { ty: RegisterType::Int, index: 0 };
+        let int_reg = Register { ty: RegisterType::Int, index: 0, host: false };
         let result = regs.set(&int_reg, &Value::Float(1.0));
         assert!(matches!(result, Err(RegisterWriteError::InvalidType)));
     }
@@ -410,24 +459,24 @@ mod tests {
     #[test]
     fn registers_set_wrong_type_relaxed() {
         let mut regs = Registers::new(4, true);
-        let int_reg = Register { ty: RegisterType::Int, index: 0 };
+        let int_reg = Register { ty: RegisterType::Int, index: 0, host: false };
         // With relax_register_types=true, a Float value goes to the float bank
         regs.set(&int_reg, &Value::Float(2.5)).unwrap();
-        let float_reg = Register { ty: RegisterType::Float, index: 0 };
+        let float_reg = Register { ty: RegisterType::Float, index: 0, host: false };
         assert!(matches!(regs.get(&float_reg), Some(Value::Float(f)) if (f - 2.5).abs() < f64::EPSILON));
     }
 
     #[test]
     fn registers_get_out_of_bounds() {
         let regs = Registers::new(2, false);
-        let reg = Register { ty: RegisterType::Int, index: 10 };
+        let reg = Register { ty: RegisterType::Int, index: 10, host: false };
         assert!(regs.get(&reg).is_none());
     }
 
     #[test]
     fn registers_set_out_of_bounds() {
         let mut regs = Registers::new(2, false);
-        let reg = Register { ty: RegisterType::Int, index: 10 };
+        let reg = Register { ty: RegisterType::Int, index: 10, host: false };
         let result = regs.set(&reg, &Value::Int(1));
         assert!(matches!(result, Err(RegisterWriteError::InvalidIndex)));
     }

@@ -38,7 +38,7 @@ COPY experiments/ experiments/
 
 # Copy website source and build with zola
 COPY website/ website/
-RUN source /dev-env.sh && cd website && zola build
+RUN source /dev-env.sh && cd website && zola build --base-url http://localhost:1116
 
 # MOTD shown on interactive shell startup
 RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:  http://localhost:1116/\nDemos: ls demos/\nHelp:  censorlab --help\n\n' > /etc/motd

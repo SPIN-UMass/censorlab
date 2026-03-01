@@ -1,7 +1,19 @@
 # CensorLang ML Protocol Classification
-# NOTE: CensorLang does not support ML model inference.
-# This file is a placeholder -- ML classification requires PyCL mode.
-# A basic entropy-based heuristic is provided as a non-ML fallback.
+# Simplified: evaluates the model on per-packet features.
+# Uses payload length and entropy as input features.
+# NOTE: CensorLang runs per-packet; for multi-packet windowing,
+# use PyCL mode which supports stateful accumulation.
 
-if field:tcp.payload.len == 0: RETURN allow_all
-if field:transport.payload.entropy > 3.0: RETURN terminate
+# Skip empty payload packets
+if field:tcp.payload.len == 0: RETURN allow
+
+# Set up model inputs: [payload_len, entropy]
+COPY field:tcp.payload.len -> model:classifier:in:0
+COPY field:transport.payload.entropy -> model:classifier:in:1
+
+# Run inference
+MODEL classifier
+
+# Check classification result
+COPY model:classifier:out:0 -> reg:f.0
+if reg:f.0 > 0.5: RETURN terminate

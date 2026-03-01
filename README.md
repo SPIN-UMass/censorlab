@@ -12,13 +12,10 @@ cd censorlab
 git submodule update --init
 
 # Interactive shell
-bash docker/censorlab.sh --shell
+./docker/censorlab.sh --shell
 
-# Run a demo (NFQ mode — requires sudo)
-sudo bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
-
-# Analyze a PCAP file
-bash docker/censorlab.sh -c demos/http_blocking/censor.toml pcap traffic.pcap
+# Run all experiments
+./experiments/scripts/run_all_docker.sh
 ```
 
 ## Building from Source
@@ -52,6 +49,8 @@ censorlab --help
 ## Pre-built VM
 
 Pre-built VirtualBox images with everything pre-installed are available for [x86_64](https://voyager.cs.umass.edu/vm-images/censorlab.ova) and [aarch64](https://voyager.cs.umass.edu/vm-images/censorlab-arm.vmdk). See the [VM setup guide](https://censorlab.cs.umass.edu/vm-info/) for import instructions.
+
+This option requires manual updating and is not recommended outside of classroom setting.
 
 ## Experiments
 

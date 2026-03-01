@@ -34,7 +34,7 @@ sudo bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
 bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap traffic.pcap 192.168.1.100
 ```
 
-The Docker wrapper auto-detects NFQ vs PCAP mode and configures networking and capabilities accordingly. Set `REBUILD=1` to force a rebuild after source changes.
+The Docker wrapper auto-detects NFQ vs PCAP mode and configures networking and capabilities accordingly. The image is automatically rebuilt when source files change.
 
 ### Build from Source
 
@@ -174,7 +174,7 @@ The [demos directory](https://github.com/SPIN-UMass/censorlab/tree/main/demos) c
 
 | Demo | Description |
 |------|-------------|
-| `dns_blocking/` | Block DNS queries by domain name |
+| `dns_blocking/` | DNS poisoning — inject forged responses for blocked domains |
 | `http_blocking/` | Block HTTP requests by keyword in the Host header |
 | `https_blocking/` | Block HTTPS connections (simple) |
 | `https_blocking_tls/` | Block HTTPS by TLS ClientHello SNI |
@@ -204,6 +204,8 @@ Paths in `censor.toml` are relative to the TOML file itself, including paths to 
 # Configuration Reference
 
 CensorLab is configured via TOML files, passed with the `-c` flag. Paths to scripts and models within the config are resolved **relative to the config file location**.
+
+**Configuration file vs. censor script:** The TOML configuration file (`censor.toml`) handles transport- and link-layer filtering — IP addresses, MAC addresses, ports, and IP:port pairs can be allowed or blocked without writing any code. The censor script (`censor.py` or `censor.cl`) handles application-layer logic — parsing DNS queries, inspecting TLS handshakes, running ML models, or implementing any custom packet analysis. The TOML file references the censor script via the `[execution]` section.
 
 ## `[execution]`
 
@@ -370,6 +372,9 @@ The `process()` function should return one of:
 | `"allow"`      | Same as `None` |
 | `"drop"`       | Drop the packet silently |
 | `"reset"`      | Send TCP RST in both directions (falls back to `"drop"` for non-TCP) |
+| `bytes`        | Inject a forged UDP response (e.g., DNS poisoning) while allowing the original packet through |
+
+Returning raw `bytes` triggers packet injection — CensorLab constructs a UDP response packet with the returned bytes as payload and sends it back to the client, while the original packet is forwarded normally. This is used for techniques like DNS poisoning where the censor races a forged response against the legitimate one. See `dns.craft_response()` below.
 
 Any unrecognized string is treated as allow with a warning logged.
 
@@ -481,10 +486,10 @@ Accessed via `packet.udp`. Returns `None` if the packet is not UDP.
 
 ## DNS Module
 
-Parse DNS packets from raw payload bytes.
+Parse DNS packets from raw payload bytes, and optionally craft forged DNS responses for injection.
 
 ```python
-from dns import parse as parse_dns
+from dns import parse as parse_dns, craft_response
 
 def process(packet):
     udp = packet.udp
@@ -492,8 +497,19 @@ def process(packet):
         dns = parse_dns(packet.payload)
         for question in dns.questions:
             if "example.com" in question.qname:
-                return "drop"
+                # Inject a forged DNS response pointing to a decoy IP
+                return craft_response(packet.payload, "10.10.10.10")
 ```
+
+### Functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `parse(bytes)` | `DnsPacket` | Parse a DNS packet from raw bytes |
+| `craft_response(query_bytes, ip)` | `bytes` | Craft a forged DNS A-record response from a query, with default TTL of 300 |
+| `craft_response(query_bytes, ip, ttl)` | `bytes` | Same as above, with a custom TTL value |
+
+Returning the `bytes` from `craft_response()` causes CensorLab to inject the forged response while allowing the original query through — the same technique used by the GFW for DNS poisoning.
 
 ### `DnsPacket`
 

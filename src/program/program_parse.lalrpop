@@ -4,8 +4,8 @@ use crate::program::program::{
         ip::V6Field as Ipv6Field, tcp::Field as TcpField, tcp::Flag as TcpFlag,
         udp::Field as UdpField, Field,
     },
-    Action, ComparisonOperator, Condition, Input, Line, LogicOperator, Operation, Operator,
-    Register, RegisterType,
+    Action, ComparisonOperator, Condition, Input, Line, LogicOperator, ModelSlot, Operation,
+    Operator, Register, RegisterType,
 };
 use std::str::FromStr;
 
@@ -19,8 +19,21 @@ Condition: Condition = {
   <lhs: Input> <operator: Operator> <rhs: Input> => Condition { lhs, operator, rhs }
 }
 
+Ident: String = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => s.to_string();
+
+ModelInputRef: ModelSlot = <s:r"model:[a-zA-Z_][a-zA-Z0-9_]*:in:[0-9]+"> => {
+    let parts: Vec<&str> = s.splitn(4, ':').collect();
+    ModelSlot { name: parts[1].to_string(), index: usize::from_str(parts[3]).unwrap() }
+};
+
+ModelOutputRef: ModelSlot = <s:r"model:[a-zA-Z_][a-zA-Z0-9_]*:out:[0-9]+"> => {
+    let parts: Vec<&str> = s.splitn(4, ':').collect();
+    ModelSlot { name: parts[1].to_string(), index: usize::from_str(parts[3]).unwrap() }
+};
+
 Input: Input = {
   "field:" <f: Field> => Input::Field(f),
+  <m: ModelOutputRef> => Input::ModelOutput(m),
   <r: Register> => Input::Register(r),
   <f: Float> => Input::Float(f),
   <i: Integer> => Input::Int(i),
@@ -29,7 +42,8 @@ Input: Input = {
 };
 
 Register: Register = {
-  "reg:" <ty: RegisterType> "." <index: Usize> => Register { ty, index },
+  "reg:" <ty: RegisterType> "." <index: Usize> => Register { ty, index, host: false },
+  "hreg:" <ty: RegisterType> "." <index: Usize> => Register { ty, index, host: true },
 }
 
 RegisterType: RegisterType = {
@@ -40,6 +54,10 @@ RegisterType: RegisterType = {
 
 pub Field: Field = {
   "env.num_packets" => Field::Env(EnvField::NumPackets),
+  "host.num_connections" => Field::Env(EnvField::HostNumConnections),
+  "host.num_packets" => Field::Env(EnvField::HostNumPackets),
+  "dst_host.num_connections" => Field::Env(EnvField::DstHostNumConnections),
+  "dst_host.num_packets" => Field::Env(EnvField::DstHostNumPackets),
   "timestamp" => Field::Timestamp,
   "ip.header_len" => Field::Ip(IpField::HeaderLen),
   "ip.total_len" => Field::Ip(IpField::TotalLen),
@@ -123,6 +141,7 @@ pub Operator: Operator = {
 }
 
 Operation: Operation = {
+  "COPY"   <from: Input> "->" <m: ModelInputRef> => Operation::CopyToModel{from, name: m.name, index: m.index},
   "COPY"   <from: Input> "->" <to: Register> => Operation::Copy{from, to},
   "ADD"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Add{lhs, rhs, out},
   "SUB"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Sub{lhs, rhs, out},
@@ -135,7 +154,7 @@ Operation: Operation = {
   "REGEX"  <index: Usize> "->" <out: Register> => Operation::Regex{index, out},
   "RETURN" <action: Action> => Operation::Return(action),
   "NOOP" => Operation::Noop,
-  "MODEL" => Operation::Model,
+  "MODEL"  <name: Ident> => Operation::Model{name},
 }
 pub Action: Action = {
   "allow" => Action::Allow,  

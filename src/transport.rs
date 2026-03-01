@@ -1,11 +1,11 @@
 use crate::censor::{Action, Direction, IpPair};
 use crate::model::ModelThreadMessage;
 use crate::program::config::Config as ProgramConfig;
-use crate::program::env::ProgramEnv;
+use crate::program::env::{ProgramEnv, Registers};
 use crate::program::packet::rust_dns;
 use crate::program::packet::rust_quic;
 use crate::program::packet::rust_tls;
-use crate::program::packet::rust_packet::{self, Model as PythonModel, Packet as PythonPacket};
+use crate::program::packet::rust_packet::{self, Host as PythonHost, Model as PythonModel, Packet as PythonPacket};
 use crate::program::packet::TransportMetadataExtra;
 use crate::program::packet::{Packet, TransportProtocol};
 use crate::program::program::{Action as ProgramAction, Program, ProgramLoadError};
@@ -13,7 +13,7 @@ use ort::Error as OrtError;
 use rustpython_vm::builtins::{PyBaseExceptionRef, PyCode};
 use rustpython_vm::convert::ToPyObject;
 use rustpython_vm::scope::Scope;
-use rustpython_vm::{self as vm, PyRef, Settings};
+use rustpython_vm::{self as vm, PyObjectRef, PyRef, Settings};
 use serde::Deserialize;
 use smoltcp::wire::Error as SmoltcpError;
 use smoltcp::wire::{
@@ -65,10 +65,25 @@ impl ConnectionKey {
     }
 }
 
+/// Per-host state shared across all connections from the same source IP
+#[derive(Debug)]
+pub struct HostState {
+    /// Number of connections initiated from this host
+    pub num_connections: u32,
+    /// Total number of packets seen from this host across all connections
+    pub num_packets: u32,
+    /// Host-level registers for CensorLang programs
+    pub registers: Registers,
+}
+
 /// Aggregate object used to manage state for many different connections
 pub struct TransportState {
     /// Internal tracker for connections
     connections: HashMap<ConnectionKey, ConnectionInfo>,
+    /// Per-host state keyed by source IP
+    host_states: HashMap<IpAddress, HostState>,
+    /// Persistent Python dicts for per-host user state (keyed by IP string)
+    python_host_dicts: HashMap<String, PyObjectRef>,
     /// Execution mode
     execution_mode: ExecutionMode,
     /// Interpreter used for executing all python code
@@ -113,6 +128,8 @@ pub enum TransportStateInitError {
 const PACKET: &str = "packet";
 const PROCESS: &str = "process";
 const MODEL: &str = "model";
+const HOST: &str = "host";
+const DST_HOST: &str = "dst_host";
 
 #[derive(Debug, Default, Deserialize, Clone, Copy)]
 pub enum ExecutionMode {
@@ -222,6 +239,8 @@ impl TransportState {
         // Construct the overall connection manager
         Ok(TransportState {
             connections: HashMap::new(),
+            host_states: HashMap::new(),
+            python_host_dicts: HashMap::new(),
             execution_mode: execution_config.mode,
             vm,
             code,
@@ -283,6 +302,33 @@ impl TransportState {
             });
         // Copy of is_first for the execution
         let is_first_cl = *is_first;
+
+        // Update per-host state for the source IP
+        let src_ip = ips.src();
+        let dst_ip = ips.dst();
+        let config = &self.censorlang_config;
+        let (host_num_connections, host_num_packets) = {
+            let host = self.host_states.entry(src_ip).or_insert_with(|| HostState {
+                num_connections: 0,
+                num_packets: 0,
+                registers: Registers::new(config.program.num_registers.into(), config.env.relax_register_types),
+            });
+            host.num_packets += 1;
+            if is_first_cl {
+                host.num_connections += 1;
+            }
+            (host.num_connections, host.num_packets)
+        };
+        // Get dst host counters (don't increment -- dst didn't send this packet)
+        let (dst_host_num_connections, dst_host_num_packets) = {
+            let dst_host = self.host_states.entry(dst_ip).or_insert_with(|| HostState {
+                num_connections: 0,
+                num_packets: 0,
+                registers: Registers::new(config.program.num_registers.into(), config.env.relax_register_types),
+            });
+            (dst_host.num_connections, dst_host.num_packets)
+        };
+
         // If the connection is set up for a Python environment, use that
         let action = match env {
             ExecutionEnvironment::Python { scope } => {
@@ -295,8 +341,37 @@ impl TransportState {
                 let mut packet = PythonPacket::from(packet);
                 packet.set_direction(direction);
                 let sender = self.model_sender.clone();
+                // Get existing per-host Python dict (if any) for persistent user state
+                let src_ip_key = src_ip.to_string();
+                let dst_ip_key = dst_ip.to_string();
+                let existing_host_dict = self.python_host_dicts.get(&src_ip_key).cloned();
+                let existing_dst_host_dict = self.python_host_dicts.get(&dst_ip_key).cloned();
+                let need_store_dict = existing_host_dict.is_none();
+                let need_store_dst_dict = existing_dst_host_dict.is_none();
                 // Run a function using the per-connection scope
                 match self.vm.enter(move |vm| {
+                    // Create or reuse the per-host state dict
+                    let host_dict = existing_host_dict
+                        .unwrap_or_else(|| vm.ctx.new_dict().to_pyobject(vm));
+                    let dst_host_dict = existing_dst_host_dict
+                        .unwrap_or_else(|| vm.ctx.new_dict().to_pyobject(vm));
+                    // Build host object with counters + persistent state dict
+                    let host = PythonHost::new(
+                        host_num_connections,
+                        host_num_packets,
+                        host_dict.clone(),
+                    );
+                    let dst_host = PythonHost::new(
+                        dst_host_num_connections,
+                        dst_host_num_packets,
+                        dst_host_dict.clone(),
+                    );
+                    scope
+                        .locals
+                        .set_item(HOST, host.to_pyobject(vm), vm)?;
+                    scope
+                        .locals
+                        .set_item(DST_HOST, dst_host.to_pyobject(vm), vm)?;
                     // Add in the current packet as an object
                     let pkt = packet.to_pyobject(vm);
                     scope.locals.set_item(PACKET, pkt, vm)?;
@@ -305,7 +380,7 @@ impl TransportState {
                         if let Err(err) = vm.run_code_obj(code, scope.clone()) {
                             error!("Error initializing environment: {:?}", err);
                             vm.print_exception(err);
-                            return Ok(Action::None);
+                            return Ok((Action::None, host_dict, dst_host_dict));
                         }
                         let model = PythonModel::new(sender);
                         let model = model.to_pyobject(vm);
@@ -383,9 +458,18 @@ impl TransportState {
                     };
                     //let result = vm.run_code_obj(process, scope.clone())?;
                     // Finally, return that everything went fine
-                    Ok::<_, PyBaseExceptionRef>(action)
+                    Ok::<_, PyBaseExceptionRef>((action, host_dict, dst_host_dict))
                 }) {
-                    Ok(action) => action,
+                    Ok((action, host_dict, dst_host_dict)) => {
+                        // Store the host dicts back if they were newly created
+                        if need_store_dict {
+                            self.python_host_dicts.insert(src_ip_key, host_dict);
+                        }
+                        if need_store_dst_dict {
+                            self.python_host_dicts.insert(dst_ip_key, dst_host_dict);
+                        }
+                        action
+                    }
                     Err(err) => {
                         self.vm.enter(|vm| vm.print_exception(err));
                         Action::None
@@ -396,7 +480,18 @@ impl TransportState {
                 // Get the program (should always exist in CensorLang mode)
                 if let Some(ref program) = self.censorlang_program {
                     let field_default_on_error = self.censorlang_config.env.field_default_on_error;
-                    let program_action = env.process(&packet, program, field_default_on_error);
+                    let host = self.host_states.get_mut(&src_ip).unwrap();
+                    let program_action = env.process(
+                        &packet,
+                        program,
+                        field_default_on_error,
+                        host_num_connections,
+                        host_num_packets,
+                        dst_host_num_connections,
+                        dst_host_num_packets,
+                        &mut host.registers,
+                        Some(&self.model_sender),
+                    );
                     // Convert program::Action to censor::Action
                     match program_action {
                         ProgramAction::Allow => Action::None,

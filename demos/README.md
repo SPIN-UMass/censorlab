@@ -4,5 +4,4 @@ Each of these demos contains a `censor.toml`, the root file for managing CensorL
 
 `censorlab -c desired_demo/censor.toml nfq`
 
-
 Paths in censor.toml are relative to the TOML file itself, including for the Censor Program or ML models

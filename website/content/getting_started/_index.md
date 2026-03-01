@@ -47,10 +47,10 @@ We also provide pre-built VM images with everything pre-installed. See the [VM I
 
 CensorLab uses two files to define censorship behavior:
 
-1. **Configuration file (`censor.toml`)** — Defines execution settings, layer-level filters, and references to the censor script and any ML models.
-2. **Censor program (`censor.py`)** — A Python script that implements the actual censorship logic, called once per packet within each connection.
+1. **Configuration file (`censor.toml`)** — Defines execution settings, transport/link-layer filters (IP, MAC, and port allowlists/blocklists), and references to the censor script and any ML models. These filters apply automatically without writing any code.
+2. **Censor program (`censor.py`)** — A Python script that implements application-layer censorship logic (e.g., parsing DNS queries, inspecting TLS handshakes, running ML models). Called once per packet within each connection.
 
-Both files are provided in each of the bundled demos under `demos/`.
+Both files are provided in each of the bundled demos under `demos/`. See the [Configuration Reference](/docs/#configuration-reference) for all available TOML options.
 
 ## Step 3: Run a Demo
 
@@ -59,21 +59,13 @@ CensorLab ships with several ready-to-use demos. Let's try the DNS blocking demo
 ### Using Docker
 
 ```bash
+# Intercept live traffic (requires host networking)
+./docker/censorlab.sh --shell
+$ censorlab -c demos/dns_blocking/censor.toml nfq &
+$ curl https://google.com  # This will fail
+
 # Analyze a PCAP file (no special permissions needed)
 bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap demos/dns_blocking/example.pcap 192.168.1.100
-
-# Or intercept live traffic (requires host networking)
-sudo bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
-```
-
-### Using a local build
-
-```bash
-# Analyze a PCAP file
-censorlab -c demos/dns_blocking/censor.toml pcap demos/dns_blocking/example.pcap 192.168.1.100
-
-# Or intercept live traffic
-censorlab -c demos/dns_blocking/censor.toml nfq
 ```
 
 Other demos you can try:
@@ -87,7 +79,7 @@ Other demos you can try:
 | `demos/shadowsocks_gfw/` | Detects Shadowsocks-like encrypted proxy traffic |
 | `demos/mega_gfw/` | Comprehensive GFW emulation (7 techniques combined) |
 
-## Step 4: See Censorship in Action
+### A More Elaborate Demo: See Censorship in Action
 
 Let's see what censorship actually feels like. We'll start CensorLab with the HTTPS/TLS blocking demo and try browsing the web with it running.
 
@@ -156,7 +148,7 @@ def process(packet):
 
 Try changing `"example.com"` to a different domain and re-running to block a different site. Or change `"drop"` to `"reset"` to see what happens when the censor actively tears down the connection instead of silently dropping it.
 
-## Step 5: Write Your First Censor Program
+## Step 4: Write Your First Censor Program
 
 Create a file called `my_censor.py`:
 
@@ -200,6 +192,7 @@ Your `process()` function controls what happens to each packet:
 | `"allow"` | Same as `None` |
 | `"drop"` | Silently drop the packet |
 | `"reset"` | Send TCP RST to both sides (TCP only; falls back to drop for UDP) |
+| `bytes` | Inject a forged UDP response (e.g., via `dns.craft_response()`) |
 
 ### Accessing packet data
 
@@ -227,7 +220,7 @@ Key attributes available on `packet`:
 | `packet.ip.src`, `packet.ip.dst` | Source/destination IP |
 | `packet.tcp` / `packet.udp` | TCP/UDP metadata (or `None`) |
 
-See the full [PyCL API reference](/docs/#pycl-python-censor-language-reference) for all attributes.
+For the full list of available packet attributes, return values, built-in libraries, and helper functions, see the [PyCL API reference](/docs/#pycl-python-censor-language-reference).
 
 ### Using regex
 
@@ -257,11 +250,25 @@ def process(packet):
                 return "drop"
 ```
 
+See the [PyCL reference](/docs/#pycl-python-censor-language-reference) for full documentation of the DNS, TLS, and QUIC modules.
+
 ### Using ML models
 
 CensorLab can run ONNX models for ML-based censorship. See the [model demo](https://github.com/SPIN-UMass/censorlab/tree/main/demos/model) for a Jupyter notebook showing how to train and export a model.
 
-## Step 6: Explore Further
+### Alternative: CensorLang
+
+Censor programs can also be written in **CensorLang**, a register-based DSL designed for efficiency and static analysis. CensorLang programs are more concise and can be machine-generated (e.g., via genetic programming), but are less flexible than Python.
+
+```toml
+[execution]
+mode = "CensorLang"
+script = "censor.cl"
+```
+
+See the [CensorLang reference](/docs/#censorlang-reference) for the full syntax and capabilities.
+
+## Step 5: Explore Further
 
 - **[Documentation](/docs/)** — Full reference for configuration, PyCL API, and CensorLang DSL
 - **[Demos](https://github.com/SPIN-UMass/censorlab/tree/main/demos)** — 12 example scenarios covering DNS, HTTP, HTTPS, QUIC, IP blocking, SSH detection, encrypted proxy detection, and ML-based classification

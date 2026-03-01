@@ -954,3 +954,281 @@ fn test_mega_gfw_combined_censorship() {
 
     println!("=== All 12 flows validated successfully! ===");
 }
+
+// ==========================================================================
+// Test: Per-host state in PyCL (Python)
+// ==========================================================================
+
+#[test]
+fn test_python_per_host_state_counters() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    // Two different clients sending to same server
+    let client_a = [10, 0, 0, 1];
+    let client_b = [10, 0, 0, 2];
+    let server = [93, 184, 216, 34];
+
+    PcapBuilder::new()
+        // Connection 1 from client_a (frames 0-2)
+        .add_frame(&tcp_frame(client_a, server, 50000, 80, TCP_SYN, 100, 0, &[]))
+        .add_frame(&tcp_frame(server, client_a, 80, 50000, TCP_ACK, 200, 101, &[]))
+        .add_frame(&tcp_frame(client_a, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
+        // Connection 2 from client_a (frames 3-5)
+        .add_frame(&tcp_frame(client_a, server, 50001, 80, TCP_SYN, 300, 0, &[]))
+        .add_frame(&tcp_frame(server, client_a, 80, 50001, TCP_ACK, 400, 301, &[]))
+        .add_frame(&tcp_frame(client_a, server, 50001, 80, TCP_PSH_ACK, 301, 401, b"GET /page HTTP/1.1\r\nHost: example.com\r\n\r\n"))
+        // Connection 3 from client_a (frames 6-7) — should be blocked (3rd connection)
+        .add_frame(&tcp_frame(client_a, server, 50002, 80, TCP_SYN, 500, 0, &[]))
+        .add_frame(&tcp_frame(client_a, server, 50002, 80, TCP_PSH_ACK, 501, 601, b"GET /blocked HTTP/1.1\r\nHost: example.com\r\n\r\n"))
+        // Connection from client_b (frames 8-9) — different host, should NOT be blocked
+        .add_frame(&tcp_frame(client_b, server, 50000, 80, TCP_SYN, 700, 0, &[]))
+        .add_frame(&tcp_frame(client_b, server, 50000, 80, TCP_PSH_ACK, 701, 801, b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
+        .write_to(&pcap_path);
+
+    // Python script that drops all traffic from a host once they exceed 2 connections
+    let script = r#"
+def process(packet):
+    if host.num_connections > 2:
+        return "drop"
+"#;
+    let config_str = r#"
+[execution]
+mode = "Python"
+script = "censor.py"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.py", script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+
+    // Frames 0-5 (first 2 connections from client_a): no action
+    for i in 0..6 {
+        assert!(
+            !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
+            "frame {i} should not be dropped (first 2 connections from client_a)"
+        );
+    }
+
+    // Frames 6-7 (3rd connection from client_a): should be dropped
+    for i in 6..8 {
+        assert!(
+            result.action_lines.iter().any(|l| l.packet_index == frame_idx(i) && l.action.contains("Drop")),
+            "frame {i} should be dropped (3rd connection from client_a, host.num_connections > 2)"
+        );
+    }
+
+    // Frames 8-9 (client_b): no action (different host, only 1 connection)
+    for i in 8..10 {
+        assert!(
+            !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
+            "frame {i} should not be dropped (client_b only has 1 connection)"
+        );
+    }
+}
+
+// ==========================================================================
+// Test: Per-host persistent state dict in PyCL (Python)
+// ==========================================================================
+
+#[test]
+fn test_python_per_host_persistent_state() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+
+    PcapBuilder::new()
+        // Connection 1: high-entropy payload triggers flagging (frames 0-1)
+        .add_frame(&tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]))
+        .add_frame(&tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 101, 201, &high_entropy_payload(256)))
+        // Connection 2: any data from same host should be dropped (frames 2-3)
+        .add_frame(&tcp_frame(client, server, 50001, 80, TCP_SYN, 300, 0, &[]))
+        .add_frame(&tcp_frame(client, server, 50001, 80, TCP_PSH_ACK, 301, 401, b"normal data"))
+        .write_to(&pcap_path);
+
+    // Python script that demonstrates residual censorship via host.state
+    let script = r#"
+def process(packet):
+    if host.state.get("blocked"):
+        return "drop"
+    if packet.payload_len > 0 and packet.payload_entropy > 0.9:
+        host.state["blocked"] = True
+        return "drop"
+"#;
+    let config_str = r#"
+[execution]
+mode = "Python"
+script = "censor.py"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.py", script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+
+    // Frame 0 (SYN): no payload, no action
+    assert!(
+        !result.action_lines.iter().any(|l| l.packet_index == frame_idx(0)),
+        "SYN should not trigger action"
+    );
+
+    // Frame 1 (high-entropy data): dropped + host flagged
+    assert!(
+        result.action_lines.iter().any(|l| l.packet_index == frame_idx(1) && l.action.contains("Drop")),
+        "high-entropy payload should be dropped"
+    );
+
+    // Frame 3 (normal data on new connection): dropped because host.state["blocked"] persists
+    assert!(
+        result.action_lines.iter().any(|l| l.packet_index == frame_idx(3) && l.action.contains("Drop")),
+        "second connection should be dropped via persistent host.state (residual censorship)"
+    );
+}
+
+// ==========================================================================
+// Test: Per-host state in CensorLang
+// ==========================================================================
+
+#[test]
+fn test_censorlang_per_host_fields() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client_a = [10, 0, 0, 1];
+    let client_b = [10, 0, 0, 2];
+    let server = [93, 184, 216, 34];
+
+    PcapBuilder::new()
+        // Connection 1 from client_a (frames 0-1)
+        .add_frame(&tcp_frame(client_a, server, 50000, 80, TCP_SYN, 100, 0, &[]))
+        .add_frame(&tcp_frame(client_a, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"hello"))
+        // Connection 2 from client_a (frames 2-3)
+        .add_frame(&tcp_frame(client_a, server, 50001, 80, TCP_SYN, 300, 0, &[]))
+        .add_frame(&tcp_frame(client_a, server, 50001, 80, TCP_PSH_ACK, 301, 401, b"world"))
+        // Connection 3 from client_a (frames 4-5) — exceeds threshold
+        .add_frame(&tcp_frame(client_a, server, 50002, 80, TCP_SYN, 500, 0, &[]))
+        .add_frame(&tcp_frame(client_a, server, 50002, 80, TCP_PSH_ACK, 501, 601, b"blocked"))
+        // Connection from client_b (frames 6-7) — different host, fine
+        .add_frame(&tcp_frame(client_b, server, 50000, 80, TCP_SYN, 700, 0, &[]))
+        .add_frame(&tcp_frame(client_b, server, 50000, 80, TCP_PSH_ACK, 701, 801, b"ok"))
+        .write_to(&pcap_path);
+
+    // CensorLang program that terminates hosts with >2 connections
+    let cl_script = "if field:host.num_connections > 2 : RETURN terminate\n";
+    let config_str = r#"
+[execution]
+mode = "CensorLang"
+script = "censor.cl"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+
+    // Frames 0-3 (first 2 connections from client_a): no action
+    for i in 0..4 {
+        assert!(
+            !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
+            "frame {i} should not be terminated (first 2 connections from client_a)"
+        );
+    }
+
+    // Frames 4-5 (3rd connection from client_a): terminated
+    for i in 4..6 {
+        assert!(
+            result.action_lines.iter().any(|l| l.packet_index == frame_idx(i) && l.action.contains("Drop")),
+            "frame {i} should be terminated (3rd connection from client_a, host.num_connections > 2)"
+        );
+    }
+
+    // Frames 6-7 (client_b): no action
+    for i in 6..8 {
+        assert!(
+            !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
+            "frame {i} should not be terminated (client_b only has 1 connection)"
+        );
+    }
+}
+
+// ==========================================================================
+// Test: CensorLang host registers (persist across connections from same IP)
+// ==========================================================================
+
+#[test]
+fn test_censorlang_host_registers() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let client_b = [10, 0, 0, 2];
+    let server = [93, 184, 216, 34];
+
+    PcapBuilder::new()
+        // Connection 1 from client: high-entropy payload triggers flag (frames 0-1)
+        .add_frame(&tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]))
+        .add_frame(&tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 101, 201, &high_entropy_payload(256)))
+        // Connection 2 from client: normal data, but host is flagged (frames 2-3)
+        .add_frame(&tcp_frame(client, server, 50001, 80, TCP_SYN, 300, 0, &[]))
+        .add_frame(&tcp_frame(client, server, 50001, 80, TCP_PSH_ACK, 301, 401, b"normal data"))
+        // Connection from client_b: not flagged (frames 4-5)
+        .add_frame(&tcp_frame(client_b, server, 50000, 80, TCP_SYN, 500, 0, &[]))
+        .add_frame(&tcp_frame(client_b, server, 50000, 80, TCP_PSH_ACK, 501, 601, b"hello"))
+        .write_to(&pcap_path);
+
+    // CensorLang program:
+    // 1. If hreg:b.0 is set, terminate (residual censorship)
+    // 2. If entropy > 7.0, set hreg:b.0 and terminate
+    let cl_script = "\
+if hreg:b.0 == True : RETURN terminate
+if field:transport.payload.entropy > 0.9 : COPY True -> hreg:b.0
+if field:transport.payload.entropy > 0.9 : RETURN terminate
+";
+    let config_str = r#"
+[execution]
+mode = "CensorLang"
+script = "censor.cl"
+
+[execution.program]
+num_registers = 16
+
+[execution.env]
+field_default_on_error = true
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+
+    // Frame 0 (SYN, no payload): no action
+    assert!(
+        !result.action_lines.iter().any(|l| l.packet_index == frame_idx(0)),
+        "SYN should not trigger action"
+    );
+
+    // Frame 1 (high-entropy data): dropped + host flagged via hreg:b.0
+    assert!(
+        result.action_lines.iter().any(|l| l.packet_index == frame_idx(1) && l.action.contains("Drop")),
+        "high-entropy payload should be dropped"
+    );
+
+    // Frames 2-3 (second connection from same client): should be dropped because hreg:b.0 persists
+    for i in 2..4 {
+        assert!(
+            result.action_lines.iter().any(|l| l.packet_index == frame_idx(i) && l.action.contains("Drop")),
+            "frame {i} should be dropped via residual host register censorship"
+        );
+    }
+
+    // Frames 4-5 (client_b): no action (different host, hreg:b.0 not set)
+    for i in 4..6 {
+        assert!(
+            !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
+            "frame {i} should not be dropped (client_b has no flag)"
+        );
+    }
+}

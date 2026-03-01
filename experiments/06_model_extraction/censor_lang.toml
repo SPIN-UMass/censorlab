@@ -1,12 +1,12 @@
-# CensorLab config for ML protocol classification (CensorLang mode)
-# Uses ONNX model for ML-based protocol classification.
-# Used for Experiment 5 timing/LOC comparison (Table 4)
+# CensorLab config for model extraction experiment (CensorLang mode)
+# Uses ONNX model ("extractor") to classify connections by first
+# 2 packet lengths. CensorLab runs in Tap mode (NFQ, observe-only).
 
 [execution]
 mode = "CensorLang"
 script = "censor.cl"
 
-[models.classifier]
+[models.extractor]
 path = "model.onnx"
 
 [ethernet]
