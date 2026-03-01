@@ -36,12 +36,19 @@ RUN nix print-dev-env .#experiments > /dev-env.sh
 # Copy experiments last — changes here only rebuild this cheap layer
 COPY experiments/ experiments/
 
-# Copy website source and build with zola
+# Copy website source and build with zola (anonymous mode for review)
 COPY website/ website/
-RUN source /dev-env.sh && cd website && zola build --base-url http://localhost:1116
+RUN sed -i 's/^anonymous = false/anonymous = true/' website/config.toml && \
+    sed -i '/arxiv\.org/d' website/content/getting_started/_index.md && \
+    sed -i 's|https://github.com/SPIN-UMass/censorlab/tree/main/demos/model|/docs/#pycl-python-censor-language-reference|g' website/content/getting_started/_index.md && \
+    sed -i 's|https://github.com/SPIN-UMass/censorlab/tree/main/demos|/docs/|g' website/content/getting_started/_index.md website/content/docs.md && \
+    sed -i 's|https://github.com/SPIN-UMass/censorlab\.git|https://anonymous.example.com/censorlab.git|g' website/content/docs.md website/content/getting_started/_index.md && \
+    sed -i 's|https://github.com/SPIN-UMass/censorlab|/docs/|g' website/content/docs.md && \
+    sed -i 's|https://voyager.cs.umass.edu/vm-images/|https://anonymous.example.com/vm-images/|g' website/content/vm-info/_index.md && \
+    source /dev-env.sh && cd website && zola build --base-url http://localhost:1116
 
 # MOTD shown on interactive shell startup
-RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:  http://localhost:1116/\nDemos: ls demos/\nHelp:  censorlab --help\n\n' > /etc/motd
+RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:           http://localhost:1116/getting_started/\nDocumentation:  http://localhost:1116/docs/\nDemos:          ls demos/\nHelp:           censorlab --help\n\n' > /etc/motd
 
 # Build fingerprint — passed by censorlab.sh to detect when rebuilds are needed.
 # Must be last so it doesn't invalidate earlier cached layers.

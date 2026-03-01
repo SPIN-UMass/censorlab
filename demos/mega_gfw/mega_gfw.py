@@ -114,7 +114,7 @@ def check_dns(packet):
         return None
 
     for question in dns.questions:
-        qname = question.qname.lower().encode()
+        qname = question.qname.lower()
         for blocked in BLOCKED_DOMAINS:
             if blocked in qname:
                 log_info("[DNS inject] Injecting forged response for: " + str(qname))
@@ -191,7 +191,7 @@ def check_tls_sni(packet):
     if not hello.sni:
         return None
 
-    sni_lower = hello.sni.lower().encode()
+    sni_lower = hello.sni.lower()
     for blocked in BLOCKED_DOMAINS:
         if blocked in sni_lower:
             log_info("[TLS SNI] Blocked SNI: " + str(sni_lower))
@@ -229,7 +229,7 @@ def check_quic_sni(packet):
     if not info.sni:
         return None
 
-    sni_lower = info.sni.lower().encode()
+    sni_lower = info.sni.lower()
     for blocked in BLOCKED_DOMAINS:
         if blocked in sni_lower:
             log_info("[QUIC SNI] Blocked SNI: " + str(sni_lower))

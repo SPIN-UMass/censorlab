@@ -9,7 +9,7 @@ def process(packet):
     if tcp and 443 in [tcp.src, tcp.dst]:
         try:
             hello = parse_client_hello(packet.payload)
-            if hello.sni and "blocked.example.com" in hello.sni:
+            if hello.sni and b"blocked.example.com" in hello.sni.lower():
                 return "reset"
         except Exception:
             pass

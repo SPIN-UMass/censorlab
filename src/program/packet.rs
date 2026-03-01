@@ -1011,8 +1011,8 @@ pub mod rust_dns {
     #[pyclass]
     impl Question {
         #[pygetset]
-        fn qname(&self) -> String {
-            self.qname.clone()
+        fn qname(&self) -> rustpython_vm::builtins::PyBytes {
+            rustpython_vm::builtins::PyBytes::from(self.qname.as_bytes().to_vec())
         }
         #[pygetset]
         fn prefer_unicast(&self) -> bool {
@@ -1265,8 +1265,8 @@ pub mod rust_tls {
     impl ClientHelloInfo {
         /// Server Name Indication, or None
         #[pygetset]
-        fn sni(&self) -> Option<String> {
-            self.inner.sni.clone()
+        fn sni(&self) -> Option<rustpython_vm::builtins::PyBytes> {
+            self.inner.sni.as_ref().map(|s| rustpython_vm::builtins::PyBytes::from(s.as_bytes().to_vec()))
         }
 
         /// ALPN protocol names
@@ -1359,8 +1359,8 @@ pub mod rust_quic {
 
         /// SNI from the TLS ClientHello, if found
         #[pygetset]
-        fn sni(&self) -> Option<String> {
-            self.inner.sni().map(|s| s.to_string())
+        fn sni(&self) -> Option<rustpython_vm::builtins::PyBytes> {
+            self.inner.sni().map(|s| rustpython_vm::builtins::PyBytes::from(s.as_bytes().to_vec()))
         }
 
         /// ALPN protocols from the TLS ClientHello, if found

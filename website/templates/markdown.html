@@ -20,10 +20,12 @@
         <a class="navbar-item" href="{{ get_url(path="/") }}">Home</a>
         <a class="navbar-item" href="{{ get_url(path="getting_started") }}">Getting Started</a>
         <a class="navbar-item" href="{{ get_url(path="docs") }}">Documentation</a>
+        {% if not config.extra.anonymous %}
         <a class="navbar-item" href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank">Examples</a>
         <a class="navbar-item" href="https://github.com/SPIN-UMass/censorlab" target="_blank">
           <span class="icon"><i class="fab fa-github"></i></span>
         </a>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -45,7 +47,9 @@
   <div class="container">
     <div class="columns is-centered">
       <div class="column is-8 has-text-centered">
+        {% if not config.extra.anonymous %}
         <p>Questions? Contact us at <a href="mailto:censorlab@cs.umass.edu">censorlab@cs.umass.edu</a>.</p>
+        {% endif %}
       </div>
     </div>
   </div>

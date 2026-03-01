@@ -16,3 +16,7 @@ render_inline_code = true
 
 [extra]
 # Put all your custom variables here
+# Set to true to hide author names, affiliations, emails, arXiv links, and
+# GitHub URLs.  The Docker image build flips this automatically so the locally
+# served docs are safe for anonymous review.
+anonymous = false

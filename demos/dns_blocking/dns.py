@@ -2,7 +2,7 @@ from dns import parse as parse_dns, craft_response
 
 # Add domains to block here
 BLOCKED_DOMAINS = [
-    "google.com",
+    b"google.com",
 ]
 
 # IP address to inject in forged DNS responses
@@ -17,5 +17,5 @@ def process(packet):
         dns = parse_dns(packet.payload)
         for question in dns.questions:
             for domain in BLOCKED_DOMAINS:
-                if domain in question.qname:
+                if domain in question.qname.lower():
                     return craft_response(packet.payload, POISON_IP)

@@ -20,7 +20,7 @@ def process(packet):
     if tcp and 443 in [tcp.src, tcp.dst]:
         try:
             hello = parse_client_hello(packet.payload)
-            if hello.sni and "example.com" in hello.sni:
+            if hello.sni and b"example.com" in hello.sni.lower():
                 return "drop"
         except Exception:
             # Not a TLS ClientHello (e.g. application data, alerts)

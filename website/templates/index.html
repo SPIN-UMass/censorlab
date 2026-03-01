@@ -8,6 +8,7 @@
           <div class="column has-text-centered">
             <div><h1 class="title is-1 publication-title">{{ section.title }}</h1></div>
             <h1 class="title is-1 publication-title">{{ section.extra.subtitle }}</h1>
+            {% if not config.extra.anonymous %}
             <div class="is-size-5 publication-authors">
               <!-- Paper authors -->
               {% set unique_institutions = section.extra.authors | map(attribute="institution") | unique %}
@@ -24,6 +25,7 @@
                 <div class="author-block">{{ institution.symbol }} {{ institution.name }}</div>
               {% endfor %}
             </div>
+            {% endif %}
         </div>
       </div>
     </div>
@@ -53,6 +55,7 @@
     <div class="columns is-centered has-text-centered">
       <div class="column has-text-centered">
         <div class="publication-links">
+            {% if not config.extra.anonymous %}
             <span class="link-block">
               <a href="{{ section.extra.pdf }}" target="_blank"
               class="external-link button is-normal is-rounded is-dark">
@@ -72,6 +75,7 @@
               <span>Code</span>
             </a>
           </span>
+            {% endif %}
         <!-- Link to getting started -->
         <span class="link-block">
           <a href="{{ get_url(path="getting_started") }}" target="_blank"
@@ -92,7 +96,8 @@
             <span>Documentation</span>
           </a>
         </span>
-        <!-- Link to examples -->  
+        {% if not config.extra.anonymous %}
+        <!-- Link to examples -->
         <span class="link-block">
           <a href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank"
             class="external-link button is-normal is-rounded is-dark">
@@ -102,8 +107,9 @@
             <span>Examples</span>
           </a>
         </span>
+        {% endif %}
 
-        <!-- Link to VM Images -->  
+        <!-- Link to VM Images -->
         <span class="link-block">
           <a href="{{ get_url(path="/vm-info") }}" target="_blank"
             class="external-link button is-normal is-rounded is-dark">
@@ -113,6 +119,7 @@
             <span>CensorLab VM</span>
           </a>
         </span>
+        {% if not config.extra.anonymous %}
  				<!-- ArXiv abstract Link -->
 				<span class="link-block">
 						<a href="{{ section.extra.arxiv }}" target="_blank"
@@ -123,6 +130,7 @@
 						<span>arXiv</span>
 					</a>
 				</span>
+        {% endif %}
         <!--<span class="link-block">
           <a href="/drives/censorlab.ova" target="_blank"
             class="external-link button is-normal is-rounded is-dark">
@@ -149,7 +157,9 @@
           <p>Get up and running with CensorLab in minutes using Docker — no Rust toolchain or system setup needed. We also provide demos, full documentation, and a pre-built VM.</p>
           Click <a href="{{ get_url(path="getting_started") }}" target="_blank">here</a> for a step-by-step tutorial.
 
+					{% if not config.extra.anonymous %}
 					<p>For educators interested in teaching censorship circumvention, consider using <a href="https://github.com/SPIN-UMass/censorlab/tree/main/homework">this example assignment</a>.</p>
+					{% endif %}
         </div>
       </div>
     </div>
@@ -187,7 +197,9 @@ End BibTex citation -->
     <div class="columns is-centered">
       <div class="column is-8">
         <div class="content">
+          {% if not config.extra.anonymous %}
           If you have any questions about CensorLab, please contact us at <a href="mailto:censorlab@cs.umass.edu">censorlab@cs.umass.edu</a>.
+          {% endif %}
         </div>
         <div class="content">
             This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a> which was adopted from the <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.

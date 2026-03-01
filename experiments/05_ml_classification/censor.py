@@ -1,7 +1,7 @@
 # ML Protocol Classification Censor (PyCL)
 # Uses an ONNX model to classify encrypted protocols.
 # Collects features over a window of 10 packets, then evaluates.
-# Based on Wang et al. traffic classification approach.
+# Uses the feature extraction approach described by Wang et al.
 #
 # The model receives a feature vector of [lengths..., directions...] and
 # returns a probability score.  If score > 0.5, traffic is classified as

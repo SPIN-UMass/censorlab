@@ -28,7 +28,7 @@ def process(packet):
         try:
             hello = parse_client_hello(packet.payload)
             if hello.sni:
-                sni_lower = hello.sni.lower().encode()
+                sni_lower = hello.sni.lower()
                 for domain in FORBIDDEN:
                     if domain in sni_lower:
                         return "reset"

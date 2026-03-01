@@ -1,0 +1,18 @@
+{
+  "table": "table3",
+  "experiment": "04_shadowsocks",
+  "rows": [
+    {
+      "tool": "PyCL",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 50,
+      "fn": 0,
+      "fp": 0,
+      "tn": 50,
+      "errors": 0,
+      "total": 100,
+      "note": "Wu et al. 2023 heuristics"
+    }
+  ]
+}

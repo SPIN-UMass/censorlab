@@ -94,6 +94,7 @@ pub Field: Field = {
   "udp.dst" => Field::Udp(UdpField::DstPort),
   "udp.length" => Field::Udp(UdpField::Length),
   "udp.checksum" => Field::Udp(UdpField::Checksum),
+  "direction" => Field::Direction,
   "transport.payload.entropy" => Field::PayloadEntropy,
   "transport.payload.avg_popcount" => Field::PayloadAveragePopcount,
 }

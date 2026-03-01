@@ -17,7 +17,7 @@ def process(packet):
     if udp and 443 in [udp.src, udp.dst]:
         try:
             info = parse_initial(packet.payload)
-            if info.sni and "example.com" in info.sni:
+            if info.sni and b"example.com" in info.sni.lower():
                 return "drop"
         except Exception:
             # Not a QUIC Initial, or encrypted payload

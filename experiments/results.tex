@@ -41,7 +41,7 @@
 \newcommand{\ResultMlClassificationPyCLTime}{0.0933}
 \newcommand{\ResultMlClassificationPyCLLoc}{21}
 \newcommand{\ResultMlClassificationCLTime}{0.0647}
-\newcommand{\ResultMlClassificationCLLoc}{6}
+\newcommand{\ResultMlClassificationCLLoc}{24}
 \newcommand{\ResultMlClassificationZeekTime}{N/A}
 \newcommand{\ResultMlClassificationZeekLoc}{N/A}
 \newcommand{\ResultMlClassificationScapyTime}{0.1168}
@@ -75,56 +75,69 @@
 % ============================================================
 % Experiment 7: Throughput/Latency Benchmarks
 % ============================================================
-% Command format: \Bench<Censor><Size><Metric>
+% Command format: \Bench<Censor><SizeName><Metric>
 % Metrics: MedianUs, PerPktUs, ThroughputPps, Overhead
 
-\newcommand{\BenchEntropy1000MedianUs}{32894}
-\newcommand{\BenchEntropy1000PerPktUs}{32.894}
-\newcommand{\BenchEntropy1000ThroughputPps}{30401}
-\newcommand{\BenchEntropy1000Overhead}{1.379}
-\newcommand{\BenchEntropy5000MedianUs}{119639}
-\newcommand{\BenchEntropy5000PerPktUs}{23.928}
-\newcommand{\BenchEntropy5000ThroughputPps}{41792}
-\newcommand{\BenchEntropy5000Overhead}{1.022}
-\newcommand{\BenchEntropy10000MedianUs}{223647}
-\newcommand{\BenchEntropy10000PerPktUs}{22.365}
-\newcommand{\BenchEntropy10000ThroughputPps}{44713}
-\newcommand{\BenchEntropy10000Overhead}{1.489}
-\newcommand{\BenchEntropy50000MedianUs}{1482651}
-\newcommand{\BenchEntropy50000PerPktUs}{29.653}
-\newcommand{\BenchEntropy50000ThroughputPps}{33723}
-\newcommand{\BenchEntropy50000Overhead}{1.565}
-\newcommand{\BenchNull1000MedianUs}{23850}
-\newcommand{\BenchNull1000PerPktUs}{23.85}
-\newcommand{\BenchNull1000ThroughputPps}{41929}
-\newcommand{\BenchNull1000Overhead}{1.0}
-\newcommand{\BenchNull5000MedianUs}{117051}
-\newcommand{\BenchNull5000PerPktUs}{23.41}
-\newcommand{\BenchNull5000ThroughputPps}{42716}
-\newcommand{\BenchNull5000Overhead}{1.0}
-\newcommand{\BenchNull10000MedianUs}{150168}
-\newcommand{\BenchNull10000PerPktUs}{15.017}
-\newcommand{\BenchNull10000ThroughputPps}{66592}
-\newcommand{\BenchNull10000Overhead}{1.0}
-\newcommand{\BenchNull50000MedianUs}{947083}
-\newcommand{\BenchNull50000PerPktUs}{18.942}
-\newcommand{\BenchNull50000ThroughputPps}{52794}
-\newcommand{\BenchNull50000Overhead}{1.0}
-\newcommand{\BenchSniFilter1000MedianUs}{44818}
-\newcommand{\BenchSniFilter1000PerPktUs}{44.818}
-\newcommand{\BenchSniFilter1000ThroughputPps}{22312}
-\newcommand{\BenchSniFilter1000Overhead}{1.879}
-\newcommand{\BenchSniFilter5000MedianUs}{175694}
-\newcommand{\BenchSniFilter5000PerPktUs}{35.139}
-\newcommand{\BenchSniFilter5000ThroughputPps}{28459}
-\newcommand{\BenchSniFilter5000Overhead}{1.501}
-\newcommand{\BenchSniFilter10000MedianUs}{342909}
-\newcommand{\BenchSniFilter10000PerPktUs}{34.291}
-\newcommand{\BenchSniFilter10000ThroughputPps}{29162}
-\newcommand{\BenchSniFilter10000Overhead}{2.284}
-\newcommand{\BenchSniFilter50000MedianUs}{2111051}
-\newcommand{\BenchSniFilter50000PerPktUs}{42.221}
-\newcommand{\BenchSniFilter50000ThroughputPps}{23685}
-\newcommand{\BenchSniFilter50000Overhead}{2.229}
+\newcommand{\BenchEntropyOneKMedianUs}{32894}
+\newcommand{\BenchEntropyOneKPerPktUs}{32.894}
+\newcommand{\BenchEntropyOneKThroughputPps}{30401}
+\newcommand{\BenchEntropyOneKOverhead}{1.379}
+\newcommand{\BenchEntropyFiveKMedianUs}{119639}
+\newcommand{\BenchEntropyFiveKPerPktUs}{23.928}
+\newcommand{\BenchEntropyFiveKThroughputPps}{41792}
+\newcommand{\BenchEntropyFiveKOverhead}{1.022}
+\newcommand{\BenchEntropyTenKMedianUs}{223647}
+\newcommand{\BenchEntropyTenKPerPktUs}{22.365}
+\newcommand{\BenchEntropyTenKThroughputPps}{44713}
+\newcommand{\BenchEntropyTenKOverhead}{1.489}
+\newcommand{\BenchEntropyFiftyKMedianUs}{1482651}
+\newcommand{\BenchEntropyFiftyKPerPktUs}{29.653}
+\newcommand{\BenchEntropyFiftyKThroughputPps}{33723}
+\newcommand{\BenchEntropyFiftyKOverhead}{1.565}
+\newcommand{\BenchNullOneKMedianUs}{23850}
+\newcommand{\BenchNullOneKPerPktUs}{23.85}
+\newcommand{\BenchNullOneKThroughputPps}{41929}
+\newcommand{\BenchNullOneKOverhead}{1.0}
+\newcommand{\BenchNullFiveKMedianUs}{117051}
+\newcommand{\BenchNullFiveKPerPktUs}{23.41}
+\newcommand{\BenchNullFiveKThroughputPps}{42716}
+\newcommand{\BenchNullFiveKOverhead}{1.0}
+\newcommand{\BenchNullTenKMedianUs}{150168}
+\newcommand{\BenchNullTenKPerPktUs}{15.017}
+\newcommand{\BenchNullTenKThroughputPps}{66592}
+\newcommand{\BenchNullTenKOverhead}{1.0}
+\newcommand{\BenchNullFiftyKMedianUs}{947083}
+\newcommand{\BenchNullFiftyKPerPktUs}{18.942}
+\newcommand{\BenchNullFiftyKThroughputPps}{52794}
+\newcommand{\BenchNullFiftyKOverhead}{1.0}
+\newcommand{\BenchSniFilterOneKMedianUs}{44818}
+\newcommand{\BenchSniFilterOneKPerPktUs}{44.818}
+\newcommand{\BenchSniFilterOneKThroughputPps}{22312}
+\newcommand{\BenchSniFilterOneKOverhead}{1.879}
+\newcommand{\BenchSniFilterFiveKMedianUs}{175694}
+\newcommand{\BenchSniFilterFiveKPerPktUs}{35.139}
+\newcommand{\BenchSniFilterFiveKThroughputPps}{28459}
+\newcommand{\BenchSniFilterFiveKOverhead}{1.501}
+\newcommand{\BenchSniFilterTenKMedianUs}{342909}
+\newcommand{\BenchSniFilterTenKPerPktUs}{34.291}
+\newcommand{\BenchSniFilterTenKThroughputPps}{29162}
+\newcommand{\BenchSniFilterTenKOverhead}{2.284}
+\newcommand{\BenchSniFilterFiftyKMedianUs}{2111051}
+\newcommand{\BenchSniFilterFiftyKPerPktUs}{42.221}
+\newcommand{\BenchSniFilterFiftyKThroughputPps}{23685}
+\newcommand{\BenchSniFilterFiftyKOverhead}{2.229}
+
+% ============================================================
+% Comparison Percentages (for introduction / showcase text)
+% ============================================================
+% Command format: \Comp<Scenario><Tool>Vs<Baseline><Metric>
+% Formula: round((baseline - censorlab) / baseline * 100)
+
+\newcommand{\CompShadowsocksPyCLVsZeekLoc}{50}
+\newcommand{\CompShadowsocksPyCLVsZeekTime}{98}
+\newcommand{\CompSniFilteringPyCLVsZeekLoc}{57}
+\newcommand{\CompSniFilteringPyCLVsZeekTime}{98}
+\newcommand{\CompMlClassificationPyCLVsScapyLoc}{80}
+\newcommand{\CompMlClassificationPyCLVsScapyTime}{20}
 
 % End of auto-generated results

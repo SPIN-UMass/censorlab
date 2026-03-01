@@ -856,6 +856,8 @@ pub mod field {
         Tcp(tcp::Field),
         /// A field based on the UDP metadata of a packet
         Udp(udp::Field),
+        /// Packet direction (1 = client→WAN, -1 = WAN→client, 0 = unknown)
+        Direction,
         /// Entropy of the transport-layer payload
         PayloadEntropy,
         /// Average popcount (bits per byte) of the transport-layer payload
@@ -887,6 +889,7 @@ pub mod field {
                 Field::Udp(field) => field
                     .eval(packet, default_on_error)
                     .map_err(FieldError::Udp),
+                Field::Direction => Ok(Value::Int(packet.direction.into())),
                 Field::PayloadEntropy => Ok(Value::Float(packet.payload_entropy())),
                 Field::PayloadAveragePopcount => Ok(Value::Float(packet.payload_average_popcount())),
             }
@@ -902,6 +905,7 @@ pub mod field {
             for field in udp::Field::all() {
                 fields.push(Field::Udp(field));
             }
+            fields.push(Field::Direction);
             fields.push(Field::PayloadEntropy);
             fields.push(Field::PayloadAveragePopcount);
             fields

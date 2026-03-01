@@ -251,16 +251,18 @@ def generate_latex_macros(table4, table3, benchmarks):
         lines.append("% ============================================================")
         lines.append("% Experiment 7: Throughput/Latency Benchmarks")
         lines.append("% ============================================================")
-        lines.append("% Command format: \\Bench<Censor><Size><Metric>")
+        lines.append("% Command format: \\Bench<Censor><SizeName><Metric>")
         lines.append("% Metrics: MedianUs, PerPktUs, ThroughputPps, Overhead")
         lines.append("")
 
         censor_names = {"null": "Null", "sni_filter": "SniFilter", "entropy": "Entropy"}
+        size_names = {1000: "OneK", 5000: "FiveK", 10000: "TenK", 50000: "FiftyK"}
         sizes = sorted(set(s for _, s in benchmarks.keys()))
 
         for (censor, size), entry in sorted(benchmarks.items()):
             censor_cmd = censor_names.get(censor, sanitize_cmd(censor))
-            cmd_base = f"Bench{censor_cmd}{size}"
+            size_cmd = size_names.get(size, f"N{size}")
+            cmd_base = f"Bench{censor_cmd}{size_cmd}"
 
             if entry["median_us"] is not None:
                 lines.append(f"\\newcommand{{\\{cmd_base}MedianUs}}{{{entry['median_us']}}}")

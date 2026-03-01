@@ -80,7 +80,7 @@ def analyze_showcase():
     tool_order = ["PyCL", "CensorLang", "Scapy"]
     tool_notes = {
         "PyCL": "ONNX model classification",
-        "CensorLang": "entropy heuristic (no ML support)",
+        "CensorLang": "ONNX model classification",
         "Scapy": "ONNX model classification",
     }
 
@@ -223,7 +223,7 @@ def analyze_live_eval(results_csv):
             "tn": None,
             "errors": None,
             "total": None,
-            "note": "entropy heuristic (cannot use ML models)",
+            "note": "ONNX model classification",
         },
     ]
 

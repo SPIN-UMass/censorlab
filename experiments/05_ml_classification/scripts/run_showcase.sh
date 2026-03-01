@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_showcase.sh — Table 4: PCAP-mode timing benchmark + LOC count
 #
-# Runs all tools (PyCL, CensorLang, Zeek, Scapy) against the test PCAP
+# Runs all tools (PyCL, CensorLang, Scapy) against the test PCAP
 # multiple times and collects timing results.
 #
 # NOTE: PyCL mode requires model.onnx to exist.  If it does not, the PyCL
@@ -11,7 +11,7 @@
 # All results are written as structured CSV to results/ for later TeX import.
 #
 # Prerequisites:
-#   nix develop .#experiments   (or have censorlab, python3+scapy, zeek in PATH)
+#   nix develop .#experiments   (or have censorlab, python3+scapy in PATH)
 #   python3 experiments/05_ml_classification/pcap/generate_pcap.py
 #
 # Usage:
@@ -91,7 +91,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. CensorLab (CensorLang) — entropy heuristic, no model needed
+# 2. CensorLab (CensorLang) — ONNX model classification
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- CensorLab (CensorLang) ---"

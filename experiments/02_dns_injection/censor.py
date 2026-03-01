@@ -30,7 +30,7 @@ def process(packet):
             try:
                 dns = parse_dns(payload)
                 for q in dns.questions:
-                    qname_lower = q.qname.lower().encode()
+                    qname_lower = q.qname.lower()
                     for domain in FORBIDDEN:
                         if domain in qname_lower:
                             return craft_response(payload, POISON_IP)

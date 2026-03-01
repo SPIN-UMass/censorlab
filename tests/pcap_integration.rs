@@ -142,14 +142,14 @@ fn test_dns_blocking() {
     assert_eq!(
         result.action_lines.len(),
         2,
-        "expected 2 drop actions, got: {:?}\nstdout: {}",
+        "expected 2 inject actions, got: {:?}\nstdout: {}",
         result.action_lines,
         result.stdout
     );
     assert_eq!(result.action_lines[0].packet_index, frame_idx(0));
-    assert!(result.action_lines[0].action.contains("Drop"));
+    assert!(result.action_lines[0].action.contains("Inject"));
     assert_eq!(result.action_lines[1].packet_index, frame_idx(2));
-    assert!(result.action_lines[1].action.contains("Drop"));
+    assert!(result.action_lines[1].action.contains("Inject"));
 }
 
 // ==========================================================================
