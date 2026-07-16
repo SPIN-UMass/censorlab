@@ -1,4 +1,4 @@
-#todocite CensorLab: A Generic Testbed for Censorship Emulation
+# CensorLab: A Generic Testbed for Censorship Emulation
 
 **[Documentation](https://censorlab.cs.umass.edu/)** | **[Getting Started](https://censorlab.cs.umass.edu/getting_started/)** | **[API Reference](https://censorlab.cs.umass.edu/docs/)**
 
