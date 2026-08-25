@@ -339,3 +339,15 @@ pub fn quic_initial_packet(sni: &str) -> Vec<u8> {
 
     buf
 }
+
+/// Overwrite the IPv4 TTL of an Ethernet-framed IPv4 packet and fix the
+/// header checksum.  Used to emulate low-TTL "fake" segments.
+pub fn set_ipv4_ttl(frame: &mut [u8], ttl: u8) {
+    let ip = &mut frame[14..];
+    ip[8] = ttl;
+    ip[10] = 0;
+    ip[11] = 0;
+    let ck = ipv4_checksum(&ip[..20]);
+    ip[10] = (ck >> 8) as u8;
+    ip[11] = ck as u8;
+}

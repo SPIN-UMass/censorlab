@@ -1232,3 +1232,69 @@ field_default_on_error = true
         );
     }
 }
+
+// ==========================================================================
+// PyCL structured return values: ("rewrite", {...}) and ("delay", seconds)
+// ==========================================================================
+
+#[test]
+fn test_python_rewrite_and_delay_actions() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+
+    // Frame 0: a normal segment (TTL 64) -> must be delayed by the script.
+    // Frame 1: a low-TTL "fake" segment (TTL 3), the kind of packet used by
+    //          desync tools against DPI -> must be rewritten to TTL 64.
+    let normal = tcp_frame(client, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"hello");
+    let mut fake = tcp_frame(client, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"fake!");
+    common::packet_builder::set_ipv4_ttl(&mut fake, 3);
+
+    PcapBuilder::new()
+        .add_frame(&normal)
+        .add_frame(&fake)
+        .write_to(&pcap_path);
+
+    let script = r#"
+def process(packet):
+    if packet.ip.ttl < 10:
+        return ("rewrite", {"ttl": 64})
+    return ("delay", 0.25)
+"#;
+    write_temp_script(&tmp, "censor.py", script);
+    let config = write_temp_config(
+        &tmp,
+        r#"
+[execution]
+mode = "Python"
+script = "censor.py"
+"#,
+    );
+
+    let result = run_pcap_with_config(&config, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+
+    let delayed = result
+        .action_lines
+        .iter()
+        .find(|l| l.packet_index == frame_idx(0))
+        .unwrap_or_else(|| panic!("no action for frame 0: {:?}\n{}", result.action_lines, result.stdout));
+    assert!(
+        delayed.action.contains("Delay"),
+        "frame 0 should be delayed, got {}",
+        delayed.action
+    );
+
+    let rewritten = result
+        .action_lines
+        .iter()
+        .find(|l| l.packet_index == frame_idx(1))
+        .unwrap_or_else(|| panic!("no action for frame 1: {:?}\n{}", result.action_lines, result.stdout));
+    assert!(
+        rewritten.action.contains("Rewrite") && rewritten.action.contains("ttl: Some(64)"),
+        "frame 1 should be rewritten to TTL 64, got {}",
+        rewritten.action
+    );
+}

@@ -145,6 +145,133 @@ pub enum ExecutionEnvironment {
     CensorLang { env: ProgramEnv },
 }
 
+/// Recognize the value returned by a PyCL `process()` call and map it to an
+/// engine [`Action`].
+///
+/// The accepted grammar is deliberately small and fully checked before any
+/// action is built:
+///
+/// ```text
+/// None                         -> continue (Action::None)
+/// "allow" | "drop" | "reset"   -> the named action
+/// bytes                        -> inject these bytes as a UDP response
+/// ("delay",   seconds: number) -> hold the packet for `seconds` (Tap/NFQ mode)
+/// ("rewrite", {"ttl": int})    -> forward a copy with the IP TTL/hop limit set
+/// ```
+///
+/// Anything else is logged and treated as `allow`.
+fn action_from_python(
+    result: PyObjectRef,
+    vm: &vm::VirtualMachine,
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Action {
+    use rustpython_vm::builtins::{PyBytes, PyDict, PyFloat, PyInt, PyStr, PyTuple};
+
+    if vm.is_none(&result) {
+        return Action::None;
+    }
+    if let Some(s) = result.payload::<PyStr>() {
+        return match s.as_str().to_lowercase().as_str() {
+            "reset" => {
+                if let TransportMetadataExtra::Tcp(tcp_metadata) = transport.extra {
+                    Action::Reset {
+                        src_mac: [0; 6],
+                        dst_mac: [0; 6],
+                        ips,
+                        ipid: None,
+                        src_port: transport.src,
+                        dst_port: transport.dst,
+                        seq: tcp_metadata.seq,
+                        ack: tcp_metadata.ack,
+                        payload_len,
+                        is_ack: tcp_metadata.flags.ack,
+                    }
+                } else {
+                    Action::Drop
+                }
+            }
+            "drop" => Action::Drop,
+            "allow" => Action::None,
+            other => {
+                error!("Unrecognized action: {}. allowing", other);
+                Action::None
+            }
+        };
+    }
+    if let Some(bytes_obj) = result.payload::<PyBytes>() {
+        // Bytes returned -> injection
+        return Action::Inject {
+            src_mac: [0; 6],
+            dst_mac: [0; 6],
+            ips: ips.swap(),
+            src_port: transport.dst,
+            dst_port: transport.src,
+            payload: bytes_obj.as_ref().to_vec(),
+        };
+    }
+    if let Some(tuple) = result.payload::<PyTuple>() {
+        let items = tuple.as_slice();
+        let kind = items
+            .first()
+            .and_then(|k| k.payload::<PyStr>())
+            .map(|k| k.as_str().to_lowercase());
+        match (kind.as_deref(), items.get(1)) {
+            (Some("delay"), Some(arg)) if items.len() == 2 => {
+                let seconds = if let Some(f) = arg.payload::<PyFloat>() {
+                    Some(f.to_f64())
+                } else {
+                    arg.payload::<PyInt>().and_then(|i| i.try_to_primitive::<i64>(vm).ok()).map(|i| i as f64)
+                };
+                match seconds {
+                    Some(s) if s.is_finite() && s >= 0.0 => {
+                        return Action::Delay(std::time::Instant::now() + std::time::Duration::from_secs_f64(s));
+                    }
+                    _ => error!("(\"delay\", seconds): seconds must be a non-negative number. allowing"),
+                }
+                return Action::None;
+            }
+            (Some("rewrite"), Some(arg)) if items.len() == 2 => {
+                if let Some(dict) = arg.payload::<PyDict>() {
+                    let mut rewrite = crate::censor::Rewrite::default();
+                    let mut ok = true;
+                    for (key, value) in dict {
+                        let key = key.payload::<PyStr>().map(|k| k.as_str().to_owned());
+                        match key.as_deref() {
+                            Some("ttl") => {
+                                match value.payload::<PyInt>().and_then(|i| i.try_to_primitive::<u8>(vm).ok()) {
+                                    Some(ttl) => rewrite.ttl = Some(ttl),
+                                    None => {
+                                        error!("(\"rewrite\", {{\"ttl\": v}}): ttl must be an int in 0..=255. allowing");
+                                        ok = false;
+                                    }
+                                }
+                            }
+                            other => {
+                                error!("(\"rewrite\", {{...}}): unknown field {:?}. allowing", other);
+                                ok = false;
+                            }
+                        }
+                    }
+                    if ok {
+                        return Action::Rewrite(rewrite);
+                    }
+                } else {
+                    error!("(\"rewrite\", spec): spec must be a dict. allowing");
+                }
+                return Action::None;
+            }
+            _ => {
+                error!("Unrecognized action tuple {:?}. allowing", tuple);
+                return Action::None;
+            }
+        }
+    }
+    error!("Unrecognized return value from process(): {:?}. allowing", result);
+    Action::None
+}
+
 impl TransportState {
     pub fn new(
         _model_config: HashMap<String, crate::config::model::Model>,
@@ -391,56 +518,7 @@ impl TransportState {
                         if let Some(process_callable) = process_function.to_callable() {
                             if let Ok(pkt) = scope.locals.get_item(PACKET, vm) {
                                 match process_callable.invoke((pkt,), vm) {
-                                    Ok(result) => {
-                                        // Try string first
-                                        if let Ok(s) = result.clone().try_into_value::<String>(vm) {
-                                            match s.to_lowercase().as_str() {
-                                                "reset" => {
-                                                    if let TransportMetadataExtra::Tcp(
-                                                        tcp_metadata,
-                                                    ) = transport.extra
-                                                    {
-                                                        Action::Reset {
-                                                            src_mac: [0; 6],
-                                                            dst_mac: [0; 6],
-                                                            ips,
-                                                            ipid: None,
-                                                            src_port: transport.src,
-                                                            dst_port: transport.dst,
-                                                            seq: tcp_metadata.seq,
-                                                            ack: tcp_metadata.ack,
-                                                            payload_len: len,
-                                                            is_ack: tcp_metadata.flags.ack,
-                                                        }
-                                                    } else {
-                                                        Action::Drop
-                                                    }
-                                                }
-                                                "drop" => Action::Drop,
-                                                "allow" => Action::None,
-                                                other => {
-                                                    error!(
-                                                        "Unrecognized action: {}. allowing",
-                                                        other
-                                                    );
-                                                    Action::None
-                                                }
-                                            }
-                                        } else if let Some(bytes_obj) = result.payload::<rustpython_vm::builtins::PyBytes>() {
-                                            // Bytes returned → injection
-                                            let bytes: Vec<u8> = bytes_obj.as_ref().to_vec();
-                                            Action::Inject {
-                                                src_mac: [0; 6],
-                                                dst_mac: [0; 6],
-                                                ips: ips.swap(),
-                                                src_port: transport.dst,
-                                                dst_port: transport.src,
-                                                payload: bytes,
-                                            }
-                                        } else {
-                                            Action::None
-                                        }
-                                    }
+                                    Ok(result) => action_from_python(result, vm, ips, &transport, len),
                                     Err(err) => {
                                         error!("Error calling processing function: {:?}", err);
                                         vm.print_exception(err);

@@ -520,6 +520,17 @@ impl Censor {
                                 msg.set_verdict(Verdict::Drop);
                                 queue.verdict(msg).map_err(NfqModeError::Nfq)?;
                             }
+                            Action::Rewrite(rewrite) => {
+                                // Forward a mutated copy of the packet
+                                let mut payload = msg.get_payload().to_vec();
+                                if rewrite.apply_ip(&mut payload) {
+                                    msg.set_payload(payload);
+                                } else {
+                                    warn!("Rewrite action on unparseable packet: forwarding unchanged");
+                                }
+                                msg.set_verdict(Verdict::Accept);
+                                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+                            }
                         };
                     }
                     Err(err) => match err.kind() {

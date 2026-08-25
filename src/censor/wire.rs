@@ -229,6 +229,30 @@ impl Censor {
                             warn!("Delay action in wire mode: dropping packet (delay not supported)");
                             Ok(ForwardFramesResult::Success)
                         }
+                        Action::Rewrite(rewrite) => {
+                            // Forward a mutated copy of the frame
+                            if let Some(dest_tx) =
+                                dest_interface.transmit(SmoltcpInstant::from_micros_const(0))
+                            {
+                                let send_result = dest_tx.consume(source_len, |dest_tx_buf| {
+                                    dest_tx_buf.copy_from_slice(source_rx_buf);
+                                    if !rewrite.apply_ethernet(dest_tx_buf) {
+                                        warn!("Rewrite action on unparseable frame: forwarding unchanged");
+                                    }
+                                    Ok(())
+                                });
+                                match send_result {
+                                    Ok(()) => Ok(ForwardFramesResult::Success),
+                                    Err(SmoltcpError) => {
+                                        retry[..source_rx_buf.len()].copy_from_slice(source_rx_buf);
+                                        Ok(ForwardFramesResult::TxFull(source_rx_buf.len()))
+                                    }
+                                    Err(err) => Err(err),
+                                }
+                            } else {
+                                Err(SmoltcpError)
+                            }
+                        }
                     }
                 });
                 match fwd_result {

@@ -430,18 +430,23 @@ impl Censor {
         };
         // Handle the delayer if relevant
         match action? {
-            Action::Delay(instant) => {
-                if let Context::Nfq(nfq::Context { delayer, .. }) = censor_ctx {
+            Action::Delay(instant) => match censor_ctx {
+                Context::Nfq(nfq::Context { delayer, .. }) => {
                     delayer
                         .delay_packet(payload.as_ref().to_vec(), instant)
                         .unwrap();
                     // We consider the packet "dropped" here
                     Ok(Action::Drop)
-                } else {
-                    // If we couldnt delay the packet, just pass it
+                }
+                // PCAP mode only reports decisions, so report the delay itself
+                Context::Pcap(_) => Ok(Action::Delay(instant)),
+                // Wire mode has no delay queue: pass the packet through unchanged
+                #[cfg(feature = "wire")]
+                Context::Wire(_) => {
+                    warn!("Delay action is only supported in NFQ mode: forwarding packet");
                     Ok(Action::None)
                 }
-            }
+            },
             // Return any other actions
             action => Ok(action),
         }
@@ -948,6 +953,65 @@ pub enum Action {
     Drop,
     /// Delay the packet until the given time
     Delay(Instant),
+    /// Forward a mutated copy of the packet (normalization, e.g. TSPU-style TTL
+    /// rewriting).  The mutation is structured and applied by the engine, which
+    /// recomputes checksums; censor programs never hand back raw packet bytes.
+    Rewrite(Rewrite),
+}
+
+/// A structured packet mutation applied by the [`Action::Rewrite`] action.
+///
+/// Only named, bounded fields are supported so that the rewritten packet is
+/// correct by construction: the engine re-validates the header it edits and
+/// fixes the IPv4 header checksum itself.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd)]
+pub struct Rewrite {
+    /// New IPv4 TTL / IPv6 hop limit.
+    pub ttl: Option<u8>,
+}
+
+impl Rewrite {
+    /// Apply the mutation in place to an IP packet (no link-layer header).
+    /// Returns `false` (leaving the buffer untouched) if the packet is not a
+    /// well-formed IPv4/IPv6 header.
+    pub fn apply_ip(&self, packet: &mut [u8]) -> bool {
+        match packet.first().map(|b| b >> 4) {
+            Some(4) => {
+                let mut ip = match Ipv4Packet::new_checked(packet) {
+                    Ok(ip) => ip,
+                    Err(_) => return false,
+                };
+                if let Some(ttl) = self.ttl {
+                    ip.set_hop_limit(ttl);
+                }
+                ip.fill_checksum();
+                true
+            }
+            Some(6) => {
+                let mut ip = match Ipv6Packet::new_checked(packet) {
+                    Ok(ip) => ip,
+                    Err(_) => return false,
+                };
+                if let Some(ttl) = self.ttl {
+                    ip.set_hop_limit(ttl);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Apply the mutation in place to an Ethernet frame carrying IPv4/IPv6.
+    pub fn apply_ethernet(&self, frame: &mut [u8]) -> bool {
+        let mut eth = match EthernetFrame::new_checked(frame) {
+            Ok(eth) => eth,
+            Err(_) => return false,
+        };
+        match eth.ethertype() {
+            EtherType::Ipv4 | EtherType::Ipv6 => self.apply_ip(eth.payload_mut()),
+            _ => false,
+        }
+    }
 }
 
 impl Ord for Action {
@@ -1107,6 +1171,7 @@ impl fmt::Display for Action {
             }
             Action::Inject { .. } => "inject a forged UDP response packet",
             Action::Delay(_instant) => "delay the packet",
+            Action::Rewrite(_) => "forward a rewritten copy of the packet",
         })
     }
 }
@@ -1341,5 +1406,59 @@ mod tests {
         assert_eq!(abl.recommend(&443), None);
         // Port 22 is not in allowlist and not in blocklist => Ignore (allowlist action)
         assert_eq!(abl.recommend(&22), Some(Action::Ignore));
+    }
+}
+
+#[cfg(test)]
+mod rewrite_tests {
+    use super::*;
+
+    /// Minimal IPv4/TCP packet (20-byte header, no payload) with a valid checksum.
+    fn ipv4_packet(ttl: u8) -> Vec<u8> {
+        let mut buf = vec![0u8; 40];
+        buf[0] = 0x45;
+        buf[3] = 40;
+        buf[8] = ttl;
+        buf[9] = 6;
+        buf[12..16].copy_from_slice(&[10, 0, 0, 1]);
+        buf[16..20].copy_from_slice(&[10, 0, 0, 2]);
+        let mut ip = Ipv4Packet::new_unchecked(&mut buf[..]);
+        ip.fill_checksum();
+        buf
+    }
+
+    #[test]
+    fn rewrite_sets_ipv4_ttl_and_fixes_checksum() {
+        let mut pkt = ipv4_packet(3);
+        assert!(Rewrite { ttl: Some(64) }.apply_ip(&mut pkt));
+        let ip = Ipv4Packet::new_checked(&pkt[..]).unwrap();
+        assert_eq!(ip.hop_limit(), 64);
+        assert!(ip.verify_checksum(), "header checksum must be recomputed");
+    }
+
+    #[test]
+    fn rewrite_sets_ipv6_hop_limit() {
+        let mut pkt = vec![0u8; 40];
+        pkt[0] = 0x60;
+        pkt[7] = 2;
+        assert!(Rewrite { ttl: Some(64) }.apply_ip(&mut pkt));
+        assert_eq!(Ipv6Packet::new_checked(&pkt[..]).unwrap().hop_limit(), 64);
+    }
+
+    #[test]
+    fn rewrite_rejects_garbage() {
+        let mut pkt = vec![0xffu8; 3];
+        let before = pkt.clone();
+        assert!(!Rewrite { ttl: Some(64) }.apply_ip(&mut pkt));
+        assert_eq!(pkt, before);
+    }
+
+    #[test]
+    fn rewrite_applies_through_ethernet() {
+        let mut frame = vec![0u8; 14];
+        frame[12] = 0x08; // IPv4
+        frame.extend(ipv4_packet(1));
+        assert!(Rewrite { ttl: Some(64) }.apply_ethernet(&mut frame));
+        assert_eq!(Ipv4Packet::new_checked(&frame[14..]).unwrap().hop_limit(), 64);
     }
 }
