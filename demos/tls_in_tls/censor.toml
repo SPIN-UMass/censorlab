@@ -1,0 +1,4 @@
+# TLS-in-TLS (tunnelled TLS) detector.
+[execution]
+mode = "Python"
+script = "tls_in_tls.py"

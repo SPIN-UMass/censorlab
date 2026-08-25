@@ -1,0 +1,5 @@
+# TSPU-style TTL normalization + SNI filtering.
+# Demonstrates the Rewrite action (structured packet mutation).
+[execution]
+mode = "Python"
+script = "tspu_ttl.py"

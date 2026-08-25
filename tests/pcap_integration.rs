@@ -1298,3 +1298,128 @@ script = "censor.py"
         rewritten.action
     );
 }
+
+// ==========================================================================
+// Corpus programs added for the revision: TSPU TTL normalization, TLS-in-TLS
+// ==========================================================================
+
+/// A TLS application-data record (type 0x17) with `len` bytes of opaque body.
+fn tls_app_record(len: usize) -> Vec<u8> {
+    let mut r = vec![0x17, 0x03, 0x03, (len >> 8) as u8, len as u8];
+    r.extend(std::iter::repeat(0xAA).take(len));
+    r
+}
+
+#[test]
+fn test_demo_tspu_ttl_normalization() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+
+    // Handshake (TTL 64 baseline), then a low-TTL fake ClientHello with a decoy
+    // SNI, then the real ClientHello for a forbidden domain.
+    let mut fake = tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 101, 201,
+                             &tls_client_hello_record("www.example.com"));
+    common::packet_builder::set_ipv4_ttl(&mut fake, 3);
+    let frames = [
+        tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]),
+        tcp_frame(server, client, 443, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]),
+        tcp_frame(client, server, 50000, 443, TCP_ACK, 101, 201, &[]),
+        fake,
+        tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 101, 201,
+                  &tls_client_hello_record("www.example.org")),
+    ];
+    let mut b = PcapBuilder::new();
+    for f in &frames {
+        b = b.add_frame(f);
+    }
+    b.write_to(&pcap_path);
+
+    let result = run_pcap_with_config(&demo_config("tspu_ttl_normalization"), &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let act = |n: usize| result.action_lines.iter().find(|l| l.packet_index == frame_idx(n)).map(|l| l.action.clone());
+    assert!(act(3).map_or(false, |a| a.contains("Rewrite") && a.contains("ttl: Some(64)")),
+            "fake segment should be TTL-normalized: {:?}\n{}", result.action_lines, result.stdout);
+    assert!(act(4).map_or(false, |a| a.contains("Reset")),
+            "real forbidden ClientHello should be reset: {:?}", result.action_lines);
+    assert!(act(0).is_none() && act(1).is_none() && act(2).is_none(), "handshake must pass");
+}
+
+#[test]
+fn test_demo_tls_in_tls() {
+    let tmp = TempDir::new().unwrap();
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+
+    // Outer connection carrying an inner TLS handshake: 350 B client record
+    // (inner ClientHello), 1400 + 900 B server records (inner ServerHello +
+    // Certificate), 74 B client record (inner Finished).
+    let tunnel = [
+        tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]),
+        tcp_frame(server, client, 443, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]),
+        tcp_frame(client, server, 50000, 443, TCP_ACK, 101, 201, &[]),
+        tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 101, 201, &tls_client_hello_record("cdn.example.net")),
+        tcp_frame(server, client, 443, 50000, TCP_PSH_ACK, 201, 400, &tls_app_record(2000)),
+        tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 400, 2206, &tls_app_record(60)),   // outer Finished (1.3)
+        tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 465, 2206, &tls_app_record(350)),  // inner ClientHello
+        tcp_frame(server, client, 443, 50000, TCP_PSH_ACK, 2206, 820, &tls_app_record(1400)), // inner ServerHello+Cert
+        tcp_frame(server, client, 443, 50000, TCP_PSH_ACK, 3611, 820, &tls_app_record(900)),
+        tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 820, 4516, &tls_app_record(74)),   // inner Finished
+    ];
+    // Plain HTTPS: same outer handshake, then request/response/request.
+    let https = [
+        tcp_frame(client, server, 50001, 443, TCP_SYN, 100, 0, &[]),
+        tcp_frame(server, client, 443, 50001, TCP_SYN | TCP_ACK, 200, 101, &[]),
+        tcp_frame(client, server, 50001, 443, TCP_ACK, 101, 201, &[]),
+        tcp_frame(client, server, 50001, 443, TCP_PSH_ACK, 101, 201, &tls_client_hello_record("www.example.net")),
+        tcp_frame(server, client, 443, 50001, TCP_PSH_ACK, 201, 400, &tls_app_record(2000)),
+        tcp_frame(client, server, 50001, 443, TCP_PSH_ACK, 400, 2206, &tls_app_record(60)),
+        tcp_frame(client, server, 50001, 443, TCP_PSH_ACK, 465, 2206, &tls_app_record(350)),  // GET
+        tcp_frame(server, client, 443, 50001, TCP_PSH_ACK, 2206, 820, &tls_app_record(1400)), // response
+        tcp_frame(server, client, 443, 50001, TCP_PSH_ACK, 3611, 820, &tls_app_record(900)),
+        tcp_frame(client, server, 50001, 443, TCP_PSH_ACK, 820, 4516, &tls_app_record(310)),  // next GET
+    ];
+
+    let pcap_path = tmp.path().join("test.pcap");
+    let mut b = PcapBuilder::new();
+    for f in tunnel.iter().chain(https.iter()) {
+        b = b.add_frame(f);
+    }
+    b.write_to(&pcap_path);
+
+    let result = run_pcap_with_config(&demo_config("tls_in_tls"), &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let resets: Vec<usize> = result.action_lines.iter()
+        .filter(|l| l.action.contains("Reset")).map(|l| l.packet_index).collect();
+    assert_eq!(resets, vec![frame_idx(9)],
+               "only the tunnel's inner Finished should trigger a reset: {:?}\n{}", result.action_lines, result.stdout);
+}
+
+#[test]
+fn test_demo_throttling_delays_matching_connection() {
+    let tmp = TempDir::new().unwrap();
+    let client = [10, 0, 0, 1];
+    let server = [104, 244, 42, 1];
+    let frames = [
+        tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]),
+        tcp_frame(server, client, 443, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]),
+        tcp_frame(client, server, 50000, 443, TCP_ACK, 101, 201, &[]),
+        tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 101, 201, &tls_client_hello_record("abs.twimg.com")),
+        tcp_frame(server, client, 443, 50000, TCP_PSH_ACK, 201, 400, &tls_app_record(1200)),
+        tcp_frame(client, server, 50000, 443, TCP_ACK, 400, 1406, &[]),
+    ];
+    let pcap_path = tmp.path().join("test.pcap");
+    let mut b = PcapBuilder::new();
+    for f in &frames {
+        b = b.add_frame(f);
+    }
+    b.write_to(&pcap_path);
+
+    let result = run_pcap_with_config(&demo_config("throttling"), &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let delayed: Vec<usize> = result.action_lines.iter()
+        .filter(|l| l.action.contains("Delay")).map(|l| l.packet_index).collect();
+    assert_eq!(delayed, vec![frame_idx(3), frame_idx(4), frame_idx(5)],
+               "ClientHello and every later packet must be delayed: {:?}", result.action_lines);
+}
