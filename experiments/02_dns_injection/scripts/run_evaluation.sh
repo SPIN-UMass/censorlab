@@ -13,7 +13,7 @@
 #   sudo bash experiments/02_dns_injection/scripts/run_evaluation.sh
 #
 # This script is designed to run inside the Docker Compose environment
-# (experiments/docker-compose.yml) or on a configured host.
+# (see experiments/10_nfq_end_to_end/docker-compose.yml) or on a configured host.
 
 set -euo pipefail
 

@@ -2,6 +2,7 @@
   "table": "table3",
   "experiment": "02_dns_injection",
   "pcap": "pcap/test.pcap",
+  "packets": 100,
   "flows": 100,
   "labels": 100,
   "rows": [
@@ -15,6 +16,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": ""
     },
     {
@@ -27,6 +30,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "drop-only (no injection)"
     },
     {
@@ -39,6 +44,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "detection-only (passive)"
     },
     {
@@ -51,6 +58,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": ""
     },
     {
@@ -63,6 +72,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "dns.query buffer; drop-only (no injection)"
     },
     {
@@ -75,6 +86,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "regex on DNS wire format; drop-only (no injection)"
     },
     {
@@ -87,6 +100,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "dns analyzer; drop-only (no injection)"
     }
   ]

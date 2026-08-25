@@ -3498,4 +3498,4 @@
 9979: Ok(Drop)
 9980: Ok(Drop)
 9981: Ok(Drop)
-Pcap mode took 42715us to process the file (42776us including I/O)
+Pcap mode took 42191us to process the file (42249us including I/O)

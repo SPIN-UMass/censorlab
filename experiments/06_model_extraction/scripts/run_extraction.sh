@@ -22,7 +22,7 @@
 #   sudo bash experiments/06_model_extraction/scripts/run_extraction.sh
 #
 # This script is designed to run inside the Docker Compose environment
-# (experiments/docker-compose.yml) or on a configured host.
+# (see experiments/10_nfq_end_to_end/docker-compose.yml) or on a configured host.
 
 set -euo pipefail
 
