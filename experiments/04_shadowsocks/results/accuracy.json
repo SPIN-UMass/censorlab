@@ -1,0 +1,57 @@
+{
+  "table": "table3",
+  "experiment": "04_shadowsocks",
+  "pcap": "pcap/test.pcap",
+  "flows": 1000,
+  "labels": 1000,
+  "rows": [
+    {
+      "tool": "PyCL",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "note": ""
+    },
+    {
+      "tool": "CensorLang",
+      "tpr": 0.0,
+      "tnr": 1.0,
+      "tp": 0,
+      "fn": 500,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "note": ""
+    },
+    {
+      "tool": "Zeek",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "note": "fingerprint-only (passive, no entropy/popcount)"
+    },
+    {
+      "tool": "Scapy",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "note": ""
+    }
+  ]
+}

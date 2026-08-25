@@ -1,5 +1,5 @@
-tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
-PyCL,11408,11028,1236.6,9646,12030,3,24,
-CensorLang,3255,3115.7,341.1,2727,3365,3,5,regex on raw payload (no TLS parsing)
-Zeek,607405,575099.3,62987.1,502514,615379,3,56,detection-only (passive)
-Scapy,3702,3801.7,176.1,3698,4005,3,136,
+tool,median_us,mean_us,stdev_us,min_us,max_us,wall_median_us,wall_mean_us,wall_stdev_us,wall_min_us,wall_max_us,startup_us,net_us,cpu_us,max_rss_kb,n,failed_runs,loc,status,note
+PyCL,150202,151724,3789.0,147653,157129,205777,205615.8,3886.1,200732,210852,54723,151054,220000,27876,5,0,24,measured,
+CensorLang,60206,60301.6,1314.6,58955,62104,121452,121591,960.8,120577,122799,60580,60872,130000,22860,5,0,5,measured,regex on raw payload (no TLS parsing)
+Zeek,674155,671994.6,12747.0,650956,684814,674155,671994.6,12747.0,650956,684814,506264,167891,700000,132916,5,0,56,measured,detection-only (passive)
+Scapy,139535,140270.6,2844.0,137722,144208,4131693,4174665.2,96664.2,4060256,4287762,988960,3142733,4070000,119372,5,0,136,measured,

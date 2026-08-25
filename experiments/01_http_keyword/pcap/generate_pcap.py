@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate a test PCAP with HTTP GET requests for keyword filtering evaluation.
 
-Creates N forbidden-keyword packets and N allowed-keyword packets as individual
-TCP segments (Ethernet/IP/TCP with HTTP payload).  Writes a labels.csv mapping
-packet indices to ground truth for later accuracy analysis.
+Creates N forbidden-keyword and N allowed-keyword HTTP connections, each a complete
+TCP flow (handshake, GET, 200 response, teardown) so that stateful tools attach
+their HTTP analyzers.  Writes a labels.csv mapping flow indices to ground truth.
 
 Usage:
     python3 generate_pcap.py [--n 500] [--output test.pcap]
@@ -15,7 +15,8 @@ import os
 import random
 import sys
 
-from scapy.all import Ether, IP, TCP, Raw, wrpcap
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "common"))
+from pcapgen import tcp_flow, write_dataset  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -42,11 +43,23 @@ def make_http_get(keyword, host="example.com"):
     ).encode()
 
 
+def make_http_response(body=b"<html><body>ok</body></html>\n"):
+    """Minimal HTTP/1.1 200 response."""
+    return (
+        f"HTTP/1.1 200 OK\r\n"
+        f"Server: censorlab-test/1.0\r\n"
+        f"Content-Type: text/html\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        f"Connection: close\r\n"
+        f"\r\n"
+    ).encode() + body
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate HTTP keyword test PCAP")
     parser.add_argument(
         "--n", type=int, default=500,
-        help="Number of packets per class (default: 500)",
+        help="Number of flows per class (default: 500)",
     )
     parser.add_argument(
         "--output", type=str, default=None,
@@ -79,61 +92,28 @@ def main():
         print("ERROR: No allowed keywords found", file=sys.stderr)
         sys.exit(1)
 
-    packets = []
-    labels = []
-
     client_ip = "10.0.0.1"
     server_ip = "10.0.0.2"
     base_sport = 10000
 
-    # Generate forbidden-keyword packets
-    for i in range(args.n):
-        kw = random.choice(forbidden_kw)
-        sport = base_sport + i
-        pkt = (
-            Ether(src="aa:bb:cc:dd:ee:01", dst="aa:bb:cc:dd:ee:02")
-            / IP(src=client_ip, dst=server_ip)
-            / TCP(sport=sport, dport=80, flags="PA", seq=1000, ack=1)
-            / Raw(load=make_http_get(kw))
-        )
-        packets.append(pkt)
-        labels.append({"index": len(packets) - 1, "keyword": kw, "class": "forbidden"})
+    # One complete HTTP/1.1 connection per label (handshake, GET, 200 OK,
+    # teardown).  Forbidden and allowed flows are interleaved.
+    specs = [(random.choice(forbidden_kw), "forbidden") for _ in range(args.n)] + \
+            [(random.choice(allowed_kw), "allowed") for _ in range(args.n)]
+    random.shuffle(specs)
 
-    # Generate allowed-keyword packets
-    for i in range(args.n):
-        kw = random.choice(allowed_kw)
-        sport = base_sport + args.n + i
-        pkt = (
-            Ether(src="aa:bb:cc:dd:ee:01", dst="aa:bb:cc:dd:ee:02")
-            / IP(src=client_ip, dst=server_ip)
-            / TCP(sport=sport, dport=80, flags="PA", seq=1000, ack=1)
-            / Raw(load=make_http_get(kw))
-        )
-        packets.append(pkt)
-        labels.append({"index": len(packets) - 1, "keyword": kw, "class": "allowed"})
+    flows = []
+    labels = []
+    for i, (kw, cls) in enumerate(specs):
+        flows.append(tcp_flow(
+            client_ip, server_ip, base_sport + i, 80,
+            client_data=make_http_get(kw),
+            server_data=make_http_response(),
+        ))
+        labels.append({"keyword": kw, "class": cls})
 
-    # Shuffle to interleave forbidden/allowed
-    combined = list(zip(packets, labels))
-    random.shuffle(combined)
-    packets, labels = zip(*combined)
-    packets = list(packets)
-    labels = list(labels)
-
-    # Re-index after shuffle
-    for i, lbl in enumerate(labels):
-        lbl["index"] = i
-
-    # Write PCAP
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    wrpcap(args.output, packets)
-    print(f"Wrote {len(packets)} packets to {args.output}")
-
-    # Write labels CSV
-    os.makedirs(os.path.dirname(args.labels), exist_ok=True)
-    with open(args.labels, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["index", "keyword", "class"])
-        writer.writeheader()
-        writer.writerows(labels)
+    n_pkts = write_dataset(flows, labels, args.output, args.labels, ["index", "keyword", "class"])
+    print(f"Wrote {n_pkts} packets ({len(flows)} flows) to {args.output}")
     print(f"Wrote labels to {args.labels}")
 
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate a test PCAP with TLS ClientHello packets for SNI filtering evaluation.
 
-Creates N forbidden-domain ClientHello packets and N allowed-domain ClientHello
-packets as individual TCP segments (Ethernet/IP/TCP with TLS ClientHello payload
-containing the SNI extension).  Writes a labels.csv mapping packet indices to
-ground truth for later accuracy analysis.
+Creates N forbidden-domain and N allowed-domain TLS connections, each a complete
+TCP flow (handshake, ClientHello with SNI, ServerHello, teardown) so that
+stateful tools attach their TLS analyzers.  Writes a labels.csv mapping flow
+indices (order of appearance) to ground truth for accuracy analysis.
 
 Usage:
     python3 generate_pcap.py [--n 500] [--output test.pcap]
@@ -17,7 +17,8 @@ import random
 import struct
 import sys
 
-from scapy.all import Ether, IP, TCP, Raw, wrpcap
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "common"))
+from pcapgen import tcp_flow, write_dataset  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -80,11 +81,24 @@ def build_tls_client_hello(sni):
     return record
 
 
+def build_tls_server_hello():
+    """Minimal valid TLS 1.2 ServerHello record (no extensions)."""
+    body = (
+        struct.pack("!H", 0x0303)      # server_version
+        + os.urandom(32)               # random
+        + struct.pack("!B", 0)         # session_id length
+        + struct.pack("!H", 0x1301)    # cipher suite
+        + struct.pack("!B", 0)         # compression
+    )
+    handshake = struct.pack("!B", 2) + struct.pack("!I", len(body))[1:] + body
+    return struct.pack("!BHH", 22, 0x0303, len(handshake)) + handshake
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate TLS SNI test PCAP")
     parser.add_argument(
         "--n", type=int, default=500,
-        help="Number of packets per class (default: 500)",
+        help="Number of flows per class (default: 500)",
     )
     parser.add_argument(
         "--output", type=str, default=None,
@@ -117,61 +131,28 @@ def main():
         print("ERROR: No allowed domains found", file=sys.stderr)
         sys.exit(1)
 
-    packets = []
-    labels = []
-
     client_ip = "10.0.0.1"
     server_ip = "10.0.0.2"
     base_sport = 10000
 
-    # Generate forbidden-domain TLS ClientHello packets
-    for i in range(args.n):
-        domain = random.choice(forbidden)
-        sport = base_sport + i
-        pkt = (
-            Ether(src="aa:bb:cc:dd:ee:01", dst="aa:bb:cc:dd:ee:02")
-            / IP(src=client_ip, dst=server_ip)
-            / TCP(sport=sport, dport=443, flags="PA", seq=1000, ack=1000)
-            / Raw(load=build_tls_client_hello(domain))
-        )
-        packets.append(pkt)
-        labels.append({"index": len(packets) - 1, "domain": domain, "class": "forbidden"})
+    # One complete TLS connection per label: handshake, ClientHello,
+    # ServerHello, teardown.  Forbidden and allowed flows are interleaved.
+    specs = [(random.choice(forbidden), "forbidden") for _ in range(args.n)] + \
+            [(random.choice(allowed), "allowed") for _ in range(args.n)]
+    random.shuffle(specs)
 
-    # Generate allowed-domain TLS ClientHello packets
-    for i in range(args.n):
-        domain = random.choice(allowed)
-        sport = base_sport + args.n + i
-        pkt = (
-            Ether(src="aa:bb:cc:dd:ee:01", dst="aa:bb:cc:dd:ee:02")
-            / IP(src=client_ip, dst=server_ip)
-            / TCP(sport=sport, dport=443, flags="PA", seq=1000, ack=1000)
-            / Raw(load=build_tls_client_hello(domain))
-        )
-        packets.append(pkt)
-        labels.append({"index": len(packets) - 1, "domain": domain, "class": "allowed"})
+    flows = []
+    labels = []
+    for i, (domain, cls) in enumerate(specs):
+        flows.append(tcp_flow(
+            client_ip, server_ip, base_sport + i, 443,
+            client_data=build_tls_client_hello(domain),
+            server_data=build_tls_server_hello(),
+        ))
+        labels.append({"domain": domain, "class": cls})
 
-    # Shuffle to interleave forbidden/allowed
-    combined = list(zip(packets, labels))
-    random.shuffle(combined)
-    packets, labels = zip(*combined)
-    packets = list(packets)
-    labels = list(labels)
-
-    # Re-index after shuffle
-    for i, lbl in enumerate(labels):
-        lbl["index"] = i
-
-    # Write PCAP
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    wrpcap(args.output, packets)
-    print(f"Wrote {len(packets)} packets to {args.output}")
-
-    # Write labels CSV
-    os.makedirs(os.path.dirname(args.labels), exist_ok=True)
-    with open(args.labels, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["index", "domain", "class"])
-        writer.writeheader()
-        writer.writerows(labels)
+    n_pkts = write_dataset(flows, labels, args.output, args.labels, ["index", "domain", "class"])
+    print(f"Wrote {n_pkts} packets ({len(flows)} flows) to {args.output}")
     print(f"Wrote labels to {args.labels}")
 
 

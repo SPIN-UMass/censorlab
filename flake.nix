@@ -71,6 +71,8 @@
                 skl2onnx
               ]))
               pkgs.zeek
+              pkgs.suricata
+              pkgs.snort
               pkgs.tcpdump
               pkgs.curl
               pkgs.dnsutils

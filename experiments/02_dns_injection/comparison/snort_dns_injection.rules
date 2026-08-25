@@ -1,0 +1,5 @@
+# Snort 3 rule for forbidden DNS queries (Scenario 02).
+# Snort 3 has no normalized DNS query buffer; names are matched in DNS wire
+# format (length-prefixed labels).  Snort cannot forge DNS responses; `drop`
+# discards the query inline.  In PCAP (-r) mode it is logged as an alert.
+drop udp any any -> any 53 (msg:"CensorLab exp02 forbidden DNS query"; pcre:"/(\x06google\x03com|\x08facebook\x03com|\x07twitter\x03com|\x07youtube\x03com|\x09wikipedia\x03org|\x09instagram\x03com|\x08whatsapp\x03com|\x08telegram\x03org|\x06signal\x03org|\x06reddit\x03com|\x07nytimes\x03com|\x03bbc\x03com|\x07reuters\x03com|\x0btheguardian\x03com|\x0ewashingtonpost\x03com|\x07amnesty\x03org|\x03hrw\x03org|\x03rsf\x03org|\x0atorproject\x03org|\x03eff\x03org|\x07vpngate\x03net|\x07psiphon\x02ca|\x0alanternvpn\x03org|\x09protonvpn\x03com|\x07mullvad\x03net|\x06github\x03com|\x06medium\x03com|\x08blogspot\x03com|\x09wordpress\x03com|\x06tumblr\x03com|\x07dropbox\x03com|\x0asoundcloud\x03com|\x05vimeo\x03com|\x06twitch\x02tv|\x07discord\x03com)/i"; sid:2000001; rev:1;)

@@ -1,4 +1,4 @@
-tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
-PyCL,93347,93718.3,2319.4,91607,96201,3,21,ONNX model classification
-CensorLang,64747,67816,7103.5,62763,75938,3,6,entropy heuristic (no ML support)
-Scapy,116783,106441.7,18166.9,85465,117077,3,106,ONNX model classification
+tool,median_us,mean_us,stdev_us,min_us,max_us,wall_median_us,wall_mean_us,wall_stdev_us,wall_min_us,wall_max_us,startup_us,net_us,cpu_us,max_rss_kb,n,failed_runs,loc,status,note
+PyCL,90677,91387.2,2140.0,88792,94333,146409,146956.2,3784.8,142955,153182,55715,90694,150000,30552,5,0,21,measured,ONNX model classification
+CensorLang,61945,61923.6,1085.4,60570,63206,140890,141138,954.0,140099,142696,76838,64052,150000,29316,5,0,24,measured,ONNX model classification
+Scapy,85332,94073.8,21253.2,75045,119184,1766535,1763263,51882.4,1695845,1837595,1200138,566397,9320000,121500,5,0,106,measured,ONNX model classification (onnxruntime)

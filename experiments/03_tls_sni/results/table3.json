@@ -1,18 +1,57 @@
 {
   "table": "table3",
   "experiment": "03_tls_sni",
+  "pcap": "pcap/test.pcap",
+  "flows": 1000,
+  "labels": 1000,
   "rows": [
     {
       "tool": "PyCL",
       "tpr": 1.0,
       "tnr": 1.0,
-      "tp": 50,
+      "tp": 500,
       "fn": 0,
       "fp": 0,
-      "tn": 50,
+      "tn": 500,
       "errors": 0,
-      "total": 100,
-      "note": "TLS SNI filtering"
+      "total": 1000,
+      "note": ""
+    },
+    {
+      "tool": "CensorLang",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "note": "regex on raw payload (no TLS parsing)"
+    },
+    {
+      "tool": "Zeek",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "note": "detection-only (passive)"
+    },
+    {
+      "tool": "Scapy",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "note": ""
     }
   ]
 }

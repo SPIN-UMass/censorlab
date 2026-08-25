@@ -1,5 +1,5 @@
-tool,median_us,mean_us,stdev_us,min_us,max_us,n,loc,note
-PyCL,8859,8162.3,1382.6,6570,9058,3,46,
-CensorLang,1685,1680,10.4,1668,1687,3,17,
-Zeek,523718,526839.3,19098.3,509494,547306,3,92,"fingerprint-only (passive, no entropy/popcount)"
-Scapy,11746,11753,57.8,11699,11814,3,112,
+tool,median_us,mean_us,stdev_us,min_us,max_us,wall_median_us,wall_mean_us,wall_stdev_us,wall_min_us,wall_max_us,startup_us,net_us,cpu_us,max_rss_kb,n,failed_runs,loc,status,note
+PyCL,114125,114910.2,3485.8,111171,120608,167493,168812.8,4462.9,164808,176301,53595,113898,180000,30576,5,0,46,measured,
+CensorLang,33412,33088.4,688.5,31971,33686,104654,104461.4,2264.9,101675,106697,71814,32840,120000,22400,5,0,18,measured,
+Zeek,719274,715661.4,19883.8,684435,739371,719274,715661.4,19883.8,684435,739371,503954,215320,750000,134588,5,0,92,measured,"fingerprint-only (passive, no entropy/popcount)"
+Scapy,311613,313482.2,4506.3,310013,321069,4327212,4331362.6,80399.6,4223634,4446233,992527,3334685,4270000,121316,5,0,112,measured,

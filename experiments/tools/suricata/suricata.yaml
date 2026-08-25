@@ -1,0 +1,138 @@
+%YAML 1.1
+---
+# Minimal Suricata configuration for offline PCAP evaluation (experiments/).
+#
+# Only what the scenarios need: TLS, DNS and HTTP app-layer parsers, and an
+# EVE JSON alert log (eve.json in the -l directory).  Rules are passed with -S.
+# Stats, flow logs and all capture methods are disabled so that wall-clock and
+# memory measurements reflect detection work only.
+
+vars:
+  address-groups:
+    HOME_NET: "any"
+    EXTERNAL_NET: "any"
+  port-groups:
+    HTTP_PORTS: "80"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+    DNP3_PORTS: 20000
+    MODBUS_PORTS: 502
+    FILE_DATA_PORTS: "[$HTTP_PORTS,110,143]"
+    FTP_PORTS: 21
+    GENEVE_PORTS: 6081
+    VXLAN_PORTS: 4789
+    TEREDO_PORTS: 3544
+
+default-log-dir: .
+
+stats:
+  enabled: no
+
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      pcap-file: false
+      community-id: false
+      types:
+        - alert:
+            tagged-packets: no
+            metadata: no
+
+logging:
+  default-log-level: notice
+  outputs:
+    - console:
+        enabled: yes
+
+app-layer:
+  protocols:
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+    dns:
+      tcp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+      udp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+    http:
+      enabled: yes
+    ssh:
+      enabled: yes
+    smtp:
+      enabled: no
+    ftp:
+      enabled: no
+    smb:
+      enabled: no
+    nfs:
+      enabled: no
+    dcerpc:
+      enabled: no
+    krb5:
+      enabled: no
+    snmp:
+      enabled: no
+    ike:
+      enabled: no
+    ntp:
+      enabled: no
+    modbus:
+      enabled: no
+    dnp3:
+      enabled: no
+    enip:
+      enabled: no
+    tftp:
+      enabled: no
+    rdp:
+      enabled: no
+    sip:
+      enabled: no
+    mqtt:
+      enabled: no
+    rfb:
+      enabled: no
+    pgsql:
+      enabled: no
+    bittorrent-dht:
+      enabled: no
+    quic:
+      enabled: no
+    http2:
+      enabled: no
+
+stream:
+  memcap: 64mb
+  checksum-validation: no
+  inline: no
+  reassembly:
+    memcap: 256mb
+    depth: 1mb
+
+flow:
+  memcap: 128mb
+
+detect:
+  profile: medium
+  sgh-mpm-context: auto
+
+mpm-algo: auto
+spm-algo: auto
+
+threading:
+  set-cpu-affinity: no
+  detect-thread-ratio: 1.0
+
+default-rule-path: .
+rule-files: []
+
+classification-file: classification.config
+reference-config-file: reference.config

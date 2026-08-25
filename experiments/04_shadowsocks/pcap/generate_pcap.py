@@ -17,7 +17,10 @@ import os
 import random
 import sys
 
-from scapy.all import Ether, IP, TCP, Raw, wrpcap
+import struct
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "common"))
+from pcapgen import tcp_flow, write_dataset  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -148,11 +151,25 @@ def make_ssh_banner():
     return b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
 
 
+def make_server_reply(traffic_type):
+    """A plausible first server segment for each traffic type."""
+    if traffic_type == "shadowsocks":
+        return os.urandom(random.randint(64, 1200))
+    if traffic_type == "tls":
+        body = struct.pack("!H", 0x0303) + os.urandom(32) + b"\x00" + struct.pack("!H", 0x1301) + b"\x00"
+        hs = b"\x02" + struct.pack("!I", len(body))[1:] + body
+        return struct.pack("!BHH", 22, 0x0303, len(hs)) + hs
+    if traffic_type == "http":
+        body = b"<html><body>ok</body></html>\n"
+        return (f"HTTP/1.1 200 OK\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body
+    return b"SSH-2.0-OpenSSH_9.6\r\n"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate Shadowsocks detection test PCAP")
     parser.add_argument(
         "--n", type=int, default=500,
-        help="Number of packets per class (default: 500)",
+        help="Number of flows per class (default: 500)",
     )
     parser.add_argument(
         "--output", type=str, default=None,
@@ -179,9 +196,6 @@ def main():
         os.path.join(EXPERIMENT_DIR, "data", "exempt_lengths.txt")
     )
 
-    packets = []
-    labels = []
-
     client_ip = "10.0.0.1"
     server_ip = "10.0.0.2"
     base_sport = 10000
@@ -192,79 +206,35 @@ def main():
         "microsoft.com", "apple.com", "github.com", "stackoverflow.com",
     ]
 
-    # Generate shadowsocks-like packets (encrypted, should be blocked)
-    for i in range(args.n):
-        sport = base_sport + i
-        payload = make_shadowsocks_payload(exempt_lengths)
-        pkt = (
-            Ether(src="aa:bb:cc:dd:ee:01", dst="aa:bb:cc:dd:ee:02")
-            / IP(src=client_ip, dst=server_ip)
-            / TCP(sport=sport, dport=443, flags="PA", seq=1000, ack=1)
-            / Raw(load=payload)
-        )
-        packets.append(pkt)
-        labels.append({
-            "index": len(packets) - 1,
-            "type": "shadowsocks",
-            "class": "forbidden",
-        })
-
-    # Generate normal traffic packets (identifiable protocols, should be allowed)
-    for i in range(args.n):
-        sport = base_sport + args.n + i
-        # Mix of TLS, HTTP, and SSH payloads
+    # (first client payload, dport, type, class) per flow
+    specs = []
+    for _ in range(args.n):
+        specs.append((make_shadowsocks_payload(exempt_lengths), 443, "shadowsocks", "forbidden"))
+    for _ in range(args.n):
         r = random.random()
         if r < 0.6:
-            # TLS ClientHello (most common)
-            domain = random.choice(normal_domains)
-            payload = make_tls_client_hello(domain)
-            traffic_type = "tls"
+            specs.append((make_tls_client_hello(random.choice(normal_domains)), 443, "tls", "allowed"))
         elif r < 0.85:
-            # HTTP GET
-            domain = random.choice(normal_domains)
-            payload = make_http_get(host=domain)
-            traffic_type = "http"
+            specs.append((make_http_get(host=random.choice(normal_domains)), 80, "http", "allowed"))
         else:
-            # SSH banner
-            payload = make_ssh_banner()
-            traffic_type = "ssh"
+            specs.append((make_ssh_banner(), 22, "ssh", "allowed"))
+    random.shuffle(specs)
 
-        dport = 80 if traffic_type == "http" else (22 if traffic_type == "ssh" else 443)
-        pkt = (
-            Ether(src="aa:bb:cc:dd:ee:01", dst="aa:bb:cc:dd:ee:02")
-            / IP(src=client_ip, dst=server_ip)
-            / TCP(sport=sport, dport=dport, flags="PA", seq=1000, ack=1)
-            / Raw(load=payload)
-        )
-        packets.append(pkt)
-        labels.append({
-            "index": len(packets) - 1,
-            "type": traffic_type,
-            "class": "allowed",
-        })
+    # One complete TCP connection per label: handshake, first client data
+    # segment (the packet Wu et al.'s heuristics inspect), a server reply,
+    # and teardown.
+    flows = []
+    labels = []
+    for i, (payload, dport, traffic_type, cls) in enumerate(specs):
+        flows.append(tcp_flow(
+            client_ip, server_ip, base_sport + i, dport,
+            client_data=payload,
+            server_data=make_server_reply(traffic_type),
+        ))
+        labels.append({"type": traffic_type, "class": cls})
 
-    # Shuffle to interleave forbidden/allowed
-    combined = list(zip(packets, labels))
-    random.shuffle(combined)
-    packets, labels = zip(*combined)
-    packets = list(packets)
-    labels = list(labels)
-
-    # Re-index after shuffle
-    for i, lbl in enumerate(labels):
-        lbl["index"] = i
-
-    # Write PCAP
-    os.makedirs(os.path.dirname(args.output), exist_ok=True)
-    wrpcap(args.output, packets)
-    print(f"Wrote {len(packets)} packets to {args.output}")
-
-    # Write labels CSV
-    os.makedirs(os.path.dirname(args.labels), exist_ok=True)
-    with open(args.labels, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["index", "type", "class"])
-        writer.writeheader()
-        writer.writerows(labels)
+    n_pkts = write_dataset(flows, labels, args.output, args.labels, ["index", "type", "class"])
+    print(f"Wrote {n_pkts} packets ({len(flows)} flows) to {args.output}")
     print(f"Wrote labels to {args.labels}")
 
 

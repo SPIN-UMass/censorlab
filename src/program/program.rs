@@ -327,14 +327,16 @@ impl Program {
         model_io: &mut ModelIO,
         model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
     ) -> Result<Action, LineExecutionError> {
-        let mut action = Action::default();
+        // Evaluate lines in order; the first executed RETURN (of any action,
+        // including plain `allow`) ends processing of this packet.
         for line in &self.lines {
-            action = line.run(packet, registers, fields, field_default_on_error, &self.regexes, model_io, model_sender)?;
-            if action != Action::default() {
-                break;
+            if let Some(action) =
+                line.run(packet, registers, fields, field_default_on_error, &self.regexes, model_io, model_sender)?
+            {
+                return Ok(action);
             }
         }
-        Ok(action)
+        Ok(Action::default())
     }
 }
 impl FromStr for Program {
@@ -460,7 +462,7 @@ impl Line {
         regexes: &[BytesRegex],
         model_io: &mut ModelIO,
         model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
-    ) -> Result<Action, LineExecutionError> {
+    ) -> Result<Option<Action>, LineExecutionError> {
         // Only execute the line if the condition evaluates to true
         if self
             .condition
@@ -587,7 +589,7 @@ impl Line {
                     registers.set(out, &Value::Bool(matched))?;
                 }
                 Return(action) => {
-                    return Ok(*action);
+                    return Ok(Some(*action));
                 }
                 Noop => {}
                 Model { ref name } => {
@@ -626,9 +628,9 @@ impl Line {
                     model_io.set_input(name, *index, f);
                 }
             };
-            Ok(Action::default())
+            Ok(None)
         } else {
-            Ok(Action::default())
+            Ok(None)
         }
     }
     fn run_math_operator(
@@ -2207,6 +2209,31 @@ mod tests {
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_run_conditional_return_allow_stops_execution() {
+        // `RETURN allow` must end evaluation of the current packet even though
+        // `allow` is also the default (no-op) action.  A guard such as
+        // `if field:tcp.payload.len == 0: RETURN allow` must prevent a later
+        // unconditional `RETURN allow_all` from whitelisting the connection.
+        let source = "if field:tcp.payload.len == 0: RETURN allow\nRETURN allow_all";
+        let prog: Program = source.parse().unwrap();
+        let pkt = make_tcp_packet(b"");
+        let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
+        let fields = default_env_fields();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
+        assert_eq!(result, Action::Allow);
+
+        // With a payload the guard does not fire and the program falls through.
+        let pkt = make_tcp_packet(b"data");
+        let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
+        assert_eq!(result, Action::AllowAll);
     }
 
     // =========================================================================

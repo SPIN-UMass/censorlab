@@ -7,7 +7,7 @@ regex "^(\x16\x03|\x14\x03|\x15\x03|\x17\x03|GET |POST |HEAD |PUT |HTTP/|SSH-|\x
 regex "^[\x20-\x7e]{6}"
 
 # Rule 1: Skip packets with no payload
-if field:tcp.payload.len == 0: RETURN allow_all
+if field:tcp.payload.len == 0: RETURN allow
 # Rule 4: Exempt common lengths
 if field:tcp.payload.len == 517: RETURN allow_all
 if field:tcp.payload.len == 518: RETURN allow_all
@@ -28,3 +28,6 @@ if field:transport.payload.avg_popcount > 4.6: RETURN allow_all
 # Rule 6: Block high-entropy traffic (likely fully encrypted)
 # Entropy is normalized 0-1; 0.375 = 3.0/8.0
 if field:transport.payload.entropy > 0.375: RETURN terminate
+# Wu et al. only inspect the first data packet: once it has passed every
+# rule the connection is exempt from further checks.
+RETURN allow_all
