@@ -1,0 +1,69 @@
+{
+  "experiment": "10_nfq_end_to_end",
+  "rows": [
+    {
+      "scenario": "01_http_keyword",
+      "variant": "none"
+    },
+    {
+      "scenario": "01_http_keyword",
+      "variant": "null"
+    },
+    {
+      "scenario": "01_http_keyword",
+      "variant": "pycl"
+    },
+    {
+      "scenario": "01_http_keyword",
+      "variant": "censorlang"
+    },
+    {
+      "scenario": "02_dns_injection",
+      "variant": "none"
+    },
+    {
+      "scenario": "02_dns_injection",
+      "variant": "null"
+    },
+    {
+      "scenario": "02_dns_injection",
+      "variant": "pycl"
+    },
+    {
+      "scenario": "02_dns_injection",
+      "variant": "censorlang"
+    },
+    {
+      "scenario": "03_tls_sni",
+      "variant": "none"
+    },
+    {
+      "scenario": "03_tls_sni",
+      "variant": "null"
+    },
+    {
+      "scenario": "03_tls_sni",
+      "variant": "pycl"
+    },
+    {
+      "scenario": "03_tls_sni",
+      "variant": "censorlang"
+    },
+    {
+      "scenario": "04_shadowsocks",
+      "variant": "none"
+    },
+    {
+      "scenario": "04_shadowsocks",
+      "variant": "null"
+    },
+    {
+      "scenario": "04_shadowsocks",
+      "variant": "pycl"
+    },
+    {
+      "scenario": "04_shadowsocks",
+      "variant": "censorlang"
+    }
+  ]
+}
