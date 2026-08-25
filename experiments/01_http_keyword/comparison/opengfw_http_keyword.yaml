@@ -1,0 +1,7 @@
+# OpenGFW ruleset for HTTP keyword filtering (Scenario 01).
+# OpenGFW's HTTP analyzer parses the request line and headers; the GFW
+# keyword list is matched against the request path (the scenario places the
+# keyword in the URI).  `block` = TCP RST.
+- name: GFW keyword in HTTP request
+  action: block
+  expr: http != nil && http.req != nil && string(http.req.path) matches "(?i)(falun|falungong|freegate|ultrasurf|dynaweb|tiananmen|dalailama|tianwang|tibetpost|minghui|epochtimes|ntdtv|wujie|zhengjian|edoors|renminbao|xinsheng|aboluowang|bannedbook|boxun|chinadigitaltimes|dongtaiwang|greatfire|huaglad|kanzhongguo|minzhuzhongguo|pincong|rfa|secretchina|soundofhope|voachinese|wangzhuan|weijingsheng|weiquanwang|zhuichaguoji)"

@@ -3,3 +3,4 @@ PyCL,censor.py,19
 CensorLang,censor.cl,5
 Zeek,comparison/zeek_http_keyword.zeek,40
 Scapy,comparison/scapy_http_keyword.py,65
+OpenGFW,comparison/opengfw_http_keyword.yaml,3

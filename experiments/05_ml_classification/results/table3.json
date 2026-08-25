@@ -15,6 +15,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "ONNX model classification"
     },
     {
@@ -27,19 +29,9 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "ONNX model classification"
-    },
-    {
-      "tool": "Zeek",
-      "tpr": 0.0,
-      "tnr": 1.0,
-      "tp": 0,
-      "fn": 50,
-      "fp": 0,
-      "tn": 50,
-      "errors": 0,
-      "total": 100,
-      "note": ""
     },
     {
       "tool": "Scapy",
@@ -51,6 +43,8 @@
       "tn": 50,
       "errors": 0,
       "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "ONNX model classification (onnxruntime)"
     }
   ]

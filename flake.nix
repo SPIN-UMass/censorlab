@@ -73,6 +73,7 @@
               pkgs.zeek
               pkgs.suricata
               pkgs.snort
+              self.packages.${system}.opengfw
               pkgs.tcpdump
               pkgs.curl
               pkgs.dnsutils
@@ -87,6 +88,8 @@
           # Censorlab package
           packages = rec {
             default = censorlab;
+            # OpenGFW comparison tool for the Table 4 experiments (MR1)
+            opengfw = pkgs.callPackage ./experiments/tools/opengfw/package.nix { };
             censorlab = craneLib.buildPackage (common_args // {
               # Install from source (remove all the extra stuff)
               src = pkgs.lib.cleanSourceWith {

@@ -19,7 +19,7 @@ Adapters (``--tool``):
     zeek        Zeek TSV log (orig_h/orig_p/resp_h/resp_p columns)
     suricata    eve.json (alert events; pcap_cnt or 5-tuple)
     snort       Snort 3 alert_csv output
-    opengfw     OpenGFW JSON log lines ("ruleset match" events)
+    opengfw     OpenGFW JSON log lines ("TCP/UDP stream action" events)
 
 Usage:
     report.py normalize --tool zeek --pcap test.pcap --labels labels.csv \
@@ -247,7 +247,11 @@ def adapt_opengfw(path, flows):
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if ev.get("msg") != "ruleset match":
+            # Engine logs one "TCP stream action"/"UDP stream action" per matched
+            # stream; "ruleset log" appears for rules with log: true.
+            if not str(ev.get("msg", "")).endswith("stream action"):
+                continue
+            if str(ev.get("action", "")).lower() in ("", "allow", "maybe"):
                 continue
             ms, md = _ADDR_PORT.match(str(ev.get("src", ""))), _ADDR_PORT.match(str(ev.get("dst", "")))
             if not (ms and md):
@@ -283,9 +287,16 @@ TOOL_ARTIFACTS = [
 # Normalize + score
 # ---------------------------------------------------------------------------
 def normalize(tool, native_path, flows, labels):
-    """Return list of {index, action} covering every labelled flow."""
+    """Return (decisions, background_flagged).
+
+    decisions: list of {index, action} covering every labelled flow.
+    background_flagged: number of *unlabelled* flows (background traffic in a
+    mixed PCAP) on which the tool took a non-allow action.
+    """
     positives = ADAPTERS[tool](native_path, flows)
-    return [{"index": idx, "action": positives.get(idx, "allow")} for idx in labels]
+    decisions = [{"index": idx, "action": positives.get(idx, "allow")} for idx in labels]
+    background_flagged = sum(1 for idx in positives if idx not in labels)
+    return decisions, background_flagged
 
 
 def write_decisions(rows, path):
@@ -317,12 +328,12 @@ def score(labels, decisions):
 # ---------------------------------------------------------------------------
 # Whole-scenario report
 # ---------------------------------------------------------------------------
-def report_scenario(scenario_dir, pcap_override=None, results_dir=None):
+def report_scenario(scenario_dir, pcap_override=None, results_dir=None, labels_override=None):
     sc = load_scenario(scenario_dir)
     sdir = sc["DIR"]
     results = results_dir or os.path.join(sdir, "results")
     pcap = pcap_override or os.path.join(sdir, sc["PCAP"])
-    labels = load_labels(os.path.join(sdir, sc["LABELS"]))
+    labels = load_labels(labels_override or os.path.join(sdir, sc["LABELS"]))
     flows = FlowTable(pcap)
 
     rows = []
@@ -330,10 +341,12 @@ def report_scenario(scenario_dir, pcap_override=None, results_dir=None):
         native = os.path.join(results, artifact)
         if not os.path.exists(native):
             continue
-        decisions = normalize(adapter, native, flows, labels)
+        decisions, bg_flagged = normalize(adapter, native, flows, labels)
         write_decisions(decisions, os.path.join(results, f"{tool.lower()}_decisions.csv"))
         row = {"tool": tool}
         row.update(score(labels, decisions))
+        row["background_flows"] = flows.num_flows - len(labels)
+        row["background_flagged"] = bg_flagged
         row["note"] = sc.get(f"NOTE_{sc['_prefix'][tool]}", "")
         rows.append(row)
 
@@ -344,11 +357,12 @@ def report_scenario(scenario_dir, pcap_override=None, results_dir=None):
     with open(os.path.join(results, "table3.json"), "w") as f:
         json.dump(out, f, indent=2)
 
-    print(f"{'Tool':<12} {'TPR':>7} {'TNR':>7} {'TP':>5} {'FN':>5} {'FP':>5} {'TN':>5}  Note")
-    print("-" * 72)
+    print(f"{'Tool':<12} {'TPR':>7} {'TNR':>7} {'TP':>5} {'FN':>5} {'FP':>5} {'TN':>5} {'bg-flag':>8}  Note")
+    print("-" * 80)
     for r in rows:
+        bg = f"{r['background_flagged']}/{r['background_flows']}" if r["background_flows"] else "-"
         print(f"{r['tool']:<12} {r['tpr']:>7.4f} {r['tnr']:>7.4f} {r['tp']:>5} {r['fn']:>5} "
-              f"{r['fp']:>5} {r['tn']:>5}  {r['note']}")
+              f"{r['fp']:>5} {r['tn']:>5} {bg:>8}  {r['note']}")
     return out
 
 
@@ -371,19 +385,23 @@ def main():
     r.add_argument("scenario_dir")
     r.add_argument("--pcap", default=None, help="PCAP the artifacts were produced from")
     r.add_argument("--results", default=None, help="results directory (default <scenario>/results)")
+    r.add_argument("--labels", default=None, help="labels CSV for --pcap (default: scenario labels)")
 
     args = ap.parse_args()
     if args.cmd == "normalize":
         labels = load_labels(args.labels)
         flows = FlowTable(args.pcap)
-        write_decisions(normalize(args.tool, args.input, flows, labels), args.output)
+        decisions, bg = normalize(args.tool, args.input, flows, labels)
+        write_decisions(decisions, args.output)
+        if bg:
+            print(f"{bg} unlabelled (background) flows flagged", file=sys.stderr)
     elif args.cmd == "score":
         labels = load_labels(args.labels)
         with open(args.decisions, newline="") as f:
             decisions = list(csv.DictReader(f))
         print(json.dumps(score(labels, decisions), indent=2))
     else:
-        report_scenario(args.scenario_dir, args.pcap, args.results)
+        report_scenario(args.scenario_dir, args.pcap, args.results, args.labels)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+# OpenGFW ruleset for fully-encrypted-traffic detection (Scenario 04).
+# OpenGFW ships the Wu et al. (USENIX Security '23) heuristics as its built-in
+# "fet" analyzer: ex1 popcount, ex2 first-six-printable, ex3 printable
+# fraction, ex4 contiguous printable run, ex5 TLS/HTTP fingerprint.
+- name: fully encrypted traffic
+  action: block
+  expr: fet != nil && fet.yes

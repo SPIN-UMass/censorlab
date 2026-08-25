@@ -1,0 +1,6 @@
+# OpenGFW ruleset for forbidden DNS queries (Scenario 02).
+# OpenGFW's DNS analyzer exposes the question names; OpenGFW cannot forge
+# responses, so the query is dropped (timeout instead of poisoning).
+- name: forbidden DNS query
+  action: drop
+  expr: dns != nil && dns.qr == false && any(dns.questions, {.name matches "(?i)(google\\.com|facebook\\.com|twitter\\.com|youtube\\.com|wikipedia\\.org|instagram\\.com|whatsapp\\.com|telegram\\.org|signal\\.org|reddit\\.com|nytimes\\.com|bbc\\.com|reuters\\.com|theguardian\\.com|washingtonpost\\.com|amnesty\\.org|hrw\\.org|rsf\\.org|torproject\\.org|eff\\.org|vpngate\\.net|psiphon\\.ca|lanternvpn\\.org|protonvpn\\.com|mullvad\\.net|github\\.com|medium\\.com|blogspot\\.com|wordpress\\.com|tumblr\\.com|dropbox\\.com|soundcloud\\.com|vimeo\\.com|twitch\\.tv|discord\\.com)"})

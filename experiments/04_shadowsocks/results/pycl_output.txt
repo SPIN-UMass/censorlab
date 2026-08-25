@@ -498,4 +498,4 @@
 9945: Ok(Drop)
 9955: Ok(Drop)
 9975: Ok(Drop)
-Pcap mode took 120457us to process the file (120608us including I/O)
+Pcap mode took 116418us to process the file (116572us including I/O)

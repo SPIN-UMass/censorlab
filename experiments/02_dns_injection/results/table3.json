@@ -52,6 +52,42 @@
       "errors": 0,
       "total": 100,
       "note": ""
+    },
+    {
+      "tool": "Suricata",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 50,
+      "fn": 0,
+      "fp": 0,
+      "tn": 50,
+      "errors": 0,
+      "total": 100,
+      "note": "dns.query buffer; drop-only (no injection)"
+    },
+    {
+      "tool": "Snort",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 50,
+      "fn": 0,
+      "fp": 0,
+      "tn": 50,
+      "errors": 0,
+      "total": 100,
+      "note": "regex on DNS wire format; drop-only (no injection)"
+    },
+    {
+      "tool": "OpenGFW",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 50,
+      "fn": 0,
+      "fp": 0,
+      "tn": 50,
+      "errors": 0,
+      "total": 100,
+      "note": "dns analyzer; drop-only (no injection)"
     }
   ]
 }

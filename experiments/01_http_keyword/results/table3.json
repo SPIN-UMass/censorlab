@@ -52,6 +52,18 @@
       "errors": 0,
       "total": 1000,
       "note": ""
+    },
+    {
+      "tool": "OpenGFW",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "note": "http.req.path analyzer"
     }
   ]
 }

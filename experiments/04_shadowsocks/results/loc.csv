@@ -3,3 +3,4 @@ PyCL,censor.py,46
 CensorLang,censor.cl,18
 Zeek,comparison/zeek_shadowsocks.zeek,92
 Scapy,comparison/scapy_shadowsocks.py,112
+OpenGFW,comparison/opengfw_shadowsocks.yaml,3

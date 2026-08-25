@@ -15,6 +15,8 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": ""
     },
     {
@@ -27,6 +29,8 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "regex on raw payload (no TLS parsing)"
     },
     {
@@ -39,6 +43,8 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "detection-only (passive)"
     },
     {
@@ -51,7 +57,51 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": ""
+    },
+    {
+      "tool": "Suricata",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
+      "note": "tls.sni buffer; reject = RST in IPS mode"
+    },
+    {
+      "tool": "Snort",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
+      "note": "regex on ClientHello payload (no SNI buffer); reject = RST inline"
+    },
+    {
+      "tool": "OpenGFW",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
+      "note": "tls.req.sni analyzer"
     }
   ]
 }

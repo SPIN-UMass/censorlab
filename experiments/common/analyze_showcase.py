@@ -89,7 +89,7 @@ def stats(values):
     }
 
 
-def analyze(scenario_dir, results_dir=None, pcap=None, accuracy=True):
+def analyze(scenario_dir, results_dir=None, pcap=None, accuracy=True, labels=None):
     sc = load_scenario(scenario_dir)
     results = results_dir or os.path.join(sc["DIR"], "results")
     raw = load_raw(os.path.join(results, "raw_timings.csv"))
@@ -174,7 +174,7 @@ def analyze(scenario_dir, results_dir=None, pcap=None, accuracy=True):
         from report import report_scenario
         print()
         print("Accuracy against ground truth (PCAP mode):")
-        report_scenario(sc["DIR"], pcap_override=pcap, results_dir=results)
+        report_scenario(sc["DIR"], pcap_override=pcap, results_dir=results, labels_override=labels)
     return rows
 
 
@@ -183,9 +183,10 @@ def main():
     ap.add_argument("scenario_dir")
     ap.add_argument("--results", default=None)
     ap.add_argument("--pcap", default=None, help="PCAP the runs used (default: scenario PCAP)")
+    ap.add_argument("--labels", default=None, help="labels CSV matching --pcap (default: scenario labels)")
     ap.add_argument("--no-accuracy", action="store_true")
     args = ap.parse_args()
-    analyze(args.scenario_dir, args.results, args.pcap, accuracy=not args.no_accuracy)
+    analyze(args.scenario_dir, args.results, args.pcap, accuracy=not args.no_accuracy, labels=args.labels)
 
 
 if __name__ == "__main__":
