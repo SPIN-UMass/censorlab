@@ -1,0 +1,59 @@
+#separator \x09
+#set_separator	,
+#empty_field	(empty)
+#unset_field	-
+#path	dns_injection_matches
+#open	2026-08-25-06-45-51
+#fields	ts	uid	orig_h	orig_p	resp_h	resp_p	domain	action
+#types	time	string	addr	port	addr	port	string	string
+1771912828.976849	CmlD2h35lx6yZuyHZ9	10.0.0.1	10013	8.8.8.8	53	reddit.com	would_inject
+1771912828.979057	CA0y6E4FQZ6PBLTsTl	10.0.0.1	10046	8.8.8.8	53	signal.org	would_inject
+1771912828.979057	CLKIwF4YdV3TdR0ns3	10.0.0.1	10018	8.8.8.8	53	twitter.com	would_inject
+1771912828.979057	CN8THB3woQWUF0tMoe	10.0.0.1	10041	8.8.8.8	53	tumblr.com	would_inject
+1771912828.979057	CrTdYe4xEVsDsD4iFd	10.0.0.1	10044	8.8.8.8	53	blogspot.com	would_inject
+1771912828.979057	CSX7x31UQkkQ9z9011	10.0.0.1	10028	8.8.8.8	53	nytimes.com	would_inject
+1771912828.979057	CxYMXh1R8ITf8CAZY9	10.0.0.1	10039	8.8.8.8	53	vpngate.net	would_inject
+1771912828.979057	CDcpZJ2y2po9jEJi4j	10.0.0.1	10014	8.8.8.8	53	psiphon.ca	would_inject
+1771912828.979057	CmDWz837jtsY8S9hS	10.0.0.1	10029	8.8.8.8	53	lanternvpn.org	would_inject
+1771912828.979057	C8D7kP2qizp2ITDOW	10.0.0.1	10043	8.8.8.8	53	amnesty.org	would_inject
+1771912828.979057	CDizdM1TDS0AK2d5R	10.0.0.1	10008	8.8.8.8	53	reuters.com	would_inject
+1771912828.979057	CGFCip43DAmCnLO5nh	10.0.0.1	10040	8.8.8.8	53	soundcloud.com	would_inject
+1771912828.979057	CkjPpk4XTeOgOQJY0i	10.0.0.1	10022	8.8.8.8	53	reuters.com	would_inject
+1771912828.979057	CP4p3b4kxTa3tawITg	10.0.0.1	10016	8.8.8.8	53	whatsapp.com	would_inject
+1771912828.979057	C2MG404sDI5QIMnvd5	10.0.0.1	10026	8.8.8.8	53	mullvad.net	would_inject
+1771912828.979057	CsC8Ho22hMGC8CJx6c	10.0.0.1	10002	8.8.8.8	53	washingtonpost.com	would_inject
+1771912828.979057	C2Rqg01Qrbh7mUZgIa	10.0.0.1	10042	8.8.8.8	53	hrw.org	would_inject
+1771912828.979057	CUn6JH1GhwzVewgQIk	10.0.0.1	10025	8.8.8.8	53	washingtonpost.com	would_inject
+1771912828.979057	CFIh3t1fmS1jOqykb	10.0.0.1	10015	8.8.8.8	53	instagram.com	would_inject
+1771912828.979057	CALMxPqk8rgtw5YXe	10.0.0.1	10045	8.8.8.8	53	protonvpn.com	would_inject
+1771912828.979057	C3ARuk4owlYT0R0sjj	10.0.0.1	10038	8.8.8.8	53	wikipedia.org	would_inject
+1771912828.979057	C8R9nL3jKxywT4bpUl	10.0.0.1	10004	8.8.8.8	53	blogspot.com	would_inject
+1771912828.979057	C7CB453JbdLOtsyaZk	10.0.0.1	10005	8.8.8.8	53	facebook.com	would_inject
+1771912828.979057	CnAgrI1QT0RkiBHk	10.0.0.1	10010	8.8.8.8	53	rsf.org	would_inject
+1771912828.979057	CnEUin183ViWG6hQAh	10.0.0.1	10032	8.8.8.8	53	nytimes.com	would_inject
+1771912828.979057	C0QkAk4iIHBYG4rcM4	10.0.0.1	10020	8.8.8.8	53	mullvad.net	would_inject
+1771912828.979057	C3HGc93kGS1tA0Fq83	10.0.0.1	10003	8.8.8.8	53	whatsapp.com	would_inject
+1771912828.979057	C6oyjX2yH5mqZOvko1	10.0.0.1	10034	8.8.8.8	53	washingtonpost.com	would_inject
+1771912828.979057	CxHn0u35Y5GDHI98oa	10.0.0.1	10047	8.8.8.8	53	instagram.com	would_inject
+1771912828.979057	CYTQ8tQoaN8Vrj9f4	10.0.0.1	10037	8.8.8.8	53	github.com	would_inject
+1771912828.979057	CGtJ7v3aes5ALWR4Lb	10.0.0.1	10024	8.8.8.8	53	torproject.org	would_inject
+1771912828.979057	CQzIwM1lFMKkrvUSd8	10.0.0.1	10019	8.8.8.8	53	discord.com	would_inject
+1771912828.979057	CWARxj2gFZniW7mJm8	10.0.0.1	10036	8.8.8.8	53	twitter.com	would_inject
+1771912828.979057	C2Tbcx2OAbTIgkWwS7	10.0.0.1	10033	8.8.8.8	53	mullvad.net	would_inject
+1771912828.979057	C79OS03AsrqrBWpcxd	10.0.0.1	10049	8.8.8.8	53	nytimes.com	would_inject
+1771912828.979057	CRYwzH3HZQQrwLHM32	10.0.0.1	10000	8.8.8.8	53	telegram.org	would_inject
+1771912828.979057	CxTr9p2ADhqnGExLC7	10.0.0.1	10048	8.8.8.8	53	telegram.org	would_inject
+1771912828.979057	CWoPI71uoDkU6jYCFc	10.0.0.1	10007	8.8.8.8	53	vimeo.com	would_inject
+1771912828.979057	Chbvfl18GHZlFHYhKc	10.0.0.1	10027	8.8.8.8	53	tumblr.com	would_inject
+1771912828.979057	CnxcIP1rnNc9aRMtP7	10.0.0.1	10021	8.8.8.8	53	torproject.org	would_inject
+1771912828.979057	CXZb2s3cFp2RaptgI	10.0.0.1	10030	8.8.8.8	53	rsf.org	would_inject
+1771912828.979057	C8YA2t1oUAuDSJ1dYi	10.0.0.1	10011	8.8.8.8	53	nytimes.com	would_inject
+1771912828.979057	CVlVTd2prN2rjXIR7	10.0.0.1	10001	8.8.8.8	53	rsf.org	would_inject
+1771912828.979057	CaS5xL3LIctgUqyoPi	10.0.0.1	10006	8.8.8.8	53	theguardian.com	would_inject
+1771912828.979057	CbA9Qg312UawxxoXWc	10.0.0.1	10012	8.8.8.8	53	psiphon.ca	would_inject
+1771912828.979057	CptFDf4vBzt6A71vD	10.0.0.1	10009	8.8.8.8	53	washingtonpost.com	would_inject
+1771912828.979057	CvkSGb1ugaQw3FJtl	10.0.0.1	10031	8.8.8.8	53	nytimes.com	would_inject
+1771912828.979057	CdY6Tz4gGCwT2Sg1X7	10.0.0.1	10035	8.8.8.8	53	youtube.com	would_inject
+1771912828.979057	CkSx4A4DSOjXwcZZxg	10.0.0.1	10023	8.8.8.8	53	twitter.com	would_inject
+1771912828.979057	CNwe684n4DGphHqTzc	10.0.0.1	10017	8.8.8.8	53	lanternvpn.org	would_inject
+#close	2026-08-25-06-45-51

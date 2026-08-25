@@ -1,0 +1,4 @@
+tool,median_us,mean_us,stdev_us,min_us,max_us,wall_median_us,wall_mean_us,wall_stdev_us,wall_min_us,wall_max_us,startup_us,net_us,cpu_us,max_rss_kb,n,failed_runs,loc,status,note
+PyCL,90439,90241.3,1663.3,88488,91797,144681,145991.3,3343.0,143502,149791,54514,90167,160000,30608,3,0,21,measured,ONNX model classification
+CensorLang,64630,64939.7,563.4,64599,65590,142714,143542.7,1515.7,142622,145292,78583,64131,160000,29684,3,0,24,measured,ONNX model classification
+Scapy,108281,105372.7,12350.1,91828,116009,1773092,1771397.7,13482.6,1757148,1783953,1196084,577008,10680000,121612,3,0,106,measured,ONNX model classification (onnxruntime)
