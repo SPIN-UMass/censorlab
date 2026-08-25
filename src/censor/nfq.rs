@@ -287,7 +287,17 @@ impl Censor {
             }
         }
         // At this point, client mac and ip should be definite
-        let (client_mac, client_ip) = client_addrs.ok_or(NfqModeError::InterfaceHasNoMac)?;
+        let (client_mac, own_ip) = client_addrs.ok_or(NfqModeError::InterfaceHasNoMac)?;
+        // Direction is computed relative to `--client-ip` when given (censor in
+        // the path between a client and the WAN); otherwise relative to our own
+        // address (censor running on the client host itself).
+        let client_ip: IpAddress = match args.client_ip {
+            Some(ip) => ip.into(),
+            None => own_ip,
+        };
+        if args.client_ip.is_some() {
+            info!("Computing traffic direction relative to client {client_ip}");
+        }
 
         // Open the interface as an IP raw socket
         trace!("Opening raw socket for {}", interface_name);
