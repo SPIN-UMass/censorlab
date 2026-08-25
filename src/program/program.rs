@@ -2212,6 +2212,21 @@ mod tests {
     }
 
     #[test]
+    fn negative_literals_are_negative() {
+        // The grammar accepted a leading '-' but discarded it, so `-1 == 1`.
+        let prog: Program = "if field:direction == -1: RETURN terminate".parse().unwrap();
+        match &prog.lines[0].condition.as_ref().unwrap().rhs {
+            Input::Int(v) => assert_eq!(*v, -1),
+            other => panic!("expected Int(-1), got {other:?}"),
+        }
+        let prog: Program = "if field:transport.payload.entropy < -0.5: RETURN terminate".parse().unwrap();
+        match &prog.lines[0].condition.as_ref().unwrap().rhs {
+            Input::Float(v) => assert_eq!(*v, -0.5),
+            other => panic!("expected Float(-0.5), got {other:?}"),
+        }
+    }
+
+    #[test]
     fn program_run_conditional_return_allow_stops_execution() {
         // `RETURN allow` must end evaluation of the current packet even though
         // `allow` is also the default (no-op) action.  A guard such as

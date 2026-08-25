@@ -24,6 +24,15 @@ pub struct Packet {
     pub payload: Vec<u8>,
 }
 impl Packet {
+    /// Record the traffic direction relative to the configured client.
+    pub fn set_direction(&mut self, direction: crate::censor::Direction) {
+        use crate::censor::Direction::*;
+        self.direction = match direction {
+            ClientToWan => 1,
+            WanToClient => -1,
+            Unknown => 0,
+        };
+    }
     pub fn from_ts_bytes(
         timestamp: Option<f64>,
         data: &[u8],

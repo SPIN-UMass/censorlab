@@ -389,6 +389,10 @@ impl TransportState {
         direction: Direction,
         packet: Packet,
     ) -> Result<Action, SmoltcpError> {
+        // Record the direction on the packet itself so that every execution
+        // environment (PyCL and CensorLang) sees the same `direction` field.
+        let mut packet = packet;
+        packet.set_direction(direction);
         // Make a connection key
         let key = ConnectionKey::new(
             ips,

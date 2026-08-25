@@ -1423,3 +1423,38 @@ fn test_demo_throttling_delays_matching_connection() {
     assert_eq!(delayed, vec![frame_idx(3), frame_idx(4), frame_idx(5)],
                "ClientHello and every later packet must be delayed: {:?}", result.action_lines);
 }
+
+// ==========================================================================
+// CensorLang must see the packet direction (it was only set for PyCL)
+// ==========================================================================
+
+#[test]
+fn test_censorlang_direction_field() {
+    let tmp = TempDir::new().unwrap();
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    let frames = [
+        tcp_frame(client, server, 50000, 80, TCP_SYN, 100, 0, &[]),                      // client -> wan
+        tcp_frame(server, client, 80, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]),          // wan -> client
+        tcp_frame(client, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"GET / HTTP/1.1\r\n\r\n"),
+        tcp_frame(server, client, 80, 50000, TCP_PSH_ACK, 201, 120, b"HTTP/1.1 200 OK\r\n\r\n"),
+    ];
+    let pcap_path = tmp.path().join("test.pcap");
+    let mut b = PcapBuilder::new();
+    for f in &frames {
+        b = b.add_frame(f);
+    }
+    b.write_to(&pcap_path);
+
+    write_temp_script(&tmp, "censor.cl", "if field:direction == -1: RETURN terminate\nRETURN allow\n");
+    let config = write_temp_config(&tmp, "[execution]\nmode = \"CensorLang\"\nscript = \"censor.cl\"\n");
+    let result = run_pcap_with_config(&config, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result.action_lines.iter()
+        .filter(|l| l.action.contains("Drop")).map(|l| l.packet_index).collect();
+    // frame 1 is the first wan -> client packet; `terminate` then drops the rest
+    // of the connection (frames 2, 3).  Frame 0 (client -> wan) must pass.
+    assert_eq!(dropped, vec![frame_idx(1), frame_idx(2), frame_idx(3)],
+               "the connection must be terminated at the first wan->client packet: {:?}\n{}",
+               result.action_lines, result.stdout);
+}

@@ -100,12 +100,12 @@ pub Field: Field = {
 }
 
 Float : f64 = {
-  "-" <s:r"[0-9]+\.[0-9]+"> => f64::from_str(s).unwrap(),
+  "-" <s:r"[0-9]+\.[0-9]+"> => -f64::from_str(s).unwrap(),
   <s:r"[0-9]+\.[0-9]+"> => f64::from_str(s).unwrap()
 }
 
 Integer: i64 = {
-  "-" <s:r"[0-9]+"> => i64::from_str(s).unwrap(),
+  "-" <s:r"[0-9]+"> => -i64::from_str(s).unwrap(),
   <s:r"[0-9]+"> => i64::from_str(s).unwrap()
 }
 
