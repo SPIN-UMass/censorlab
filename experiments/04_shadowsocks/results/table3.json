@@ -2,6 +2,7 @@
   "table": "table3",
   "experiment": "04_shadowsocks",
   "pcap": "pcap/test.pcap",
+  "packets": 10000,
   "flows": 1000,
   "labels": 1000,
   "rows": [
