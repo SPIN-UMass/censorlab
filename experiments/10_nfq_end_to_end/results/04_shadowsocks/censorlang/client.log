@@ -1,15 +1,15 @@
 == latency probe ==
-probe: 200/200 ok, median total 1.24 ms
+probe: 200/200 ok, median total 1.23 ms
 == iperf3 ==
-iperf3: 264.5 Mbit/s received, retransmits 79
+iperf3: 254.6 Mbit/s received, retransmits 50
 Sending 200 connections to 172.30.0.20:443...
-  100/200 (95.1s elapsed, 0 errors)
-  200/200 (205.3s elapsed, 1 errors)
+  100/200 (1.4s elapsed, 0 errors)
+  200/200 (2.7s elapsed, 0 errors)
 
 === Results ===
-Total: 200 connections in 205.3s
-Errors: 1
-TP=99 FN=1 FP=0 TN=99
-TPR=0.9900  TNR=1.0000
+Total: 200 connections in 2.7s
+Errors: 0
+TP=0 FN=100 FP=0 TN=100
+TPR=0.0000  TNR=1.0000
 Output: /results/live_eval_results.csv
 == client done ==

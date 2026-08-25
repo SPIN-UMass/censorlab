@@ -1,9 +1,11 @@
 {
-  "source_lines": 2,
-  "lines": 2,
-  "max_lines_per_packet": 2,
+  "source_lines": 3,
+  "lines": 3,
+  "max_lines_per_packet": 3,
   "regexes": 1,
-  "fields": [],
+  "fields": [
+    "Udp(DstPort)"
+  ],
   "models": [],
   "connection_registers": {
     "float": [],
@@ -21,8 +23,8 @@
   "per_connection_bytes": 21,
   "per_host_register_bytes": 0,
   "per_packet": {
-    "conditions": 1,
-    "reads": 2,
+    "conditions": 2,
+    "reads": 4,
     "writes": 1,
     "copies": 0,
     "arithmetic": 0,
@@ -30,7 +32,7 @@
     "regex": 1,
     "model_inputs": 0,
     "model_calls": 0,
-    "returns": 1
+    "returns": 2
   },
   "ends_with_unconditional_return": false
 }

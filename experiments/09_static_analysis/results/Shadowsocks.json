@@ -1,11 +1,13 @@
 {
-  "source_lines": 16,
-  "lines": 16,
-  "max_lines_per_packet": 16,
-  "regexes": 2,
+  "source_lines": 21,
+  "lines": 21,
+  "max_lines_per_packet": 21,
+  "regexes": 3,
   "fields": [
+    "Direction",
     "PayloadAveragePopcount",
     "PayloadEntropy",
+    "Tcp(Flag(Syn))",
     "Tcp(PayloadLength)"
   ],
   "models": [],
@@ -14,7 +16,9 @@
     "int": [],
     "bool": [
       0,
-      1
+      1,
+      2,
+      3
     ]
   },
   "host_registers": {
@@ -22,20 +26,20 @@
     "int": [],
     "bool": []
   },
-  "per_connection_register_bytes": 2,
-  "per_connection_bytes": 22,
+  "per_connection_register_bytes": 4,
+  "per_connection_bytes": 24,
   "per_host_register_bytes": 0,
   "per_packet": {
-    "conditions": 13,
-    "reads": 26,
-    "writes": 2,
-    "copies": 0,
+    "conditions": 17,
+    "reads": 35,
+    "writes": 4,
+    "copies": 1,
     "arithmetic": 0,
     "logic": 0,
-    "regex": 2,
+    "regex": 3,
     "model_inputs": 0,
     "model_calls": 0,
-    "returns": 14
+    "returns": 17
   },
   "ends_with_unconditional_return": true
 }

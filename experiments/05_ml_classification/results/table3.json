@@ -2,6 +2,7 @@
   "table": "table3",
   "experiment": "05_ml_classification",
   "pcap": "pcap/test.pcap",
+  "packets": 1200,
   "flows": 100,
   "labels": 100,
   "rows": [
