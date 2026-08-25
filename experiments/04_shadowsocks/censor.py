@@ -2,8 +2,8 @@
 # Emulates GFW-style heuristics from Wu et al. 2023:
 # "How the Great Firewall of China Detects and Blocks Fully Encrypted Traffic"
 #
-# Rules applied to the FIRST client->server data packet of each connection whose
-# SYN was observed (Wu et al.: "the first data packet of a TCP connection";
+# Rules applied to the FIRST data packet sent by the client (the SYN sender) of
+# each connection whose SYN was observed (Wu et al.: "the first data packet of a TCP connection";
 # connections picked up mid-stream are not inspected, as in OpenGFW/the GFW):
 # 1. Payload > 0 bytes
 # 2. First 6 bytes are NOT printable ASCII (0x20-0x7e)
@@ -18,7 +18,8 @@
 
 from rust import regex
 
-saw_syn = False  # connection start observed (mid-stream flows are never inspected)
+saw_syn = False      # connection start observed (mid-stream flows are never inspected)
+client_port = None   # the SYN sender is the client, whatever the capture's client IP is
 checked = False
 blocked = False  # once the first data packet fails the checks, the whole connection is blocked
 
@@ -51,7 +52,7 @@ NON_PRINTABLE = bytes(range(0x20)) + bytes(range(0x7F, 0x100))
 PRINTABLE_RUN = regex(r"[\x20-\x7e]{21}")
 
 def process(packet):
-    global saw_syn, checked, blocked
+    global saw_syn, client_port, checked, blocked
     tcp = packet.tcp
     if not tcp:
         return
@@ -59,11 +60,12 @@ def process(packet):
     # retransmissions of the first data packet must not slip through.
     if blocked:
         return "drop"
-    if tcp.flags.syn and not tcp.flags.ack and packet.direction == 1:
+    if tcp.flags.syn and not tcp.flags.ack:
         saw_syn = True
+        client_port = tcp.src
         return
     # Only the client's first data packet of a connection we saw start is inspected
-    if not saw_syn or packet.direction != 1:
+    if not saw_syn or tcp.src != client_port:
         return
     payload = packet.payload
     if not payload or len(payload) == 0:

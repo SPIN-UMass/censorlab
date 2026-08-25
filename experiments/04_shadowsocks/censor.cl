@@ -8,13 +8,15 @@ regex "^[\x20-\x7e]{6}"
 # Regex 2: a run of more than 20 printable bytes anywhere (Wu et al. Ex4)
 regex "[\x20-\x7e]{21}"
 
-# Connection start: remember that we saw the client's SYN (reg:b.3).  Flows
+# Connection start: the pure SYN (ACK flag clear) identifies the client side;
+# remember that we saw it (reg:b.3) and the client's port (reg:i.4).  Flows
 # picked up mid-stream are never inspected (Wu et al. inspect the first data
 # packet of a connection).
-if field:tcp.flag.syn == True: COPY True -> reg:b.3
+if field:tcp.flag.ack == False: COPY field:tcp.src -> reg:i.4
+if field:tcp.flag.ack == False: COPY True -> reg:b.3
 if reg:b.3 != True: RETURN allow
-# Only client -> server segments carry the first data packet
-if field:direction != 1: RETURN allow
+# Only segments from the client carry the first data packet
+if field:tcp.src != reg:i.4: RETURN allow
 # Rule 1: Skip packets with no payload
 if field:tcp.payload.len == 0: RETURN allow
 # Rule 4: Exempt common lengths
