@@ -17,7 +17,7 @@
       "errors": 0,
       "total": 1000,
       "background_flows": 40684,
-      "background_flagged": 1285,
+      "background_flagged": 0,
       "note": ""
     },
     {
@@ -31,7 +31,7 @@
       "errors": 0,
       "total": 1000,
       "background_flows": 40684,
-      "background_flagged": 1285,
+      "background_flagged": 0,
       "note": ""
     },
     {
@@ -59,7 +59,7 @@
       "errors": 0,
       "total": 1000,
       "background_flows": 40684,
-      "background_flagged": 1287,
+      "background_flagged": 0,
       "note": ""
     },
     {

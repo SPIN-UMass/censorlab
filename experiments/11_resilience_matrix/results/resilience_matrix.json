@@ -9,7 +9,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.089,
+      "seconds": 0.075,
       "exit_code": 0
     },
     {
@@ -20,7 +20,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.077,
+      "seconds": 0.079,
       "exit_code": 0
     },
     {
@@ -31,7 +31,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.073,
+      "seconds": 0.085,
       "exit_code": 0
     },
     {
@@ -42,7 +42,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.078,
+      "seconds": 0.076,
       "exit_code": 0
     },
     {
@@ -53,7 +53,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.085,
+      "seconds": 0.088,
       "exit_code": 0
     },
     {
@@ -75,7 +75,7 @@
       "flagged": 59,
       "rate": 0.9833,
       "actions": "drop=59",
-      "seconds": 0.102,
+      "seconds": 0.108,
       "exit_code": 0
     },
     {
@@ -86,7 +86,7 @@
       "flagged": 59,
       "rate": 0.9833,
       "actions": "drop=59",
-      "seconds": 0.093,
+      "seconds": 0.096,
       "exit_code": 0
     },
     {
@@ -97,7 +97,7 @@
       "flagged": 60,
       "rate": 1.0,
       "actions": "drop=60",
-      "seconds": 0.155,
+      "seconds": 0.158,
       "exit_code": 0
     },
     {
@@ -108,7 +108,7 @@
       "flagged": 50,
       "rate": 0.8333,
       "actions": "drop=50",
-      "seconds": 0.147,
+      "seconds": 0.145,
       "exit_code": 0
     },
     {
@@ -119,7 +119,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.098,
+      "seconds": 0.094,
       "exit_code": 0
     },
     {
@@ -130,7 +130,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.087,
+      "seconds": 0.091,
       "exit_code": 0
     },
     {
@@ -141,7 +141,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.087,
+      "seconds": 0.088,
       "exit_code": 0
     },
     {
@@ -152,7 +152,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.084,
+      "seconds": 0.091,
       "exit_code": 0
     },
     {
@@ -163,7 +163,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.082,
+      "seconds": 0.087,
       "exit_code": 0
     },
     {
@@ -174,7 +174,7 @@
       "flagged": 60,
       "rate": 1.0,
       "actions": "drop=60",
-      "seconds": 16.514,
+      "seconds": 17.606,
       "exit_code": 0
     },
     {
@@ -185,7 +185,7 @@
       "flagged": 60,
       "rate": 1.0,
       "actions": "drop=60",
-      "seconds": 7.384,
+      "seconds": 7.485,
       "exit_code": 0
     },
     {
@@ -196,7 +196,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.081,
+      "seconds": 0.051,
       "exit_code": 0
     },
     {
@@ -218,7 +218,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.078,
+      "seconds": 0.063,
       "exit_code": 0
     },
     {
@@ -251,7 +251,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.073,
+      "seconds": 0.074,
       "exit_code": 0
     },
     {
@@ -262,7 +262,7 @@
       "flagged": 60,
       "rate": 1.0,
       "actions": "drop=60",
-      "seconds": 0.106,
+      "seconds": 0.103,
       "exit_code": 0
     },
     {
@@ -273,7 +273,7 @@
       "flagged": 60,
       "rate": 1.0,
       "actions": "drop=60",
-      "seconds": 0.091,
+      "seconds": 0.092,
       "exit_code": 0
     },
     {
@@ -284,7 +284,7 @@
       "flagged": 60,
       "rate": 1.0,
       "actions": "drop=60",
-      "seconds": 0.131,
+      "seconds": 0.137,
       "exit_code": 0
     },
     {
@@ -306,7 +306,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.086,
+      "seconds": 0.088,
       "exit_code": 0
     },
     {
@@ -317,7 +317,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.081,
+      "seconds": 0.079,
       "exit_code": 0
     },
     {
@@ -328,7 +328,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.074,
+      "seconds": 0.076,
       "exit_code": 0
     },
     {
@@ -339,7 +339,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.086,
+      "seconds": 0.08,
       "exit_code": 0
     },
     {
@@ -350,7 +350,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.078,
+      "seconds": 0.074,
       "exit_code": 0
     },
     {
@@ -361,7 +361,7 @@
       "flagged": 60,
       "rate": 1.0,
       "actions": "drop=60",
-      "seconds": 17.329,
+      "seconds": 17.206,
       "exit_code": 0
     },
     {
@@ -372,7 +372,7 @@
       "flagged": 60,
       "rate": 1.0,
       "actions": "drop=60",
-      "seconds": 7.278,
+      "seconds": 7.385,
       "exit_code": 0
     },
     {
@@ -383,7 +383,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.073,
+      "seconds": 0.075,
       "exit_code": 0
     },
     {
@@ -405,7 +405,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.074,
+      "seconds": 0.077,
       "exit_code": 0
     },
     {
@@ -416,7 +416,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.066,
+      "seconds": 0.071,
       "exit_code": 0
     },
     {
@@ -427,7 +427,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.071,
+      "seconds": 0.076,
       "exit_code": 0
     },
     {
@@ -438,7 +438,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.067,
+      "seconds": 0.072,
       "exit_code": 0
     },
     {
@@ -449,7 +449,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.08,
+      "seconds": 0.078,
       "exit_code": 0
     },
     {
@@ -460,7 +460,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.077,
+      "seconds": 0.082,
       "exit_code": 0
     },
     {
@@ -471,7 +471,7 @@
       "flagged": 21,
       "rate": 0.7,
       "actions": "drop=21",
-      "seconds": 0.095,
+      "seconds": 0.109,
       "exit_code": 0
     },
     {
@@ -482,7 +482,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.087,
+      "seconds": 0.083,
       "exit_code": 0
     },
     {
@@ -493,7 +493,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.073,
+      "seconds": 0.075,
       "exit_code": 0
     },
     {
@@ -504,7 +504,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.08,
+      "seconds": 0.072,
       "exit_code": 0
     },
     {
@@ -515,7 +515,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.072,
+      "seconds": 0.073,
       "exit_code": 0
     },
     {
@@ -526,7 +526,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.078,
+      "seconds": 0.07,
       "exit_code": 0
     },
     {
@@ -537,7 +537,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.075,
+      "seconds": 0.076,
       "exit_code": 0
     },
     {
@@ -548,7 +548,7 @@
       "flagged": 10,
       "rate": 0.3333,
       "actions": "drop=10",
-      "seconds": 0.117,
+      "seconds": 0.119,
       "exit_code": 0
     },
     {
@@ -559,7 +559,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.088,
+      "seconds": 0.109,
       "exit_code": 0
     },
     {
@@ -570,7 +570,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 1.01,
+      "seconds": 0.821,
       "exit_code": 0
     },
     {
@@ -581,7 +581,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.319,
+      "seconds": 0.307,
       "exit_code": 0
     },
     {
@@ -592,7 +592,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 1.244,
+      "seconds": 1.141,
       "exit_code": 0
     },
     {
@@ -603,7 +603,7 @@
       "flagged": 1,
       "rate": 0.0,
       "actions": "drop=1",
-      "seconds": 0.324,
+      "seconds": 0.312,
       "exit_code": 0
     },
     {
@@ -614,7 +614,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 1.575,
+      "seconds": 1.24,
       "exit_code": 0
     },
     {
@@ -625,7 +625,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.33,
+      "seconds": 0.322,
       "exit_code": 0
     },
     {
@@ -636,7 +636,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 3.555,
+      "seconds": 2.881,
       "exit_code": 0
     },
     {
@@ -647,7 +647,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 0.332,
+      "seconds": 0.334,
       "exit_code": 0
     },
     {
@@ -658,7 +658,7 @@
       "flagged": 300,
       "rate": 0.0126,
       "actions": "drop=300",
-      "seconds": 1.608,
+      "seconds": 1.49,
       "exit_code": 0
     },
     {
@@ -669,7 +669,7 @@
       "flagged": 300,
       "rate": 0.0126,
       "actions": "drop=300",
-      "seconds": 0.607,
+      "seconds": 0.617,
       "exit_code": 0
     },
     {
@@ -680,7 +680,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 1.257,
+      "seconds": 1.278,
       "exit_code": 0
     },
     {
@@ -691,7 +691,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 1.175,
+      "seconds": 1.088,
       "exit_code": 0
     },
     {
@@ -702,7 +702,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 1.096,
+      "seconds": 1.101,
       "exit_code": 0
     },
     {
@@ -713,7 +713,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 1.195,
+      "seconds": 1.146,
       "exit_code": 0
     },
     {
@@ -724,7 +724,7 @@
       "flagged": 0,
       "rate": 0.0,
       "actions": "",
-      "seconds": 1.103,
+      "seconds": 1.408,
       "exit_code": 0
     },
     {
@@ -735,7 +735,7 @@
       "flagged": 5457,
       "rate": 0.229,
       "actions": "drop=5457",
-      "seconds": 12.563,
+      "seconds": 15.587,
       "exit_code": 0
     },
     {
@@ -746,7 +746,7 @@
       "flagged": 111,
       "rate": 0.0047,
       "actions": "drop=111",
-      "seconds": 4.345,
+      "seconds": 5.395,
       "exit_code": 0
     }
   ]

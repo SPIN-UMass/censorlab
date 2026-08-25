@@ -173,7 +173,7 @@ index,class,type,outcome
 171,allowed,checkip.amazonaws.com,completed
 172,allowed,httpbin.org,completed
 173,forbidden,shadowsocks,dropped
-174,forbidden,shadowsocks,dropped
+174,forbidden,shadowsocks,completed
 175,forbidden,shadowsocks,dropped
 176,allowed,ifconfig.me,completed
 177,allowed,example.com,completed

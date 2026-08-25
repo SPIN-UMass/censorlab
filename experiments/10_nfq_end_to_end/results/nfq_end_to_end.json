@@ -270,21 +270,21 @@
     {
       "scenario": "04_shadowsocks",
       "variant": "pycl",
-      "tpr": 1.0,
+      "tpr": 0.99,
       "tnr": 1.0,
-      "tp": 100,
-      "fn": 0,
+      "tp": 99,
+      "fn": 1,
       "fp": 0,
       "tn": 100,
       "errors": 0,
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.483,
-      "latency_p95_ms": 1.629,
-      "latency_stdev_ms": 0.09,
-      "throughput_mbps": 172.8,
-      "retransmits": 32
+      "latency_median_ms": 1.456,
+      "latency_p95_ms": 1.613,
+      "latency_stdev_ms": 0.097,
+      "throughput_mbps": 160.2,
+      "retransmits": 33
     },
     {
       "scenario": "04_shadowsocks",
@@ -299,11 +299,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.276,
-      "latency_p95_ms": 1.406,
-      "latency_stdev_ms": 0.1,
-      "throughput_mbps": 264.5,
-      "retransmits": 49
+      "latency_median_ms": 1.321,
+      "latency_p95_ms": 1.532,
+      "latency_stdev_ms": 0.362,
+      "throughput_mbps": 256.1,
+      "retransmits": 47
     }
   ]
 }
