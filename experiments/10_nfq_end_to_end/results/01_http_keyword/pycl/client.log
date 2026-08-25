@@ -1,0 +1,13 @@
+== latency probe ==
+probe: 200/200 ok, median total 1.35 ms
+== iperf3 ==
+iperf3: 181.4 Mbit/s received, retransmits 27
+Sending 200 requests to 172.30.0.20:80...
+
+=== Results ===
+Total: 200 requests in 1.6s
+Errors: 0
+TP=100 FN=0 FP=0 TN=100
+TPR=1.0000  TNR=1.0000
+Output: /results/live_eval_results.csv
+== client done ==

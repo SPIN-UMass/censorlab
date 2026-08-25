@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """server.py — all the endpoints the live scenarios need, in one process.
 
-  :8080  HTTP/1.1 server answering every GET with a small 200 response (01)
+  :8080  HTTP/1.1 server answering every GET with a small 200 response (probe)
+  :80    same HTTP server (01: the keyword censors filter port 80)
   :443   TLS-handshake responder: reads a ClientHello, replies with a fixed
          ServerHello record (03, 04); plain TCP sink otherwise
   :53    DNS responder: answers every A query with 93.184.216.34 (02).  An
@@ -33,8 +34,8 @@ class Quiet(BaseHTTPRequestHandler):
         pass
 
 
-def http_server():
-    ThreadingHTTPServer(("0.0.0.0", 8080), Quiet).serve_forever()
+def http_server(port=8080):
+    ThreadingHTTPServer(("0.0.0.0", port), Quiet).serve_forever()
 
 
 def server_hello():
@@ -95,4 +96,6 @@ def dns_responder():
 if __name__ == "__main__":
     for fn in (http_server, tls_responder, dns_responder):
         threading.Thread(target=fn, daemon=True).start()
+    # Scenario 01 filters port 80 specifically
+    threading.Thread(target=http_server, args=(80,), daemon=True).start()
     threading.Event().wait()

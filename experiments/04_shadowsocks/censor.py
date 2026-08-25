@@ -11,6 +11,7 @@
 # 6. Entropy > 0.375 (normalized 0-1; equivalent to 3.0 on 0-8 scale)
 
 checked = False
+blocked = False  # once the first data packet fails the checks, the whole connection is blocked
 
 EXEMPT_LENGTHS = {
     517, 518, 519, 520, 521,
@@ -36,10 +37,14 @@ def is_printable_ascii(b):
     return 0x20 <= b <= 0x7e
 
 def process(packet):
-    global checked
+    global checked, blocked
     tcp = packet.tcp
     if not tcp:
         return
+    # A blocked connection stays blocked: the GFW blackholes the flow, so TCP
+    # retransmissions of the first data packet must not slip through.
+    if blocked:
+        return "drop"
     payload = packet.payload
     if not payload or len(payload) == 0:
         return
@@ -72,4 +77,5 @@ def process(packet):
     if entropy < 0.375:
         return
 
+    blocked = True
     return "drop"

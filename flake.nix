@@ -118,6 +118,21 @@
                 Env = [ "PATH=/bin" "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
               };
             };
+            # Image with real circumvention tools (Shadowsocks, obfs4/lyrebird, Snowflake)
+            # used by experiments/11_resilience_matrix to record genuine traffic.
+            docker-circumvention = pkgs.dockerTools.buildLayeredImage {
+              name = "censorlab-circumvention";
+              tag = "latest";
+              contents = with pkgs; [
+                bashInteractive coreutils gnugrep gnused procps iproute2 curl cacert
+                python3 tcpdump shadowsocks-rust obfs4 snowflake
+              ];
+              extraCommands = "mkdir -m 1777 -p tmp";
+              config = {
+                Cmd = [ "/bin/bash" ];
+                Env = [ "PATH=/bin" "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
+              };
+            };
             censorlab = craneLib.buildPackage (common_args // {
               # Install from source (remove all the extra stuff)
               src = pkgs.lib.cleanSourceWith {

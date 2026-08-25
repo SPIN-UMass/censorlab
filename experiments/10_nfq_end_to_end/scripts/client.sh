@@ -30,7 +30,7 @@ PY
 
 case "${SCENARIO:-}" in
     01_http_keyword)
-        python3 "$EXP/01_http_keyword/scripts/generate_traffic.py" --host $SERVER --port 8080 \
+        python3 "$EXP/01_http_keyword/scripts/generate_traffic.py" --host $SERVER --port 80 \
             --num-requests "${N_REQUESTS:-200}" --output "$OUT/live_eval_results.csv" ;;
     02_dns_injection)
         python3 "$EXP/02_dns_injection/scripts/generate_traffic.py" --resolver $SERVER \

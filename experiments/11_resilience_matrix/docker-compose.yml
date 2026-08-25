@@ -1,0 +1,41 @@
+# Traffic capture topology for experiments/11_resilience_matrix.
+#
+#   client 172.31.0.10  ──(Shadowsocks / obfs4 / Snowflake)──▶  server 172.31.0.20
+#
+# Both containers run the real tools (shadowsocks-rust, lyrebird, snowflake);
+# the client records the wire traffic of each tunnel with tcpdump.  Image:
+#     nix build .#docker-circumvention && docker load < result
+x-image: &image censorlab-circumvention:latest
+
+services:
+  server:
+    image: *image
+    volumes:
+      - ${REPO:-../..}:/censorlab:ro
+      - ${RESULTS:-./pcap}:/results
+    networks:
+      net:
+        ipv4_address: 172.31.0.20
+    command: bash /censorlab/experiments/11_resilience_matrix/scripts/server.sh
+
+  client:
+    image: *image
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      N_FETCHES: ${N_FETCHES:-60}
+      TOOLS: ${TOOLS:-shadowsocks obfs4 snowflake}
+    volumes:
+      - ${REPO:-../..}:/censorlab:ro
+      - ${RESULTS:-./pcap}:/results
+    networks:
+      net:
+        ipv4_address: 172.31.0.10
+    command: bash /censorlab/experiments/11_resilience_matrix/scripts/client.sh
+    depends_on: [server]
+
+networks:
+  net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
