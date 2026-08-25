@@ -3,6 +3,8 @@ use censorlab::censor::{Censor, CensorInitError};
 use censorlab::config::{Config, ConfigLoadError};
 use censorlab::ipc::IPC_DEFAULT_PORT;
 use censorlab::model::{start_model_thread, ModelThreadMessage};
+use censorlab::program::analysis::ProgramAnalysis;
+use censorlab::program::program::Program;
 use clap::Parser;
 use ort::Error as OrtError;
 use std::path::PathBuf;
@@ -51,6 +53,21 @@ async fn main() -> Result<(), CensorlabError> {
         .finish();
     // Set the global subscriber
     tracing::subscriber::set_global_default(subscriber)?;
+    // Static analysis needs no config, model thread or censor
+    if let SubCmd::Analyze { program, json } = &args.sub_cmd {
+        let source = std::fs::read_to_string(program)
+            .map_err(|e| CensorlabError::Analyze(format!("{}: {e}", program.display())))?;
+        let parsed: Program = source
+            .parse()
+            .map_err(|e: String| CensorlabError::Analyze(format!("{}: {e}", program.display())))?;
+        let analysis = ProgramAnalysis::of(&parsed, Some(&source));
+        if *json {
+            println!("{}", serde_json::to_string_pretty(&analysis).map_err(|e| CensorlabError::Analyze(e.to_string()))?);
+        } else {
+            print!("{}", analysis.report());
+        }
+        return Ok(());
+    }
     // Load our config
     let mut config = args
         .config_path
@@ -94,4 +111,6 @@ enum CensorlabError {
     EnvironmentBuild(#[from] OrtError),
     #[error("Failed to initialize censor: {0}")]
     CensorInit(#[from] CensorInitError),
+    #[error("Failed to analyse program: {0}")]
+    Analyze(String),
 }

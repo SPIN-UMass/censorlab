@@ -55,6 +55,7 @@ pub type PortVec = BitArr!(for 65536, in u64, Msb0);
 /// Arguments to the censor are stored here
 pub mod args {
     use clap::Parser;
+    use std::path::PathBuf;
     /// Censorlab is a framework for simulating censors
     #[derive(Debug, Parser)]
     pub enum SubCmd {
@@ -77,6 +78,15 @@ pub mod args {
         Nfq {
             #[clap(flatten)]
             args: super::nfq::Args,
+        },
+        /// Statically analyse a CensorLang program: per-connection/per-host memory
+        /// and worst-case per-packet operation counts.  No traffic is processed.
+        Analyze {
+            /// Path to the CensorLang program (.cl)
+            program: PathBuf,
+            /// Emit JSON instead of a human-readable report
+            #[clap(long)]
+            json: bool,
         },
     }
 }
@@ -397,6 +407,8 @@ impl Censor {
             args::SubCmd::Wire { args } => self.run_wire(args)?,
             args::SubCmd::Pcap { args } => self.run_pcap(args)?,
             args::SubCmd::Nfq { args } => self.run_nfq(args).await?,
+            // Handled in the binary before a Censor is constructed
+            args::SubCmd::Analyze { .. } => {}
         };
         Ok(())
     }

@@ -1,0 +1,46 @@
+{
+  "source_lines": 11,
+  "lines": 11,
+  "max_lines_per_packet": 11,
+  "regexes": 0,
+  "fields": [
+    "Tcp(PayloadLength)"
+  ],
+  "models": [
+    "extractor"
+  ],
+  "connection_registers": {
+    "float": [
+      0
+    ],
+    "int": [
+      0,
+      1,
+      2
+    ],
+    "bool": [
+      0
+    ]
+  },
+  "host_registers": {
+    "float": [],
+    "int": [],
+    "bool": []
+  },
+  "per_connection_register_bytes": 33,
+  "per_connection_bytes": 53,
+  "per_host_register_bytes": 0,
+  "per_packet": {
+    "conditions": 10,
+    "reads": 28,
+    "writes": 5,
+    "copies": 4,
+    "arithmetic": 1,
+    "logic": 0,
+    "regex": 0,
+    "model_inputs": 2,
+    "model_calls": 1,
+    "returns": 3
+  },
+  "ends_with_unconditional_return": false
+}
