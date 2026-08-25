@@ -426,7 +426,8 @@ impl Censor {
                                 }
                                 trace!("Sending bidirectional reset for {:?}<->{:?}, ips={:?}, ports={},{}, seq={},ack={}", src_mac, dst_mac, ips, src_port, dst_port, seq, ack);
                                 // Send resets, then accept the packet
-                                let (client_reset, server_reset) = self.craft_resets(
+                                let (client_reset, server_reset) = Self::craft_resets(
+                                    client_mac.0,
                                     src_mac,
                                     dst_mac,
                                     ips,
@@ -495,8 +496,10 @@ impl Censor {
                                     }
                                 }
                                 // Construct and send the injection packet
+                                // Ethernet source is always our own MAC (see craft_resets)
+                                let _ = inj_src_mac;
                                 let inject_packet = crate::transport::construct_udp_inject(
-                                    EthernetAddress(inj_src_mac),
+                                    client_mac,
                                     EthernetAddress(inj_dst_mac),
                                     inject_ips,
                                     inject_src_port,
@@ -562,10 +565,18 @@ impl Censor {
         }
         Ok(())
     }
+    /// Build the two RST frames for an intercepted segment `src -> dst`.
+    ///
+    /// Both frames leave *our* interface, so their Ethernet source is our own
+    /// MAC (`own_mac`); only the IP/TCP layers impersonate the peers.  Spoofing
+    /// the peers' MACs at layer 2 poisons the FDB of any learning bridge we are
+    /// attached to (it would move the peer's MAC onto our port) and stalls the
+    /// very connections we are trying to reset.  `src_host_mac`/`dst_host_mac`
+    /// are the next-hop MACs for the original source and destination.
     fn craft_resets(
-        &mut self,
-        src_mac: [u8; 6],
-        dst_mac: [u8; 6],
+        own_mac: [u8; 6],
+        src_host_mac: [u8; 6],
+        dst_host_mac: [u8; 6],
         ips: IpPair,
         ipid: Option<u16>,
         src_port: u16,
@@ -582,8 +593,8 @@ impl Censor {
         // - seq should be what the source expects to receive = intercepted ack
         // - ack can acknowledge what they sent = intercepted seq + payload_len
         let client_reset = crate::transport::construct_reset(
-            EthernetAddress(dst_mac),
-            EthernetAddress(src_mac),
+            EthernetAddress(own_mac),
+            EthernetAddress(src_host_mac),
             ips.swap(),
             ipid,
             dst_port, // src port (swapped)
@@ -602,8 +613,8 @@ impl Censor {
         //   (since the original packet is accepted, dest will have processed it)
         // - ack = 0 is fine for RST
         let server_reset = crate::transport::construct_reset(
-            EthernetAddress(src_mac),
-            EthernetAddress(dst_mac),
+            EthernetAddress(own_mac),
+            EthernetAddress(dst_host_mac),
             ips,
             ipid,
             src_port,          // src port
@@ -653,4 +664,30 @@ pub enum NfqModeError {
     Process(#[from] smoltcp::wire::Error),
     #[error("Error joining watermark thread :{0}")]
     ThreadJoin(#[from] JoinError),
+}
+
+#[cfg(test)]
+mod reset_frame_tests {
+    use super::*;
+    use smoltcp::wire::{EthernetFrame, Ipv4Address};
+
+    #[test]
+    fn resets_use_our_mac_as_ethernet_source() {
+        let own = [0x02, 0xCE, 0x00, 0x00, 0x00, 0x01];
+        let client = [0xAA, 0x00, 0x00, 0x00, 0x00, 0x01];
+        let server = [0xBB, 0x00, 0x00, 0x00, 0x00, 0x02];
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        let (to_client, to_server) = Censor::craft_resets(own, client, server, ips, Some(1), 40000, 443,
+                          TcpSeqNumber(2000), TcpSeqNumber(1000), 100, true)
+            .unwrap();
+        let f1 = EthernetFrame::new_checked(&to_client[..]).unwrap();
+        let f2 = EthernetFrame::new_checked(&to_server[..]).unwrap();
+        assert_eq!(f1.src_addr(), EthernetAddress(own));
+        assert_eq!(f1.dst_addr(), EthernetAddress(client));
+        assert_eq!(f2.src_addr(), EthernetAddress(own));
+        assert_eq!(f2.dst_addr(), EthernetAddress(server));
+    }
 }

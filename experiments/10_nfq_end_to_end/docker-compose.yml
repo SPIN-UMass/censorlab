@@ -1,0 +1,83 @@
+# Live NFQ end-to-end topology (experiments/10_nfq_end_to_end, MR2).
+#
+#   client 172.30.0.10 ──▶ censor 172.30.0.2 ──▶ server 172.30.0.20   (one bridge)
+#
+# All three containers share one Docker bridge/subnet, but client and server
+# each carry a /32 host route to the other *via the censor*, so every packet
+# between them is forwarded by the censor container (ip_forward=1, ICMP
+# redirects disabled).  Keeping everything inside one bridge subnet avoids the
+# per-bridge anti-spoofing rules Docker ≥ 28 installs on the host.  CensorLab's
+# NFQ mode hooks raw/PREROUTING on the censor, so every forwarded packet in
+# both directions is queued to the censor program.  The same image (built from
+# the flake: `nix build .#docker-live && docker load < result`) plays all roles.
+#
+# Environment (set by scripts/run.sh):
+#   CENSOR_CMD   command run in the censor container, e.g.
+#                "censorlab -c /censorlab/experiments/03_tls_sni/censor.toml nfq --client-ip 172.30.0.10"
+#                or "sleep infinity" for the no-censor baseline
+#   CLIENT_CMD   command run in the client container once the path is up
+#   REPO         repository root on the host (mounted read-only at /censorlab)
+#   RESULTS      host directory mounted read-write at /results
+
+x-image: &image censorlab-live:latest
+
+services:
+  server:
+    image: *image
+    cap_add: [NET_ADMIN]
+    sysctls:
+      net.ipv4.conf.all.accept_redirects: 0
+    volumes:
+      - ${REPO}:/censorlab:ro
+    networks:
+      path:
+        ipv4_address: 172.30.0.20
+        driver_opts:
+          com.docker.network.endpoint.sysctls: "net.ipv4.conf.IFNAME.accept_redirects=0"
+    command: >
+      bash -c "ip route replace 172.30.0.10/32 via 172.30.0.2 &&
+               iperf3 -s -D &&
+               exec python3 /censorlab/experiments/10_nfq_end_to_end/scripts/server.py"
+
+  censor:
+    image: *image
+    cap_add: [NET_ADMIN, NET_RAW]
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv4.conf.all.send_redirects: 0
+      net.ipv4.conf.default.send_redirects: 0
+    volumes:
+      - ${REPO}:/censorlab:ro
+    networks:
+      path:
+        ipv4_address: 172.30.0.2
+        driver_opts:
+          com.docker.network.endpoint.sysctls: "net.ipv4.conf.IFNAME.send_redirects=0"
+    command: bash -c "${CENSOR_CMD}"
+    depends_on: [server]
+
+  client:
+    image: *image
+    cap_add: [NET_ADMIN]
+    sysctls:
+      net.ipv4.conf.all.accept_redirects: 0
+    volumes:
+      - ${REPO}:/censorlab:ro
+      - ${RESULTS}:/results
+    networks:
+      path:
+        ipv4_address: 172.30.0.10
+        driver_opts:
+          com.docker.network.endpoint.sysctls: "net.ipv4.conf.IFNAME.accept_redirects=0"
+    command: >
+      bash -c "ip route replace 172.30.0.20/32 via 172.30.0.2 &&
+               for i in $$(seq 1 30); do curl -s -m 1 -o /dev/null http://172.30.0.20:8080/ && break; sleep 1; done &&
+               ${CLIENT_CMD}"
+    depends_on: [censor]
+
+networks:
+  path:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

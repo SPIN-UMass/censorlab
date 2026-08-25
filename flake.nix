@@ -90,6 +90,34 @@
             default = censorlab;
             # OpenGFW comparison tool for the Table 4 experiments (MR1)
             opengfw = pkgs.callPackage ./experiments/tools/opengfw/package.nix { };
+            # Small Docker image (censorlab + iptables + iperf3 + python3) used by
+            # experiments/10_nfq_end_to_end and docker/docker-compose.live.yml.
+            # Build with `nix build .#docker-live` and `docker load < result`.
+            docker-live = pkgs.dockerTools.buildLayeredImage {
+              name = "censorlab-live";
+              tag = "latest";
+              contents = with pkgs; [
+                censorlab
+                bashInteractive
+                coreutils
+                gnugrep
+                gnused
+                iptables
+                iproute2
+                iperf3
+                curl
+                procps
+                python3
+                tcpdump
+                cacert
+              ];
+              # iperf3 needs a writable /tmp
+              extraCommands = "mkdir -m 1777 -p tmp";
+              config = {
+                Cmd = [ "/bin/bash" ];
+                Env = [ "PATH=/bin" "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
+              };
+            };
             censorlab = craneLib.buildPackage (common_args // {
               # Install from source (remove all the extra stuff)
               src = pkgs.lib.cleanSourceWith {
