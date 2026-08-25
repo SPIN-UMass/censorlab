@@ -57,25 +57,19 @@ class FlowTable:
     """Maps packet indices and 5-tuples to flow ordinals for one PCAP."""
 
     def __init__(self, pcap_path):
-        from scapy.all import IP, IPv6, TCP, UDP, PcapReader  # lazy: scapy is slow to import
+        from pcaprecords import five_tuple, iter_records
 
         self.pkt_to_flow = []
         self.key_to_flow = OrderedDict()
-        with PcapReader(pcap_path) as reader:
-            for pkt in reader:
-                key = None
-                ip = pkt.getlayer(IP) or pkt.getlayer(IPv6)
-                if ip is not None:
-                    l4 = pkt.getlayer(TCP) or pkt.getlayer(UDP)
-                    if l4 is not None:
-                        proto = "tcp" if pkt.haslayer(TCP) else "udp"
-                        key = self.make_key(proto, ip.src, l4.sport, ip.dst, l4.dport)
-                if key is None:
-                    self.pkt_to_flow.append(None)
-                    continue
-                if key not in self.key_to_flow:
-                    self.key_to_flow[key] = len(self.key_to_flow)
-                self.pkt_to_flow.append(self.key_to_flow[key])
+        for _ts, frame, linktype in iter_records(pcap_path):
+            t = five_tuple(frame, linktype)
+            if t is None:
+                self.pkt_to_flow.append(None)
+                continue
+            key = self.make_key(*t)
+            if key not in self.key_to_flow:
+                self.key_to_flow[key] = len(self.key_to_flow)
+            self.pkt_to_flow.append(self.key_to_flow[key])
 
     @staticmethod
     def make_key(proto, a_ip, a_port, b_ip, b_port):
@@ -351,7 +345,7 @@ def report_scenario(scenario_dir, pcap_override=None, results_dir=None, labels_o
         rows.append(row)
 
     out = {"table": "table3", "experiment": sc["ID"], "pcap": os.path.relpath(pcap, sdir),
-           "flows": flows.num_flows, "labels": len(labels), "rows": rows}
+           "packets": len(flows.pkt_to_flow), "flows": flows.num_flows, "labels": len(labels), "rows": rows}
     with open(os.path.join(results, "accuracy.json"), "w") as f:
         json.dump(out, f, indent=2)
     with open(os.path.join(results, "table3.json"), "w") as f:
