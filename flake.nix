@@ -79,6 +79,7 @@
               pkgs.bash
               pkgs.time
               pkgs.zola
+              pkgs.gnused
             ];
           };
           devShells.website = import ./website/devshell.nix { inherit pkgs; };
