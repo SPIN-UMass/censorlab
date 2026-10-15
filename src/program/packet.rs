@@ -108,6 +108,12 @@ impl Packet {
         }
         f64::from(ones) / f64::from(len)
     }
+    /// Fraction of payload bytes that are printable ASCII (0x20..=0x7e);
+    /// Wu et al.'s Ex3 exemption.  NaN for an empty payload, like the popcount.
+    pub fn payload_printable_fraction(&self) -> f64 {
+        let printable = self.payload.iter().filter(|b| (0x20..=0x7e).contains(*b)).count();
+        printable as f64 / self.payload.len() as f64
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -497,6 +503,10 @@ pub mod rust_packet {
         #[pygetset]
         fn payload_avg_popcount(&self) -> f64 {
             self.0.payload_average_popcount()
+        }
+        #[pygetset]
+        fn payload_printable_fraction(&self) -> f64 {
+            self.0.payload_printable_fraction()
         }
         #[pymethod]
         fn __str__(&self) -> String {

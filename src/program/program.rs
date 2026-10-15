@@ -864,6 +864,7 @@ pub mod field {
         PayloadEntropy,
         /// Average popcount (bits per byte) of the transport-layer payload
         PayloadAveragePopcount,
+        PayloadPrintableFraction,
     }
     impl Field {
         pub fn eval(
@@ -894,6 +895,7 @@ pub mod field {
                 Field::Direction => Ok(Value::Int(packet.direction.into())),
                 Field::PayloadEntropy => Ok(Value::Float(packet.payload_entropy())),
                 Field::PayloadAveragePopcount => Ok(Value::Float(packet.payload_average_popcount())),
+                Field::PayloadPrintableFraction => Ok(Value::Float(packet.payload_printable_fraction())),
             }
         }
         pub fn all() -> Vec<Field> {
@@ -910,6 +912,7 @@ pub mod field {
             fields.push(Field::Direction);
             fields.push(Field::PayloadEntropy);
             fields.push(Field::PayloadAveragePopcount);
+            fields.push(Field::PayloadPrintableFraction);
             fields
         }
     }
@@ -2619,6 +2622,21 @@ mod tests {
     // =========================================================================
     // Popcount field tests
     // =========================================================================
+
+    #[test]
+    fn field_payload_printable_fraction() {
+        // 'A' and ' ' are printable, 0x00 and 0xFF are not -> 2/4
+        let pkt = make_tcp_packet(&[b'A', 0x00, b' ', 0xFF]);
+        let field = field::Field::PayloadPrintableFraction;
+        let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+        assert!(matches!(result, Value::Float(f) if f == 0.5));
+    }
+
+    #[test]
+    fn parse_field_payload_printable_fraction() {
+        let field: field::Field = "transport.payload.printable_fraction".parse().unwrap();
+        assert_eq!(field, field::Field::PayloadPrintableFraction);
+    }
 
     #[test]
     fn field_payload_average_popcount() {

@@ -97,6 +97,7 @@ pub Field: Field = {
   "direction" => Field::Direction,
   "transport.payload.entropy" => Field::PayloadEntropy,
   "transport.payload.avg_popcount" => Field::PayloadAveragePopcount,
+  "transport.payload.printable_fraction" => Field::PayloadPrintableFraction,
 }
 
 Float : f64 = {
