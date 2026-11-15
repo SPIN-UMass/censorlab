@@ -16,7 +16,7 @@
 mode = "Python"
 # Optional, script to load at startup
 # relative to censor.toml
-script = "shadowsocks_poison.py"
+script = "censor.py"
 [ethernet]
 # What to do if we come across a packet with an unknown ethertype
 # i.e. not IP or ARP
@@ -44,9 +44,9 @@ list = []
 # unknown = "None"
 [ip.blocklist]
 # Addresses to block
-list = [ "192.168.31.1" ] 
+list = []
 # What to do if address is in the blocklist 
-action = "Reset"
+# action = "None"
 # Allowlist of IP addresses
 [ip.allowlist]
 # Addresses to allow
