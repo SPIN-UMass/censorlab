@@ -216,7 +216,15 @@ pub fn http_get(host: &str, path: &str) -> Vec<u8> {
 ///
 /// This produces a full TLS record suitable as a TCP payload.
 pub fn tls_client_hello_record(sni: &str) -> Vec<u8> {
-    let msg = tls_client_hello_message(sni);
+    tls_client_hello_record_padded(sni, 0)
+}
+
+/// Build a TLS ClientHello record with a padding extension of `padding` bytes.
+///
+/// With ~1500 bytes of padding this is the size of a ClientHello carrying a post-quantum
+/// key share, which no longer fits in a single TCP segment.
+pub fn tls_client_hello_record_padded(sni: &str, padding: usize) -> Vec<u8> {
+    let msg = tls_client_hello_message(sni, padding);
     let mut record = Vec::with_capacity(5 + msg.len());
     record.push(22); // content type: Handshake
     record.extend_from_slice(&[0x03, 0x01]); // TLS 1.0
@@ -227,7 +235,7 @@ pub fn tls_client_hello_record(sni: &str) -> Vec<u8> {
 }
 
 /// Build a TLS ClientHello handshake message (without record header).
-fn tls_client_hello_message(sni: &str) -> Vec<u8> {
+fn tls_client_hello_message(sni: &str, padding: usize) -> Vec<u8> {
     let mut extensions = Vec::new();
 
     // SNI extension
@@ -254,6 +262,14 @@ fn tls_client_hello_message(sni: &str) -> Vec<u8> {
         extensions.push((sv_data_len & 0xff) as u8);
         extensions.push(versions.len() as u8);
         extensions.extend_from_slice(&versions);
+    }
+
+    // padding extension
+    if padding > 0 {
+        extensions.extend_from_slice(&[0x00, 0x15]);
+        extensions.push(((padding >> 8) & 0xff) as u8);
+        extensions.push((padding & 0xff) as u8);
+        extensions.extend(std::iter::repeat(0u8).take(padding));
     }
 
     let ch_body_len = 2 + 32 + 1 + 2 + 2 + 1 + 1 + 2 + extensions.len();
@@ -297,7 +313,7 @@ pub fn high_entropy_payload(len: usize) -> Vec<u8> {
 ///
 /// The payload is NOT encrypted — suitable for testing the QUIC parser.
 pub fn quic_initial_packet(sni: &str) -> Vec<u8> {
-    let ch = tls_client_hello_message(sni);
+    let ch = tls_client_hello_message(sni, 0);
 
     // CRYPTO frame
     let mut crypto_frame = Vec::new();
