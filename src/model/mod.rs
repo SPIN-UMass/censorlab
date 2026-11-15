@@ -53,7 +53,7 @@ pub fn start_model_thread(
                 .find(|input| input.name() == "float_input")
                 .expect("Could not find float_input");
             let input_dims = if let ort::value::ValueType::Tensor { ref shape, .. } = *input.dtype() {
-                Some(shape.iter().map(|dim| *dim as usize).collect::<Vec<_>>())
+                Some(shape.iter().copied().collect::<Vec<i64>>())
             } else {
                 None
             };
@@ -84,10 +84,11 @@ pub fn start_model_thread(
                     // Check if we have a model by the given name
                     let result: Result<Vec<f32>, _> =
                         if let Some(ref mut model) = models.get_mut(&name) {
-                            match Array::from_shape_vec(
-                                (model.input_dims[0], model.input_dims[1]),
-                                data,
-                            ) {
+                            match onnx::input_shape(&model.input_dims, data.len())
+                                .ok_or_else(|| ModelThreadError::UnsupportedInputShape(model.input_dims.clone()))
+                                .and_then(|shape| {
+                                    Array::from_shape_vec(shape, data).map_err(ModelThreadError::ModelShapeError)
+                                }) {
                                 Ok(input) => {
                                     let tensor = TensorRef::from_array_view(input.view())
                                         .expect("Failed to create tensor from array view");
@@ -104,7 +105,7 @@ pub fn start_model_thread(
                                     }
                                 }
 
-                                Err(err) => Err(ModelThreadError::ModelShapeError(err)),
+                                Err(err) => Err(err),
                             }
                         } else {
                             Err(ModelThreadError::ModelNotFound)
@@ -137,4 +138,6 @@ pub enum ModelThreadError {
     ModelRunError(OrtError),
     #[error("Error with data shape: {0}")]
     ModelShapeError(ShapeError),
+    #[error("Unsupported model input shape {0:?}, expected 2D")]
+    UnsupportedInputShape(Vec<i64>),
 }
