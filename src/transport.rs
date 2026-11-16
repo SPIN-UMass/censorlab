@@ -148,6 +148,44 @@ pub enum ExecutionEnvironment {
     CensorLang { env: ProgramEnv },
 }
 
+/// Build the Reset action for the TCP connection a packet belongs to.
+///
+/// This is the only place a Reset is populated from a packet, so every source of a
+/// Reset (scripts, CensorLang, config lists) targets the same connection the same way.
+/// Returns `None` for non-TCP packets, which have no connection to reset.
+pub fn reset_for(
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Option<Action> {
+    let TransportMetadataExtra::Tcp(tcp) = transport.extra else {
+        return None;
+    };
+    // SYN and FIN each occupy one sequence number (RFC 9293 section 3.4)
+    let seg_len = payload_len + usize::from(tcp.flags.syn) + usize::from(tcp.flags.fin);
+    Some(Action::Reset {
+        src_mac: [0; 6],
+        dst_mac: [0; 6],
+        ips,
+        ipid: None,
+        src_port: transport.src,
+        dst_port: transport.dst,
+        seq: tcp.seq,
+        ack: tcp.ack,
+        seg_len,
+        is_ack: tcp.flags.ack,
+    })
+}
+
+/// [`reset_for`], falling back to Drop for traffic that has no TCP connection to reset.
+pub fn reset_or_drop(
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Action {
+    reset_for(ips, transport, payload_len).unwrap_or(Action::Drop)
+}
+
 /// Recognize the value returned by a PyCL `process()` call and map it to an
 /// engine [`Action`].
 ///
@@ -158,7 +196,7 @@ pub enum ExecutionEnvironment {
 /// None                         -> continue (Action::None)
 /// "allow" | "drop" | "reset"   -> the named action
 /// bytes                        -> inject these bytes as a UDP response
-/// ("delay",   seconds: number) -> hold the packet for `seconds` (Tap/NFQ mode)
+/// ("delay",   seconds: number) -> hold the packet for `seconds` (NFQ; wire forwards)
 /// ("rewrite", {"ttl": int})    -> forward a copy with the IP TTL/hop limit set
 /// ```
 ///
@@ -177,24 +215,7 @@ fn action_from_python(
     }
     if let Some(s) = result.payload::<PyStr>() {
         return match s.as_str().to_lowercase().as_str() {
-            "reset" => {
-                if let TransportMetadataExtra::Tcp(tcp_metadata) = transport.extra {
-                    Action::Reset {
-                        src_mac: [0; 6],
-                        dst_mac: [0; 6],
-                        ips,
-                        ipid: None,
-                        src_port: transport.src,
-                        dst_port: transport.dst,
-                        seq: tcp_metadata.seq,
-                        ack: tcp_metadata.ack,
-                        payload_len,
-                        is_ack: tcp_metadata.flags.ack,
-                    }
-                } else {
-                    Action::Drop
-                }
-            }
+            "reset" => reset_or_drop(ips, transport, payload_len),
             "drop" => Action::Drop,
             "allow" => Action::None,
             other => {
@@ -392,7 +413,7 @@ impl TransportState {
         &mut self,
         ips: IpPair,
         direction: Direction,
-        mut packet: Packet,
+        packet: Packet,
     ) -> Result<Action, SmoltcpError> {
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.
@@ -601,25 +622,7 @@ impl TransportState {
                         ProgramAction::AllowAll => Action::Ignore,
                         ProgramAction::TerminateAll => Action::Drop,
                         ProgramAction::ResetAll => {
-                            if let TransportMetadataExtra::Tcp(tcp_metadata) =
-                                packet.transport.extra
-                            {
-                                Action::Reset {
-                                    src_mac: [0; 6],
-                                    dst_mac: [0; 6],
-                                    ips,
-                                    ipid: None,
-                                    src_port: packet.transport.src,
-                                    dst_port: packet.transport.dst,
-                                    seq: tcp_metadata.seq,
-                                    ack: tcp_metadata.ack,
-                                    payload_len: packet.payload.len(),
-                                    is_ack: tcp_metadata.flags.ack,
-                                }
-                            } else {
-                                // Reset is only meaningful for TCP; fall back to Drop for UDP
-                                Action::Drop
-                            }
+                            reset_or_drop(ips, &packet.transport, packet.payload.len())
                         }
                     }
                 } else {
@@ -640,6 +643,8 @@ const IPV6_HEADER_LEN: u8 = 40;
 const TCP_HEADER_LEN: u8 = 20;
 const UDP_HEADER_LEN: u8 = 8;
 
+/// Build an Ethernet/IP/TCP RST frame. With `ack: Some(n)` the RST carries the ACK
+/// flag and acknowledgment number `n`; with `None` it is a bare RST.
 pub fn construct_reset(
     src_mac: EthernetAddress,
     dst_mac: EthernetAddress,
@@ -647,7 +652,7 @@ pub fn construct_reset(
     ipid: Option<u16>,
     src_port: u16,
     dst_port: u16,
-    ack: TcpSeqNumber,
+    ack: Option<TcpSeqNumber>,
     seq: TcpSeqNumber,
 ) -> Result<Vec<u8>, SmoltcpError> {
     let total_length = ETH_HEADER_LEN
@@ -707,7 +712,7 @@ fn fill_reset(
     ips: IpPair,
     src_port: u16,
     dst_port: u16,
-    ack: TcpSeqNumber,
+    ack: Option<TcpSeqNumber>,
     seq: TcpSeqNumber,
 ) -> Result<(), SmoltcpError> {
     let mut tcp_packet = TcpPacket::new_unchecked(ip_payload);
@@ -715,10 +720,10 @@ fn fill_reset(
     tcp_packet.check_len()?;
     tcp_packet.set_src_port(src_port);
     tcp_packet.set_dst_port(dst_port);
-    tcp_packet.set_ack_number(ack);
+    tcp_packet.set_ack_number(ack.unwrap_or(TcpSeqNumber(0)));
     tcp_packet.set_seq_number(seq);
     tcp_packet.clear_flags();
-    tcp_packet.set_ack(true);
+    tcp_packet.set_ack(ack.is_some());
     tcp_packet.set_rst(true);
     tcp_packet.fill_checksum(&ips.src(), &ips.dst());
     Ok(())
@@ -838,7 +843,7 @@ mod tests {
             src: Ipv4Address::new(10, 0, 0, 1),
             dst: Ipv4Address::new(10, 0, 0, 2),
         };
-        let key_a = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_a = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Tcp);
         let key_b = ConnectionKey::new(ips, 1234, 443, TransportProtocol::Tcp);
         assert_ne!(key_a, key_b);
     }
@@ -849,7 +854,7 @@ mod tests {
             src: Ipv4Address::new(10, 0, 0, 1),
             dst: Ipv4Address::new(10, 0, 0, 2),
         };
-        let key_tcp = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_tcp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Tcp);
         let key_udp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Udp);
         assert_ne!(key_tcp, key_udp);
     }
@@ -871,7 +876,7 @@ mod tests {
             Some(0x1234),
             12345,
             80,
-            TcpSeqNumber(1000),
+            Some(TcpSeqNumber(1000)),
             TcpSeqNumber(2000),
         );
         let pkt = result.unwrap();
@@ -913,7 +918,7 @@ mod tests {
             None,
             443,
             50000,
-            TcpSeqNumber(500),
+            Some(TcpSeqNumber(500)),
             TcpSeqNumber(600),
         );
         let pkt = result.unwrap();
@@ -933,5 +938,62 @@ mod tests {
         assert_eq!(tcp.dst_port(), 50000);
         assert!(tcp.rst());
         assert!(tcp.ack());
+    }
+
+    #[test]
+    fn construct_reset_without_ack_clears_ack_flag() {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(192, 168, 1, 1),
+            dst: Ipv4Address::new(10, 0, 0, 1),
+        };
+        let pkt = construct_reset(EthernetAddress([0; 6]), EthernetAddress([0; 6]), ips, None,
+                                  1, 2, None, TcpSeqNumber(42)).unwrap();
+        let eth = EthernetFrame::new_unchecked(&pkt);
+        let ip = Ipv4Packet::new_unchecked(eth.payload());
+        let tcp = TcpPacket::new_checked(ip.payload()).unwrap();
+        assert!(tcp.rst());
+        assert!(!tcp.ack());
+        assert_eq!(tcp.ack_number(), TcpSeqNumber(0));
+        assert_eq!(tcp.seq_number(), TcpSeqNumber(42));
+        assert!(tcp.verify_checksum(&ips.src(), &ips.dst()));
+    }
+
+    // --- reset_for tests ---
+
+    fn tcp_transport(syn: bool, fin: bool, ack: bool) -> crate::program::packet::TransportMetadata {
+        use crate::program::packet::{TcpFlags, TcpMetadata, TransportMetadata};
+        TransportMetadata {
+            src: 40000,
+            dst: 443,
+            extra: TransportMetadataExtra::Tcp(TcpMetadata {
+                seq: TcpSeqNumber(1000),
+                ack: TcpSeqNumber(2000),
+                header_len: 20,
+                urgent_at: 0,
+                window_len: 0,
+                flags: TcpFlags {
+                    fin, syn, rst: false, psh: false, ack, urg: false, ece: false, cwr: false, ns: false,
+                },
+            }),
+        }
+    }
+
+    fn seg_len_of(action: Option<Action>) -> usize {
+        match action {
+            Some(Action::Reset { seg_len, .. }) => seg_len,
+            other => panic!("expected Reset, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reset_for_counts_syn_and_fin_in_segment_length() {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(false, false, true), 5)), 5);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(true, false, false), 0)), 1);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(false, true, true), 5)), 6);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(true, true, false), 3)), 5);
     }
 }

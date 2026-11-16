@@ -31,20 +31,10 @@ if [ -f "$REPO_ROOT/.gitmodules" ] && command -v git &>/dev/null; then
     git -C "$REPO_ROOT" submodule update --init --recursive 2>/dev/null || true
 fi
 
-# Compute a fingerprint of files that affect the Docker image.
-# Uses git so it's portable across Linux and macOS.
-# NOTE: These paths must match the COPY sources in the Dockerfile.
-# If the Dockerfile's COPY paths change, update the list here too.
-compute_build_hash() {
-    (cd "$REPO_ROOT" && {
-        git rev-parse HEAD
-        git diff HEAD -- docker/ flake.nix flake.lock Cargo.toml Cargo.lock \
-            build.rs src/ demos/ website/ .gitmodules
-        git submodule status
-    } 2>/dev/null | git hash-object --stdin 2>/dev/null) || echo "unknown"
-}
-
-BUILD_HASH=$(compute_build_hash)
+# Fingerprint of files that affect the Docker image (see build_hash.sh).
+# shellcheck source=build_hash.sh
+source "$SCRIPT_DIR/build_hash.sh"
+BUILD_HASH=$(compute_build_hash "$REPO_ROOT" "${DOCKERFILE_SOURCES[@]}")
 STORED_HASH=$(docker inspect --format '{{index .Config.Labels "censorlab.build_hash"}}' \
     censorlab:latest 2>/dev/null || echo "")
 

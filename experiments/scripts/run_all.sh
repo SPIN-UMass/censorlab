@@ -40,6 +40,11 @@ SHOWCASE_EXPERIMENTS=(
 
 FAILED=()
 
+# Result files are committed, so mere existence says nothing about this run.
+# A file only counts as produced if it is newer than this start marker.
+RUN_MARKER="$(mktemp)"
+trap 'rm -f "$RUN_MARKER"' EXIT
+
 # ----------------------------------------------------------------
 # Step 1: Generate PCAPs for experiments 01-05
 # ----------------------------------------------------------------
@@ -160,30 +165,26 @@ echo "  Pipeline Complete"
 echo "============================================================"
 echo ""
 
-# Check which result files exist
+# check_result <path relative to experiments/> — OK only if written by this run
+check_result() {
+    local rel="$1" f="$EXPERIMENTS_DIR/$1"
+    if [ ! -f "$f" ]; then
+        echo "  [MISS]  $rel"
+        FAILED+=("$rel missing")
+    elif [ "$f" -nt "$RUN_MARKER" ]; then
+        echo "  [OK]    $rel"
+    else
+        echo "  [STALE] $rel (not updated by this run)"
+        FAILED+=("$rel stale")
+    fi
+}
+
 echo "Result files:"
 for exp in "${SHOWCASE_EXPERIMENTS[@]}"; do
-    t4="$EXPERIMENTS_DIR/$exp/results/table4.json"
-    if [ -f "$t4" ]; then
-        echo "  [OK]   $exp/results/table4.json"
-    else
-        echo "  [MISS] $exp/results/table4.json"
-    fi
+    check_result "$exp/results/table4.json"
 done
-
-bench="$EXPERIMENTS_DIR/07_benchmarks/results/benchmark_summary.json"
-if [ -f "$bench" ]; then
-    echo "  [OK]   07_benchmarks/results/benchmark_summary.json"
-else
-    echo "  [MISS] 07_benchmarks/results/benchmark_summary.json"
-fi
-
-agg="$EXPERIMENTS_DIR/results.tex"
-if [ -f "$agg" ]; then
-    echo "  [OK]   experiments/results.tex"
-else
-    echo "  [MISS] experiments/results.tex"
-fi
+check_result "07_benchmarks/results/benchmark_summary.json"
+check_result "results.tex"
 
 echo ""
 if [ ${#FAILED[@]} -gt 0 ]; then

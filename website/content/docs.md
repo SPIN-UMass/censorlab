@@ -250,10 +250,15 @@ CensorLab processes packets through a layered pipeline. Each layer can have allo
 | Key           | Type       | Description |
 |---------------|------------|-------------|
 | `unknown`     | action     | Action for unknown IP next-header protocols |
-| `allowlist`   | list block | IP address allowlist |
-| `blocklist`   | list block | IP address blocklist |
+| `allowlist`   | list block | IP address / subnet allowlist |
+| `blocklist`   | list block | IP address / subnet blocklist |
 
-IP addresses are strings like `"192.168.1.1"` or `"::1"`.
+Entries are single addresses like `"192.168.1.1"` or `"::1"`, or CIDR subnets like `"10.0.0.0/8"` or `"2001:db8::/32"`; the two may be mixed in one list. A bare address is equivalent to a `/32` (IPv4) or `/128` (IPv6). Lookups use a sorted range table, so large subnet lists stay cheap.
+
+Subnets are parsed strictly and a bad entry makes the config fail to load:
+
+- the prefix must be plain decimal with no sign or leading zeros, and at most 32 (IPv4) or 128 (IPv6);
+- no bits may be set after the prefix — `"10.0.0.1/8"` is rejected (with a hint to write `"10.0.0.0/8"`) rather than silently widened to the whole `/8`.
 
 ### `[icmp]`
 
@@ -270,7 +275,7 @@ IP addresses are strings like `"192.168.1.1"` or `"::1"`.
 | `ip_port_allowlist`  | list block | IP:port pair allowlist |
 | `ip_port_blocklist`  | list block | IP:port pair blocklist |
 
-Port lists contain integers (e.g. `[80, 443]`). IP:port pairs are strings like `"10.0.0.1:80"` or `"[::1]:443"`.
+Port lists contain integers (e.g. `[80, 443]`). IP:port pairs are strings like `"10.0.0.1:80"` or `"[::1]:443"`, and the address part may be a CIDR subnet: `"10.0.0.0/8:80"`, `"[2001:db8::/32]:443"`. IPv6 addresses must be in brackets and IPv4 addresses must not be. Ports must be plain decimal (0–65535).
 
 ### List Block Format
 
@@ -278,7 +283,7 @@ Allowlist and blocklist sections share a common format:
 
 ```toml
 [ip.blocklist]
-list = ["192.168.1.1", "10.0.0.0"]
+list = ["192.168.1.1", "10.0.0.0/8", "2001:db8::/32"]
 action = "Drop"
 ```
 
@@ -304,9 +309,9 @@ Actions control what happens to a packet at a given processing layer.
 | `"None"`   | Continue processing through subsequent layers |
 | `"Ignore"` | Forward the packet immediately, skip further processing |
 | `"Drop"`   | Silently drop the packet |
-| `"Reset"`  | Send TCP RST packets in both directions (only meaningful for TCP-layer lists) |
+| `"Reset"`  | Send TCP RST packets in both directions to tear down the matching connection (valid on `[tcp]` and `[ip]` lists) |
 
-`"Reset"` is only meaningful on `[tcp]` lists. On `[ip]` lists it is accepted but downgraded to `"Drop"` at runtime (with a warning). Using it on `[ethernet]`, `[arp]`, or `[icmp]` sections produces a validation error.
+`"Reset"` is valid on `[tcp]` lists and on `[ip]` (`allowlist`, `blocklist`, `unknown`). On an `[ip]` rule, a matching TCP packet gets a RST for its connection, while any other traffic it matches (ICMP, UDP, other protocols, fragments, truncated TCP) is dropped. `ip.unknown` never matches TCP, so `"Reset"` there behaves as `"Drop"`. Using `"Reset"` on `[ethernet]`, `[arp]`, `[icmp]`, or any `[udp]` list produces a validation error at startup.
 
 ## Example Configuration
 
@@ -318,7 +323,7 @@ hash_seed = 1337
 reset_repeat = 5
 
 [ip.blocklist]
-list = ["198.51.100.1", "203.0.113.0"]
+list = ["198.51.100.1", "203.0.113.0/24"]
 action = "Drop"
 
 [tcp.port_blocklist]
@@ -343,7 +348,7 @@ ip_port_allowlist = { list = [] }
 path = "models/classifier.onnx.ml"
 ```
 
-**Note:** `"Reset"` is only valid on `[tcp]` lists. Using it on `[ip]`, `[ethernet]`, `[arp]`, `[udp]`, or `[icmp]` sections will produce a validation error at startup. Use `"Drop"` for non-TCP layers.
+**Note:** `"Reset"` is valid on `[tcp]` and `[ip]` lists; on `[ip]` it resets TCP connections and drops everything else. Using it on `[ethernet]`, `[arp]`, `[udp]`, or `[icmp]` sections will produce a validation error at startup. Use `"Drop"` for those layers.
 
 ---
 
@@ -360,7 +365,7 @@ PyCL is CensorLab's Python scripting API, powered by RustPython. Scripts run per
 ## Imports
 
 ```python
-from rust import Packet, Model, regex
+from rust import Packet, Model, regex, subnet, ip_in
 ```
 
 This brings all core types into scope. Protocol-specific modules are imported separately:
@@ -665,6 +670,37 @@ def process(packet):
 |---------------------|---------|-------------|
 | `.is_match(bytes)`  | `bool`  | True if the pattern matches anywhere in the byte string |
 
+## Subnets
+
+CIDR subnet membership for address strings such as `packet.ip.src` / `packet.ip.dst`. Subnets use the same strict syntax as the configuration file (see `[ip]` above).
+
+```python
+from rust import subnet, ip_in
+
+# Compile once at module level...
+blocked = subnet("198.51.100.0/24")
+
+def process(packet):
+    if blocked.contains(packet.ip.dst):
+        return "drop"
+    # ...or test ad hoc (parses the subnet on every call)
+    if ip_in(packet.ip.src, "2001:db8::/32"):
+        return "drop"
+```
+
+### `subnet(cidr)` → `Subnet`
+
+Raises `ValueError` if `cidr` is malformed, has a prefix longer than the address, or has host bits set. A bare address is a `/32` or `/128`.
+
+| Method            | Returns | Description |
+|-------------------|---------|-------------|
+| `.contains(addr)` | `bool`  | True if the address string lies in the subnet. Addresses of the other IP family never match. Raises `ValueError` on a malformed address |
+| `str(s)`          | `str`   | Canonical form, e.g. `"10.0.0.0/8"` |
+
+### `ip_in(addr, cidr)` → `bool`
+
+Same as `subnet(cidr).contains(addr)`.
+
 ## Model
 
 Evaluate ONNX models defined in the configuration file.
@@ -841,6 +877,21 @@ XOR <value>, <value> -> <register>
 ```
 
 Values are converted to bool before the operation (`0` / `0.0` / `false` → false, everything else → true).
+
+### Subnet membership: `SRC_IN`, `DST_IN`
+
+Declare subnets with `subnet "<cidr>"` directives (numbered from 0 in order, same strict syntax as the configuration file), then test whether the packet's source or destination address lies in one. The result is written to a register as a bool.
+
+```
+subnet "198.51.100.0/24"
+subnet "2001:db8::/32"
+DST_IN 0 -> reg:b.0
+if reg:b.0 == True: RETURN terminate
+SRC_IN 1 -> reg:b.1
+if reg:b.1 == True: RETURN terminate
+```
+
+Addresses of the other IP family never match. A malformed subnet, or an index that doesn't refer to a declared subnet, is rejected when the program is loaded.
 
 ### `NOOP`
 
