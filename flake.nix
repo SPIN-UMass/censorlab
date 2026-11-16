@@ -76,6 +76,8 @@
               pkgs.snort
               self.packages.${system}.opengfw
               pkgs.tcpdump
+              pkgs.wireshark-cli # editcap: pcapng -> pcap when ingesting ISCXVPN2016
+              pkgs.unzip
               pkgs.curl
               pkgs.dnsutils
               pkgs.iptables
