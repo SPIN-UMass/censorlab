@@ -21,7 +21,8 @@
   };
 
   outputs = { self, nixpkgs, home-manager, utils, rust-overlay, crane, deploy-rs }:
-    utils.lib.eachDefaultSystem
+    # recursiveUpdate so vm/outputs.nix deploy checks merge with ours per system
+    nixpkgs.lib.recursiveUpdate (utils.lib.eachDefaultSystem
       (system:
         let
           overlays = [ (import rust-overlay) ];
@@ -86,6 +87,29 @@
           };
           devShells.website = import ./website/devshell.nix { inherit pkgs; };
           # Censorlab package
+          # Build-artifact-free test/lint runs: `nix build .#checks.<system>.tests`
+          checks =
+            let
+              # Integration tests load demo configs, so include demos/ and tests/
+              testSrc = pkgs.lib.fileset.toSource {
+                root = ./.;
+                fileset = pkgs.lib.fileset.unions [
+                  (craneLib.fileset.commonCargoSources ./.)
+                  (pkgs.lib.fileset.fileFilter (f: f.hasExt "lalrpop") ./src)
+                  ./tests
+                  ./demos
+                ];
+              };
+              checkArgs = common_args // {
+                src = testSrc;
+                inherit cargoArtifacts;
+              };
+            in
+            {
+              tests = craneLib.cargoTest checkArgs;
+              tests-wire = craneLib.cargoTest (checkArgs // { cargoTestExtraArgs = "--features wire"; });
+              clippy = craneLib.cargoClippy (checkArgs // { cargoClippyExtraArgs = "--all-targets --all-features"; });
+            };
           packages = rec {
             default = censorlab;
             # OpenGFW comparison tool for the Table 4 experiments (MR1)
@@ -149,7 +173,7 @@
           } // (if builtins.pathExists ./vm/packages.nix
                then import ./vm/packages.nix { inherit pkgs; }
                else {});
-        }) // (if builtins.pathExists ./vm/outputs.nix
+        })) (if builtins.pathExists ./vm/outputs.nix
               then import ./vm/outputs.nix { inherit self nixpkgs home-manager deploy-rs; }
               else {});
 }
