@@ -2926,4 +2926,46 @@ mod tests {
             matches!(&prog.lines[0].operation, Operation::Model { name } if name == "wf")
         );
     }
+
+    // --- Parser robustness: numeric literals are recognized, never panic ---
+
+    #[test]
+    fn parse_out_of_range_integer_is_error() {
+        assert!("COPY 99999999999999999999 -> reg:i.0".parse::<Program>().is_err());
+        assert!("COPY -99999999999999999999 -> reg:i.0".parse::<Program>().is_err());
+    }
+
+    #[test]
+    fn parse_i64_min_literal() {
+        let prog: Program = "COPY -9223372036854775808 -> reg:i.0".parse().unwrap();
+        assert!(matches!(
+            &prog.lines[0].operation,
+            Operation::Copy { from: Input::Int(i64::MIN), .. }
+        ));
+    }
+
+    #[test]
+    fn parse_out_of_range_register_index_is_error() {
+        assert!("COPY 1 -> reg:i.99999999999999999999".parse::<Program>().is_err());
+        assert!("REGEX 99999999999999999999 -> reg:b.0".parse::<Program>().is_err());
+        assert!("COPY 1 -> model:m:in:99999999999999999999".parse::<Program>().is_err());
+        assert!("COPY model:m:out:99999999999999999999 -> reg:f.0".parse::<Program>().is_err());
+    }
+
+    #[test]
+    fn parse_non_finite_float_is_error() {
+        let huge = format!("COPY {}.0 -> reg:f.0", "9".repeat(400));
+        assert!(huge.parse::<Program>().is_err());
+    }
+
+    #[test]
+    fn parse_model_name_that_is_a_keyword() {
+        // Model names follow the same rule in MODEL and in model:<name>:in/out
+        let prog: Program = "COPY 1 -> model:f:in:0\nMODEL f\nCOPY model:f:out:0 -> reg:f.0"
+            .parse()
+            .unwrap();
+        assert!(matches!(&prog.lines[1].operation, Operation::Model { name } if name == "f"));
+        let prog: Program = "MODEL allow".parse().unwrap();
+        assert!(matches!(&prog.lines[0].operation, Operation::Model { name } if name == "allow"));
+    }
 }
