@@ -105,17 +105,21 @@ impl Packet {
     pub fn payload_entropy(&self) -> f64 {
         shannon_entropy(&self.payload)
     }
+    /// Average number of set bits per payload byte; 0.0 for an empty payload
+    /// (like the entropy), never NaN.
     pub fn payload_average_popcount(&self) -> f64 {
-        let mut ones: u32 = 0;
-        let len: u32 = self.payload.len().try_into().unwrap();
-        for byte in &self.payload {
-            ones += byte.count_ones();
+        if self.payload.is_empty() {
+            return 0.0;
         }
-        f64::from(ones) / f64::from(len)
+        let ones: u64 = self.payload.iter().map(|b| u64::from(b.count_ones())).sum();
+        ones as f64 / self.payload.len() as f64
     }
     /// Fraction of payload bytes that are printable ASCII (0x20..=0x7e);
-    /// Wu et al.'s Ex3 exemption.  NaN for an empty payload, like the popcount.
+    /// Wu et al.'s Ex3 exemption.  0.0 for an empty payload, never NaN.
     pub fn payload_printable_fraction(&self) -> f64 {
+        if self.payload.is_empty() {
+            return 0.0;
+        }
         let printable = self.payload.iter().filter(|b| (0x20..=0x7e).contains(*b)).count();
         printable as f64 / self.payload.len() as f64
     }
