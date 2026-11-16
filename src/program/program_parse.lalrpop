@@ -4,12 +4,17 @@ use crate::program::program::{
         ip::V6Field as Ipv6Field, tcp::Field as TcpField, tcp::Flag as TcpFlag,
         udp::Field as UdpField, Field,
     },
-    Action, ComparisonOperator, Condition, Input, Line, LogicOperator, ModelSlot, Operation,
+    Action, ComparisonOperator, Condition, Endpoint, Input, Line, LogicOperator, ModelSlot, Operation,
     Operator, Register, RegisterType,
 };
 use std::str::FromStr;
+use lalrpop_util::ParseError;
 
 grammar;
+
+// Numeric literals are recognized by the lexer as digit strings of unbounded
+// length; the actions below are the second half of the recognizer and reject
+// any that do not fit the target type (instead of panicking).
 
 pub Line: Line = {
   "if" <condition: Condition> ":" <operation: Operation>  => Line { condition: Some(condition), operation },
@@ -19,16 +24,25 @@ Condition: Condition = {
   <lhs: Input> <operator: Operator> <rhs: Input> => Condition { lhs, operator, rhs }
 }
 
-Ident: String = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => s.to_string();
-
-ModelInputRef: ModelSlot = <s:r"model:[a-zA-Z_][a-zA-Z0-9_]*:in:[0-9]+"> => {
-    let parts: Vec<&str> = s.splitn(4, ':').collect();
-    ModelSlot { name: parts[1].to_string(), index: usize::from_str(parts[3]).unwrap() }
+// `MODEL <name>` is lexed as a single token (like `model:<name>:in:<N>`) so that
+// a model name is never confused with a keyword: every name accepted in a
+// model slot reference is also accepted here, and vice versa.
+ModelCall: String = <s:r"MODEL[ \t]+[a-zA-Z_][a-zA-Z0-9_]*"> => {
+    s["MODEL".len()..].trim_start().to_string()
 };
 
-ModelOutputRef: ModelSlot = <s:r"model:[a-zA-Z_][a-zA-Z0-9_]*:out:[0-9]+"> => {
+ModelInputRef: ModelSlot = <s:r"model:[a-zA-Z_][a-zA-Z0-9_]*:in:[0-9]+"> =>? {
     let parts: Vec<&str> = s.splitn(4, ':').collect();
-    ModelSlot { name: parts[1].to_string(), index: usize::from_str(parts[3]).unwrap() }
+    let index = usize::from_str(parts[3])
+        .map_err(|_| ParseError::User { error: "model input index out of range" })?;
+    Ok(ModelSlot { name: parts[1].to_string(), index })
+};
+
+ModelOutputRef: ModelSlot = <s:r"model:[a-zA-Z_][a-zA-Z0-9_]*:out:[0-9]+"> =>? {
+    let parts: Vec<&str> = s.splitn(4, ':').collect();
+    let index = usize::from_str(parts[3])
+        .map_err(|_| ParseError::User { error: "model output index out of range" })?;
+    Ok(ModelSlot { name: parts[1].to_string(), index })
 };
 
 Input: Input = {
@@ -101,16 +115,25 @@ pub Field: Field = {
 }
 
 Float : f64 = {
-  "-" <s:r"[0-9]+\.[0-9]+"> => -f64::from_str(s).unwrap(),
-  <s:r"[0-9]+\.[0-9]+"> => f64::from_str(s).unwrap()
+  "-" <f: UFloat> => -f,
+  UFloat,
 }
+
+UFloat: f64 = <s:r"[0-9]+\.[0-9]+"> =>? f64::from_str(s)
+  .ok()
+  .filter(|f| f.is_finite())
+  .ok_or(ParseError::User { error: "float literal out of range" });
 
 Integer: i64 = {
-  "-" <s:r"[0-9]+"> => -i64::from_str(s).unwrap(),
-  <s:r"[0-9]+"> => i64::from_str(s).unwrap()
+  // Parse the sign together with the digits so that i64::MIN is representable
+  "-" <s:r"[0-9]+"> =>? i64::from_str(&format!("-{s}"))
+    .map_err(|_| ParseError::User { error: "integer literal out of range" }),
+  <s:r"[0-9]+"> =>? i64::from_str(s)
+    .map_err(|_| ParseError::User { error: "integer literal out of range" }),
 }
 
-Usize: usize = <s:r"[0-9]+"> => usize::from_str(s).unwrap();
+Usize: usize = <s:r"[0-9]+"> =>? usize::from_str(s)
+  .map_err(|_| ParseError::User { error: "index out of range" });
 
 pub Operator: Operator = {
   "lt" => Operator::Comparison(ComparisonOperator::Less), 
@@ -154,9 +177,11 @@ Operation: Operation = {
   "OR"     <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Or{ lhs, rhs, out},
   "XOR"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Xor{lhs, rhs, out},
   "REGEX"  <index: Usize> "->" <out: Register> => Operation::Regex{index, out},
+  "SRC_IN" <index: Usize> "->" <out: Register> => Operation::SubnetIn{index, endpoint: Endpoint::Src, out},
+  "DST_IN" <index: Usize> "->" <out: Register> => Operation::SubnetIn{index, endpoint: Endpoint::Dst, out},
   "RETURN" <action: Action> => Operation::Return(action),
   "NOOP" => Operation::Noop,
-  "MODEL"  <name: Ident> => Operation::Model{name},
+  <name: ModelCall> => Operation::Model{name},
 }
 pub Action: Action = {
   "allow" => Action::Allow,  

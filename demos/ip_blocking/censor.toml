@@ -10,7 +10,7 @@
 # * Drop   - This means the packet is immediately Dropped without further analysis. Only allowed in wire mode
 # * Reset  - Sends a TCP RST in both directions. The original content of the packet is not forwarded in wire mode.
 #            Only allowed in IP and TCP sections. If specified in an IP section and the underlying traffic is not TCP, this has
-#            the same behavior as "None"
+#            the same behavior as "Drop"
 [execution]
 # Python or CensorLang
 mode = "Python"
@@ -43,8 +43,10 @@ list = []
 # i.e. not tcp/udp/icmp
 # unknown = "None"
 [ip.blocklist]
-# Addresses to block
-list = [ ] 
+# Addresses and/or CIDR subnets to block, e.g.
+# list = [ "8.8.8.8", "198.51.100.0/24", "2001:db8::/32" ]
+# Subnets must not have host bits set ("10.0.0.1/8" is rejected; write "10.0.0.0/8")
+list = [ ]
 # What to do if address is in the blocklist 
 action = "Drop"
 # Allowlist of IP addresses
@@ -75,7 +77,8 @@ list = []
 # What to do if the ip-port pair is not in this list
 # action = "None"
 [tcp.ip_port_blocklist]
-# List of ip-port pairs
+# List of ip-port pairs; the address may be a subnet, IPv6 in brackets
+# e.g. list = [ "93.184.216.34:443", "10.0.0.0/8:80", "[2001:db8::/32]:443" ]
 list = []
 # What to do if the ip-port pair is in this list
 # action = "None"
