@@ -1,10 +1,10 @@
-/// Builds raw Ethernet frames wrapping IPv4 + TCP/UDP packets.
-///
-/// The Ethernet header is 14 bytes:
-///   dst_mac(6) + src_mac(6) + ethertype(2)
-///
-/// Reuses the same IP/TCP/UDP construction patterns from `src/program/packet.rs`
-/// unit tests, with the addition of the Ethernet framing.
+//! Builds raw Ethernet frames wrapping IPv4 + TCP/UDP packets.
+//!
+//! The Ethernet header is 14 bytes:
+//!   dst_mac(6) + src_mac(6) + ethertype(2)
+//!
+//! Reuses the same IP/TCP/UDP construction patterns from `src/program/packet.rs`
+//! unit tests, with the addition of the Ethernet framing.
 
 const SRC_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01];
 const DST_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x02];

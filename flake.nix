@@ -109,7 +109,7 @@
             {
               tests = craneLib.cargoTest checkArgs;
               tests-wire = craneLib.cargoTest (checkArgs // { cargoTestExtraArgs = "--features wire"; });
-              clippy = craneLib.cargoClippy (checkArgs // { cargoClippyExtraArgs = "--all-targets --all-features"; });
+              clippy = craneLib.cargoClippy (checkArgs // { cargoClippyExtraArgs = "--all-targets --all-features -- --deny warnings"; });
             };
           packages = rec {
             default = censorlab;

@@ -2479,7 +2479,6 @@ mod tests {
         let fields = default_env_fields();
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
-        drop(banks);
         let val = regs.get(&Register { ty: RegisterType::Float, index: 0, host: false }).unwrap();
         assert!(matches!(val, Value::Float(f) if (f - 3.5).abs() < f64::EPSILON));
     }
@@ -2739,7 +2738,6 @@ mod tests {
         let fields = EnvFields { host_num_packets: 42, ..Default::default() };
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         let _ = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
-        drop(banks);
         assert!(matches!(
             regs.get(&Register { ty: RegisterType::Int, index: 0, host: false }),
             Some(Value::Int(42))
@@ -2877,7 +2875,6 @@ mod tests {
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
-        drop(banks);
         // Verify host register was written
         let hreg = Register { ty: RegisterType::Bool, index: 0, host: false };
         let val = host_regs.get(&hreg).unwrap();

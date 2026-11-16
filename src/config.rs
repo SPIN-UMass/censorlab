@@ -496,10 +496,10 @@ action = "Reset"
             action: Action::Drop,
         };
         let bv = list.bit_vec();
-        assert_eq!(*bv.list.get(80).unwrap(), true);
-        assert_eq!(*bv.list.get(443).unwrap(), true);
-        assert_eq!(*bv.list.get(8080).unwrap(), true);
-        assert_eq!(*bv.list.get(22).unwrap(), false);
+        assert!(*bv.list.get(80).unwrap());
+        assert!(*bv.list.get(443).unwrap());
+        assert!(*bv.list.get(8080).unwrap());
+        assert!(!*bv.list.get(22).unwrap());
         assert_eq!(bv.action, Action::Drop);
     }
 
@@ -575,6 +575,7 @@ action = "Reset"
     #[test]
     fn ip_port_deserialize_invalid() {
         #[derive(Deserialize)]
+        #[allow(dead_code)] // only checks that deserialization fails
         struct W {
             pair: super::IpPort,
         }
