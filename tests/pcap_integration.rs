@@ -647,6 +647,50 @@ script = "censor.py"
 }
 
 // ==========================================================================
+// Test 8a'''': CensorLang subnet directive + DST_IN
+// ==========================================================================
+
+#[test]
+fn test_censorlang_subnet_membership() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: dst in 198.51.100.0/24 -> terminated
+        .add_frame(&tcp_frame(client, [198, 51, 100, 5], 50000, 80, TCP_SYN, 100, 0, &[]))
+        // frame 1: dst outside -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 101, 5], 50001, 80, TCP_SYN, 200, 0, &[]))
+        .write_to(&pcap_path);
+
+    let cl_script = "subnet \"198.51.100.0/24\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\n";
+    let config_str = r#"
+[execution]
+mode = "CensorLang"
+script = "censor.cl"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains("Drop"))
+        .map(|l| l.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0)],
+        "unexpected drops: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+// ==========================================================================
 // Test 8a'': Invalid CIDR in config is rejected at load time
 // ==========================================================================
 
