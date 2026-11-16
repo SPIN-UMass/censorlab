@@ -525,20 +525,11 @@ impl Censor {
             #[cfg(feature = "wire")]
             Context::Wire(ctx) => ctx.direction,
             // For pcap/nfq mode we infer it using a client IP
-            Context::Pcap(pcap::Context { client_ip })
-            | Context::Nfq(nfq::Context { client_ip, .. }) => {
-                if let IpAddress::Ipv4(client_ip) = client_ip {
-                    if ipv4_packet.src_addr() == *client_ip {
-                        Direction::ClientToWan
-                    } else if ipv4_packet.dst_addr() == *client_ip {
-                        Direction::WanToClient
-                    } else {
-                        Direction::Unknown
-                    }
-                } else {
-                    Direction::Unknown
-                }
-            }
+            Context::Pcap(pcap::Context { client })
+            | Context::Nfq(nfq::Context { client, .. }) => client.direction(
+                ipv4_packet.src_addr().into(),
+                ipv4_packet.dst_addr().into(),
+            ),
         };
         // Process the remainder using the generic IP handler
         let result = self.process_ip(
@@ -584,20 +575,11 @@ impl Censor {
             #[cfg(feature = "wire")]
             Context::Wire(ctx) => ctx.direction,
             // For pcap/nfq mode we infer it using a client IP
-            Context::Pcap(pcap::Context { client_ip })
-            | Context::Nfq(nfq::Context { client_ip, .. }) => {
-                if let IpAddress::Ipv6(client_ip) = *client_ip {
-                    if ipv6_packet.src_addr() == client_ip {
-                        Direction::ClientToWan
-                    } else if ipv6_packet.dst_addr() == client_ip {
-                        Direction::WanToClient
-                    } else {
-                        Direction::Unknown
-                    }
-                } else {
-                    Direction::Unknown
-                }
-            }
+            Context::Pcap(pcap::Context { client })
+            | Context::Nfq(nfq::Context { client, .. }) => client.direction(
+                ipv6_packet.src_addr().into(),
+                ipv6_packet.dst_addr().into(),
+            ),
         };
         // Process the remainder using the generic IP handler
         self.process_ip(
@@ -844,6 +826,53 @@ pub enum ForwardFramesResult {
     /// A frame was successfully read, but failed to send, and we reached our max number of tries
     /// Contains the size of the failed frame
     TxFull(usize),
+}
+
+/// The set of addresses considered to be "the client" when inferring traffic
+/// direction in NFQ/PCAP mode.  Holding a set (rather than a single address)
+/// lets IPv4 and IPv6 traffic both get a direction, and covers hosts with
+/// several addresses per family (e.g. IPv6 temporary addresses).
+#[derive(Clone, Debug, Default)]
+pub struct ClientAddrs(Vec<IpAddress>);
+
+impl ClientAddrs {
+    pub fn new(addrs: impl IntoIterator<Item = IpAddress>) -> Self {
+        let mut v: Vec<IpAddress> = Vec::new();
+        for addr in addrs {
+            if !v.contains(&addr) {
+                v.push(addr);
+            }
+        }
+        Self(v)
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn contains(&self, addr: IpAddress) -> bool {
+        self.0.contains(&addr)
+    }
+    /// Direction of a packet `src -> dst` relative to the client.
+    pub fn direction(&self, src: IpAddress, dst: IpAddress) -> Direction {
+        if self.contains(src) {
+            Direction::ClientToWan
+        } else if self.contains(dst) {
+            Direction::WanToClient
+        } else {
+            Direction::Unknown
+        }
+    }
+}
+
+impl fmt::Display for ClientAddrs {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (i, addr) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{addr}")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1472,5 +1501,44 @@ mod rewrite_tests {
         frame.extend(ipv4_packet(1));
         assert!(Rewrite { ttl: Some(64) }.apply_ethernet(&mut frame));
         assert_eq!(Ipv4Packet::new_checked(&frame[14..]).unwrap().hop_limit(), 64);
+    }
+}
+
+#[cfg(test)]
+mod client_addrs_tests {
+    use super::*;
+
+    fn v4(a: u8) -> IpAddress {
+        Ipv4Address::new(10, 0, 0, a).into()
+    }
+    fn v6(a: u16) -> IpAddress {
+        Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, a).into()
+    }
+
+    #[test]
+    fn direction_for_both_address_families() {
+        let client = ClientAddrs::new([v4(1), v6(1)]);
+        assert_eq!(client.direction(v4(1), v4(2)), Direction::ClientToWan);
+        assert_eq!(client.direction(v4(2), v4(1)), Direction::WanToClient);
+        assert_eq!(client.direction(v6(1), v6(2)), Direction::ClientToWan);
+        assert_eq!(client.direction(v6(2), v6(1)), Direction::WanToClient);
+        assert_eq!(client.direction(v6(2), v6(3)), Direction::Unknown);
+        assert_eq!(client.direction(v4(2), v4(3)), Direction::Unknown);
+    }
+
+    #[test]
+    fn multiple_addresses_per_family() {
+        // e.g. a host with a stable and a temporary (privacy) IPv6 address
+        let client = ClientAddrs::new([v6(1), v6(9)]);
+        assert_eq!(client.direction(v6(9), v6(2)), Direction::ClientToWan);
+        assert_eq!(client.direction(v6(2), v6(1)), Direction::WanToClient);
+        assert_eq!(client.direction(v4(1), v4(2)), Direction::Unknown);
+    }
+
+    #[test]
+    fn empty_is_always_unknown() {
+        let client = ClientAddrs::default();
+        assert!(client.is_empty());
+        assert_eq!(client.direction(v4(1), v4(2)), Direction::Unknown);
     }
 }

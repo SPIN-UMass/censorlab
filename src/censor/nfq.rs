@@ -1,6 +1,6 @@
 use super::{Action, Censor};
 use crate::arp::ArpCache;
-use crate::censor::{HandleIpcError, IpPair};
+use crate::censor::{ClientAddrs, HandleIpcError, IpPair};
 use crate::watermark::Delayer;
 use clap::Parser;
 use mac_address::MacAddressError;
@@ -34,8 +34,12 @@ pub struct Args {
     /// Without 2 interfaces, we don't know how to determine the direction of traffic
     /// We need to arbitrarily choose a "client ip" that is used to calculate direction
     /// Anything coming to this IP is wan->cient. Anything from this IP is client->wan
-    #[clap(long)]
-    pub client_ip: Option<IpAddr>,
+    ///
+    /// May be repeated or comma-separated (e.g. `--client-ip 10.0.0.2,2001:db8::2`)
+    /// so both IPv4 and IPv6 traffic get a direction.  Defaults to every address
+    /// of the chosen interface (censor running on the client host itself).
+    #[clap(long, value_delimiter = ',')]
+    pub client_ip: Vec<IpAddr>,
     /// what to do with traffic that doesn't have a direction
     /// by default we have to ignore it because the model relies on direction info
     #[clap(long, default_value = "ignore")]
@@ -223,7 +227,7 @@ pub struct Context {
     /// Stored for potential future use in RST packet construction.
     #[allow(dead_code)]
     pub client_mac: EthernetAddress,
-    pub client_ip: IpAddress,
+    pub client: ClientAddrs,
     /// Stored for potential future use in direction-less traffic handling.
     #[allow(dead_code)]
     pub no_dir_action: Action,
@@ -269,6 +273,8 @@ impl Censor {
 
         // Initialize an arp cache. This is used for resolving IPs to arp
         let mut arp_cache = ArpCache::default();
+        // Every address of the chosen interface (IPv4 and IPv6)
+        let mut own_addrs: Vec<IpAddress> = Vec::new();
         // Iterate over interfaces, and store the client mac/ip for our preferred interface
         for system_if in if_addrs::get_if_addrs().map_err(NfqModeError::Interface)? {
             // Skip loopback
@@ -280,24 +286,26 @@ impl Censor {
                 let mac = EthernetAddress(mac.bytes());
                 // Store that info in the arp cache
                 arp_cache.insert(system_if.ip().into(), mac);
+                if interface_name == system_if.name {
+                    own_addrs.push(system_if.ip().into());
+                }
                 // Store the addresses if they are the same
                 if interface_name == system_if.name && client_addrs.is_none() {
-                    client_addrs = Some((mac, system_if.ip().into()));
+                    client_addrs = Some(mac);
                 }
             }
         }
         // At this point, client mac and ip should be definite
-        let (client_mac, own_ip) = client_addrs.ok_or(NfqModeError::InterfaceHasNoMac)?;
+        let client_mac = client_addrs.ok_or(NfqModeError::InterfaceHasNoMac)?;
         // Direction is computed relative to `--client-ip` when given (censor in
-        // the path between a client and the WAN); otherwise relative to our own
-        // address (censor running on the client host itself).
-        let client_ip: IpAddress = match args.client_ip {
-            Some(ip) => ip.into(),
-            None => own_ip,
+        // the path between a client and the WAN); otherwise relative to every
+        // address of our interface (censor running on the client host itself).
+        let client = if args.client_ip.is_empty() {
+            ClientAddrs::new(own_addrs)
+        } else {
+            ClientAddrs::new(args.client_ip.iter().map(|ip| IpAddress::from(*ip)))
         };
-        if args.client_ip.is_some() {
-            info!("Computing traffic direction relative to client {client_ip}");
-        }
+        info!("Computing traffic direction relative to client address(es): {client}");
 
         // Open the interface as an IP raw socket
         trace!("Opening raw socket for {}", interface_name);
@@ -307,7 +315,7 @@ impl Censor {
         // Create our NFQ context
         let mut context_nfq = Context {
             client_mac,
-            client_ip,
+            client: client.clone(),
             no_dir_action: args.no_dir_action.clone(),
             delayer: Delayer::new(interface_name),
         };
@@ -417,7 +425,7 @@ impl Censor {
                                         .map_err(NfqModeError::OpenArp)?
                                     {
                                         src_mac = mac.0;
-                                    } else if IpAddress::from(src) != client_ip {
+                                    } else if !client.contains(IpAddress::from(src)) {
                                         if let Some(mac) = default_route_mac {
                                             src_mac = mac;
                                         }
@@ -428,7 +436,7 @@ impl Censor {
                                         .map_err(NfqModeError::OpenArp)?
                                     {
                                         dst_mac = mac.0;
-                                    } else if IpAddress::from(dst) != client_ip {
+                                    } else if !client.contains(IpAddress::from(dst)) {
                                         if let Some(mac) = default_route_mac {
                                             dst_mac = mac;
                                         }
@@ -489,7 +497,7 @@ impl Censor {
                                         .map_err(NfqModeError::OpenArp)?
                                     {
                                         inj_src_mac = mac.0;
-                                    } else if IpAddress::from(src) != client_ip {
+                                    } else if !client.contains(IpAddress::from(src)) {
                                         if let Some(mac) = default_route_mac {
                                             inj_src_mac = mac;
                                         }
@@ -499,7 +507,7 @@ impl Censor {
                                         .map_err(NfqModeError::OpenArp)?
                                     {
                                         inj_dst_mac = mac.0;
-                                    } else if IpAddress::from(dst) != client_ip {
+                                    } else if !client.contains(IpAddress::from(dst)) {
                                         if let Some(mac) = default_route_mac {
                                             inj_dst_mac = mac;
                                         }
@@ -699,5 +707,26 @@ mod reset_frame_tests {
         assert_eq!(f1.dst_addr(), EthernetAddress(client));
         assert_eq!(f2.src_addr(), EthernetAddress(own));
         assert_eq!(f2.dst_addr(), EthernetAddress(server));
+    }
+}
+
+#[cfg(test)]
+mod args_tests {
+    use super::*;
+
+    #[test]
+    fn client_ip_repeated_or_comma_separated() {
+        let a = Args::try_parse_from([
+            "nfq",
+            "--client-ip",
+            "10.0.0.2",
+            "--client-ip",
+            "2001:db8::2",
+        ])
+        .unwrap();
+        let b = Args::try_parse_from(["nfq", "--client-ip", "10.0.0.2,2001:db8::2"]).unwrap();
+        assert_eq!(a.client_ip, b.client_ip);
+        assert_eq!(a.client_ip.len(), 2);
+        assert!(Args::try_parse_from(["nfq"]).unwrap().client_ip.is_empty());
     }
 }
