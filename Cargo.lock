@@ -1219,12 +1219,11 @@ dependencies = [
 
 [[package]]
 name = "iptables"
-version = "0.5.3"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "587f29670d67df4c7af1631928dcc592e24e897e961f89b06b142b95702ce21f"
+checksum = "f30c9a636a0a728c67d1d420471c99b215708a17c222bb9afb16d0821e2d80d8"
 dependencies = [
  "lazy_static",
- "nix 0.29.0",
  "regex",
 ]
 
@@ -1835,18 +1834,6 @@ dependencies = [
  "bitflags 2.13.2",
  "cfg-if",
  "cfg_aliases 0.1.1",
- "libc",
-]
-
-[[package]]
-name = "nix"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
-dependencies = [
- "bitflags 2.13.2",
- "cfg-if",
- "cfg_aliases 0.2.2",
  "libc",
 ]
 
