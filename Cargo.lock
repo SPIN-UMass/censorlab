@@ -2497,7 +2497,7 @@ dependencies = [
 [[package]]
 name = "rustpython-codegen"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "ahash",
  "bitflags 2.6.0",
@@ -2514,7 +2514,7 @@ dependencies = [
 [[package]]
 name = "rustpython-common"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "ascii",
  "bitflags 2.6.0",
@@ -2541,7 +2541,7 @@ dependencies = [
 [[package]]
 name = "rustpython-compiler"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "rustpython-codegen",
  "rustpython-compiler-core",
@@ -2551,7 +2551,7 @@ dependencies = [
 [[package]]
 name = "rustpython-compiler-core"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "bitflags 2.6.0",
  "itertools 0.11.0",
@@ -2564,7 +2564,7 @@ dependencies = [
 [[package]]
 name = "rustpython-derive"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "rustpython-compiler",
  "rustpython-derive-impl",
@@ -2574,7 +2574,7 @@ dependencies = [
 [[package]]
 name = "rustpython-derive-impl"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "itertools 0.11.0",
  "maplit",
@@ -2613,7 +2613,7 @@ dependencies = [
 [[package]]
 name = "rustpython-jit"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "cranelift",
  "cranelift-jit",
@@ -2685,7 +2685,7 @@ dependencies = [
 [[package]]
 name = "rustpython-sre_engine"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "bitflags 2.6.0",
  "num_enum",
@@ -2695,7 +2695,7 @@ dependencies = [
 [[package]]
 name = "rustpython-vm"
 version = "0.4.0"
-source = "git+https://github.com/RustPython/RustPython#76236682564d53da2853e45daf9da205628b657f"
+source = "git+https://github.com/RustPython/RustPython?rev=76236682564d53da2853e45daf9da205628b657f#76236682564d53da2853e45daf9da205628b657f"
 dependencies = [
  "ahash",
  "ascii",
@@ -3025,7 +3025,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "smoltcp"
 version = "0.11.0"
-source = "git+https://github.com/smoltcp-rs/smoltcp?branch=main#a2b92ed6e8d7ae7b1229665c5b3f2e801de111e9"
+source = "git+https://github.com/smoltcp-rs/smoltcp?rev=a2b92ed6e8d7ae7b1229665c5b3f2e801de111e9#a2b92ed6e8d7ae7b1229665c5b3f2e801de111e9"
 dependencies = [
  "bitflags 1.3.2",
  "byteorder",
