@@ -1793,7 +1793,7 @@ fn test_censorlang_direction_field() {
                result.action_lines, result.stdout);
 }
 
-<<<<<<< HEAD
+// ==========================================================================
 // Tests: broken censor scripts fail loudly
 // ==========================================================================
 
@@ -1897,7 +1897,7 @@ fn test_python_process_exception_logged_with_connection() {
     assert!(result.action_lines.is_empty(), "actions: {:?}", result.action_lines);
 }
 
-
+// ==========================================================================
 // demos/model: ONNX classifier over the first 10 (payload_len, direction)
 // pairs of a connection
 // ==========================================================================

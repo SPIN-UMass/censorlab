@@ -225,6 +225,7 @@ pub mod execution {
                 script: None,
                 hash_seed: default_hash_seed(),
                 reset_repeat: default_reset_repeat(),
+                on_script_error: ScriptErrorPolicy::default(),
             }
         }
     }

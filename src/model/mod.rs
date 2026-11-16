@@ -52,7 +52,7 @@ fn load_model(name: &str, config: &ModelConfig) -> Result<Model, ModelLoadError>
     let session = Session::builder()
         .map_err(ort_err)?
         .with_optimization_level(GraphOptimizationLevel::Level3)
-        .map_err(|err| ort_err(err.into()))?
+        .map_err(ort_err)?
         .commit_from_file(&config.path)
         .map_err(ort_err)?;
     // The input must be an f32 tensor of shape [batch, features] where the batch
