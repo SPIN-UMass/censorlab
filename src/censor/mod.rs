@@ -10,7 +10,7 @@ use crate::censor::pcap::PcapModeError;
 #[cfg(feature = "wire")]
 use crate::censor::wire::WireError;
 use crate::config::ethernet::MACAddress;
-use crate::config::Config;
+use crate::config::{Config, IpNetPort};
 use crate::ipc::{ipc_thread, ModelThreadError};
 use crate::model::onnx::ModelLoadError;
 use crate::model::ModelThreadMessage;
@@ -34,7 +34,7 @@ use smoltcp::wire::{
 use std::collections::HashSet;
 use std::fmt;
 use std::io;
-use std::net::IpAddr;
+use crate::subnet::IpNet;
 use std::path::PathBuf;
 #[cfg(feature = "wire")]
 use std::slice::SliceIndex;
@@ -103,9 +103,9 @@ pub struct Censor {
     arp: crate::config::arp::Config,
     // IP
     /// IPv4 allow/blocklist
-    ipv4_list: AllowBlockList<HashSet<Ipv4Address>>,
+    ipv4_list: AllowBlockList<crate::subnet::Ipv4Set>,
     /// IPv6 allow/blocklist
-    ipv6_list: AllowBlockList<HashSet<Ipv6Address>>,
+    ipv6_list: AllowBlockList<crate::subnet::Ipv6Set>,
     /// What to do with ip packets with unknown type
     ip_unknown: Action,
     // ICMP
@@ -115,12 +115,12 @@ pub struct Censor {
     /// TCP allow/blocklist for ports
     tcp_port_list: AllowBlockList<PortVec>,
     /// TCP allow/blocklist for ip-port pairs
-    tcp_ip_port_list: AllowBlockList<HashSet<crate::config::IpPort>>,
+    tcp_ip_port_list: AllowBlockList<crate::subnet::IpPortSet>,
     // UDP
     /// UDP allow/blocklist for ports
     udp_port_list: AllowBlockList<PortVec>,
     /// UDP allow/blocklist for ip-port pairs
-    udp_ip_port_list: AllowBlockList<HashSet<crate::config::IpPort>>,
+    udp_ip_port_list: AllowBlockList<crate::subnet::IpPortSet>,
     // Reset
     /// Number of times to repeat TCP RST packets
     reset_repeat: usize,
@@ -220,27 +220,27 @@ impl Censor {
 
         // Split IP lists out into ipv4 and ipv6
         let ipv4_filter = |ip| {
-            if let IpAddr::V4(ipv4) = ip {
-                Some(ipv4.into())
+            if let IpNet::V4(ipv4) = ip {
+                Some(ipv4)
             } else {
                 None
             }
         };
         let ipv6_filter = |ip| {
-            if let IpAddr::V6(ipv6) = ip {
-                Some(ipv6.into())
+            if let IpNet::V6(ipv6) = ip {
+                Some(ipv6)
             } else {
                 None
             }
         };
         // Perform filtering (ipv4)
-        let ipv4_allowlist = AllowList::from(ip.allowlist.filter_map(ipv4_filter).set());
-        let ipv4_blocklist = BlockList::from(ip.blocklist.filter_map(ipv4_filter).set());
+        let ipv4_allowlist = AllowList::from(ip.allowlist.filter_map(ipv4_filter).collect());
+        let ipv4_blocklist = BlockList::from(ip.blocklist.filter_map(ipv4_filter).collect());
         // Combine allow and blocklist
         let ipv4_list = AllowBlockList::new(ipv4_allowlist, ipv4_blocklist);
         // Perform filtering (ipv6)
-        let ipv6_allowlist = AllowList::from(ip.allowlist.filter_map(ipv6_filter).set());
-        let ipv6_blocklist = BlockList::from(ip.blocklist.filter_map(ipv6_filter).set());
+        let ipv6_allowlist = AllowList::from(ip.allowlist.filter_map(ipv6_filter).collect());
+        let ipv6_blocklist = BlockList::from(ip.blocklist.filter_map(ipv6_filter).collect());
         // Combine allow and blocklist
         let ipv6_list = AllowBlockList::new(ipv6_allowlist, ipv6_blocklist);
 
@@ -249,9 +249,9 @@ impl Censor {
         let tcp_port_blocklist = BlockList::from(tcp.port_blocklist.bit_vec());
         // Combine into 1 thing
         let tcp_port_list = AllowBlockList::new(tcp_port_allowlist, tcp_port_blocklist);
-        // Initialize hashmaps for tcp ip-port lists
-        let tcp_ip_port_allowlist = AllowList::from(tcp.ip_port_allowlist.set());
-        let tcp_ip_port_blocklist = BlockList::from(tcp.ip_port_blocklist.set());
+        // Initialize subnet sets for tcp ip-port lists
+        let tcp_ip_port_allowlist = AllowList::from(tcp.ip_port_allowlist.map(IpNetPort::into_pair).collect());
+        let tcp_ip_port_blocklist = BlockList::from(tcp.ip_port_blocklist.map(IpNetPort::into_pair).collect());
         // Combine into 1 thing
         let tcp_ip_port_list = AllowBlockList::new(tcp_ip_port_allowlist, tcp_ip_port_blocklist);
 
@@ -260,9 +260,9 @@ impl Censor {
         let udp_port_blocklist = BlockList::from(udp.port_blocklist.bit_vec());
         // Combine into 1 thing
         let udp_port_list = AllowBlockList::new(udp_port_allowlist, udp_port_blocklist);
-        // Initialize hashmaps for udp ip-port lists
-        let udp_ip_port_allowlist = AllowList::from(udp.ip_port_allowlist.set());
-        let udp_ip_port_blocklist = BlockList::from(udp.ip_port_blocklist.set());
+        // Initialize subnet sets for udp ip-port lists
+        let udp_ip_port_allowlist = AllowList::from(udp.ip_port_allowlist.map(IpNetPort::into_pair).collect());
+        let udp_ip_port_blocklist = BlockList::from(udp.ip_port_blocklist.map(IpNetPort::into_pair).collect());
         // Combine into 1 thing
         let udp_ip_port_list = AllowBlockList::new(udp_ip_port_allowlist, udp_ip_port_blocklist);
 

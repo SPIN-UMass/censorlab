@@ -73,6 +73,8 @@ pub struct OperationCounts {
     pub logic: usize,
     /// Regex evaluations against the payload (each linear in payload length).
     pub regex: usize,
+    /// Subnet membership tests (SRC_IN/DST_IN): one mask-and-compare each.
+    pub subnet: usize,
     pub model_inputs: usize,
     pub model_calls: usize,
     pub returns: usize,
@@ -82,7 +84,7 @@ impl OperationCounts {
     /// Total primitive operations excluding the payload-proportional regex and
     /// model terms (which are reported as counts).
     pub fn constant_ops(&self) -> usize {
-        self.conditions + self.reads + self.writes + self.copies + self.arithmetic + self.logic + self.returns
+        self.conditions + self.reads + self.writes + self.copies + self.arithmetic + self.logic + self.subnet + self.returns
     }
 }
 
@@ -97,6 +99,8 @@ pub struct ProgramAnalysis {
     pub max_lines_per_packet: usize,
     /// Regex patterns compiled for the program.
     pub regexes: usize,
+    /// Subnets declared for the program.
+    pub subnets: usize,
     /// Distinct fields read (e.g. `tcp.payload.len`).
     pub fields: BTreeSet<String>,
     /// Distinct ONNX models referenced.
@@ -167,6 +171,10 @@ fn analyse_line(line: &Line, counts: &mut OperationCounts, fields: &mut BTreeSet
             counts.regex += 1;
             count_output(out, counts, conn, host);
         }
+        SubnetIn { out, .. } => {
+            counts.subnet += 1;
+            count_output(out, counts, conn, host);
+        }
         CopyToModel { from, name, .. } => {
             counts.model_inputs += 1;
             models.insert(name.clone());
@@ -197,7 +205,7 @@ impl ProgramAnalysis {
             .map(|s| {
                 s.lines()
                     .map(str::trim)
-                    .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("regex "))
+                    .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("regex ") && !l.starts_with("subnet "))
                     .count()
             })
             .unwrap_or(program.lines.len());
@@ -212,6 +220,7 @@ impl ProgramAnalysis {
             lines: program.lines.len(),
             max_lines_per_packet: program.lines.len(),
             regexes: program.regexes.len(),
+            subnets: program.subnets.len(),
             fields,
             models,
             per_connection_register_bytes,
@@ -230,6 +239,7 @@ impl ProgramAnalysis {
         s.push_str(&format!("lines (source / optimised):      {} / {}\n", self.source_lines, self.lines));
         s.push_str(&format!("max lines evaluated per packet:  {}\n", self.max_lines_per_packet));
         s.push_str(&format!("regex patterns:                  {}\n", self.regexes));
+        s.push_str(&format!("subnets:                         {}\n", self.subnets));
         s.push_str(&format!("fields read:                     {}\n",
                             if self.fields.is_empty() { "-".to_string() } else { self.fields.iter().cloned().collect::<Vec<_>>().join(", ") }));
         s.push_str(&format!("models:                          {}\n",
@@ -290,6 +300,18 @@ RETURN allow_all
         assert_eq!(a.per_packet.writes, 2);
         assert!(a.fields.iter().any(|f| f.contains("Payload") || f.contains("payload")), "{:?}", a.fields);
         assert!(a.ends_with_unconditional_return);
+    }
+
+    #[test]
+    fn analysis_counts_subnet_tests() {
+        let src = "subnet \"10.0.0.0/8\"\nsubnet \"2001:db8::/32\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\nSRC_IN 1 -> reg:b.1\nif reg:b.1 == True: RETURN terminate";
+        let prog: Program = src.parse().unwrap();
+        let a = ProgramAnalysis::of(&prog, Some(src));
+        assert_eq!(a.source_lines, 4);
+        assert_eq!(a.subnets, 2);
+        assert_eq!(a.per_packet.subnet, 2);
+        assert_eq!(a.per_packet.writes, 2);
+        assert!(a.report().contains("subnets:"));
     }
 
     #[test]

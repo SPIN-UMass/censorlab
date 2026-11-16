@@ -1,4 +1,5 @@
 use crate::censor::{Action, PortVec};
+use crate::subnet::IpNet;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -145,6 +146,16 @@ where
             action: self.action.clone(),
         }
     }
+    /// Collect the list into an arbitrary store (e.g. a subnet range set)
+    pub fn collect<C>(self) -> List<C>
+    where
+        C: FromIterator<T>,
+    {
+        List {
+            list: self.list.into_iter().collect(),
+            action: self.action,
+        }
+    }
     pub fn set(self) -> List<HashSet<T>>
     where
         T: Eq + PartialEq + Hash,
@@ -255,7 +266,7 @@ pub mod arp {
 /// Config related to IP  handling
 pub mod ip {
     use super::{Action, Deserialize, List};
-    use std::net::IpAddr;
+    use crate::subnet::IpNet;
 
     #[derive(Default, Deserialize)]
     /// Config related to IP handling
@@ -264,12 +275,12 @@ pub mod ip {
     /// drops any matching packet that is not well-formed TCP (so `unknown`, which never
     /// sees TCP, treats `Reset` as `Drop`).
     pub struct Config {
-        /// Allowlist of IP addresses
+        /// Allowlist of IP addresses and/or CIDR subnets
         #[serde(default)]
-        pub allowlist: List<Vec<IpAddr>>,
-        /// Blocklist of IP addresses
+        pub allowlist: List<Vec<IpNet>>,
+        /// Blocklist of IP addresses and/or CIDR subnets
         #[serde(default)]
-        pub blocklist: List<Vec<IpAddr>>,
+        pub blocklist: List<Vec<IpNet>>,
         /// What to do if we run into an unknown next-protocol-header field
         #[serde(default)]
         pub unknown: Action,
@@ -290,7 +301,7 @@ pub mod icmp {
     }
 }
 
-/// An IP address + port pair that deserializes from "ip:port" strings.
+/// A concrete IP address + port pair (the lookup key for ip:port lists).
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IpPort(pub std::net::IpAddr, pub u16);
 
@@ -300,39 +311,92 @@ impl std::fmt::Display for IpPort {
     }
 }
 
-impl<'de> Deserialize<'de> for IpPort {
+/// A subnet + port pair as written in config ip:port lists.
+///
+/// Grammar (regular; recognized in full before use):
+///
+/// ```text
+/// pair := v4net ":" port | "[" v6net "]" ":" port
+/// port := "0" | [1-9] [0-9]*            (at most 65535)
+/// ```
+///
+/// where `v4net`/`v6net` follow [`IpNet`]'s syntax (`addr` or `addr/prefix`).
+/// IPv6 must be bracketed and IPv4 must not, so the port separator is unambiguous.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct IpNetPort(pub IpNet, pub u16);
+
+impl IpNetPort {
+    /// Split into (subnet, port)
+    pub fn into_pair(self) -> (IpNet, u16) {
+        (self.0, self.1)
+    }
+}
+
+impl std::fmt::Display for IpNetPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self.0 {
+            IpNet::V4(_) => write!(f, "{}:{}", self.0, self.1),
+            IpNet::V6(_) => write!(f, "[{}]:{}", self.0, self.1),
+        }
+    }
+}
+
+/// Parse a strictly-formatted decimal port: "0" or [1-9][0-9]* with value <= 65535
+fn parse_port(s: &str) -> Option<u16> {
+    let well_formed = match s.as_bytes() {
+        [b'0'] => true,
+        [b'1'..=b'9', rest @ ..] => rest.len() <= 4 && rest.iter().all(u8::is_ascii_digit),
+        _ => false,
+    };
+    if well_formed {
+        s.parse().ok()
+    } else {
+        None
+    }
+}
+
+impl std::str::FromStr for IpNetPort {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (net_str, port_str, want_v6) = if let Some(rest) = s.strip_prefix('[') {
+            let (net, after) = rest
+                .split_once(']')
+                .ok_or_else(|| format!("invalid ip:port pair (missing ']'): {s}"))?;
+            let port = after
+                .strip_prefix(':')
+                .ok_or_else(|| format!("invalid ip:port pair (expected ':' after ']'): {s}"))?;
+            (net, port, true)
+        } else {
+            let (net, port) = s
+                .split_once(':')
+                .ok_or_else(|| format!("invalid ip:port pair (missing ':'): {s}"))?;
+            (net, port, false)
+        };
+        let net: IpNet = net_str.parse().map_err(|e| format!("{e}"))?;
+        match (net, want_v6) {
+            (IpNet::V4(_), false) | (IpNet::V6(_), true) => {}
+            (IpNet::V4(_), true) => return Err(format!("IPv4 address must not be bracketed: {s}")),
+            (IpNet::V6(_), false) => return Err(format!("IPv6 address must be bracketed: {s}")),
+        }
+        let port = parse_port(port_str)
+            .ok_or_else(|| format!("invalid port (expected decimal 0-65535) in ip:port pair: {s}"))?;
+        Ok(IpNetPort(net, port))
+    }
+}
+
+impl<'de> Deserialize<'de> for IpNetPort {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        // Support both "ip:port" and "[ipv6]:port"
-        let (ip_str, port_str) = if s.starts_with('[') {
-            // IPv6: "[::1]:80"
-            let bracket_end = s.find(']').ok_or_else(|| {
-                serde::de::Error::custom(format!("invalid ip:port pair (missing ']'): {s}"))
-            })?;
-            let ip_part = &s[1..bracket_end];
-            let port_part = s.get(bracket_end + 2..).ok_or_else(|| {
-                serde::de::Error::custom(format!("invalid ip:port pair (missing port after ']:'): {s}"))
-            })?;
-            (ip_part, port_part)
-        } else {
-            // IPv4: "1.2.3.4:80"
-            let colon = s.rfind(':').ok_or_else(|| {
-                serde::de::Error::custom(format!("invalid ip:port pair (missing ':'): {s}"))
-            })?;
-            (&s[..colon], &s[colon + 1..])
-        };
-        let ip: std::net::IpAddr = ip_str.parse().map_err(serde::de::Error::custom)?;
-        let port: u16 = port_str.parse().map_err(serde::de::Error::custom)?;
-        Ok(IpPort(ip, port))
+        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
 /// Config related to TCP  handling
 pub mod tcp {
-    use super::{IpPort, List};
+    use super::{IpNetPort, List};
     use serde::Deserialize;
 
     #[derive(Default, Deserialize)]
@@ -345,16 +409,16 @@ pub mod tcp {
         /// Blocklist of ports
         pub port_blocklist: List<Vec<u16>>,
         /// Allowlist of ip-port pairs
-        pub ip_port_allowlist: List<Vec<IpPort>>,
+        pub ip_port_allowlist: List<Vec<IpNetPort>>,
         #[serde(default)]
         /// Blocklist of ip-port pairs
-        pub ip_port_blocklist: List<Vec<IpPort>>,
+        pub ip_port_blocklist: List<Vec<IpNetPort>>,
     }
 }
 
 /// Config related to UDP  handling
 pub mod udp {
-    use super::{IpPort, List};
+    use super::{IpNetPort, List};
     use serde::Deserialize;
 
     #[derive(Default, Deserialize)]
@@ -367,10 +431,10 @@ pub mod udp {
         /// Blocklist of ports
         pub port_blocklist: List<Vec<u16>>,
         /// Allowlist of ip-port pairs
-        pub ip_port_allowlist: List<Vec<IpPort>>,
+        pub ip_port_allowlist: List<Vec<IpNetPort>>,
         #[serde(default)]
         /// Blocklist of ip-port pairs
-        pub ip_port_blocklist: List<Vec<IpPort>>,
+        pub ip_port_blocklist: List<Vec<IpNetPort>>,
     }
 }
 
@@ -617,10 +681,10 @@ action = "Reset"
     fn ip_port_deserialize_ipv4() {
         #[derive(Deserialize)]
         struct W {
-            pair: super::IpPort,
+            pair: super::IpNetPort,
         }
         let w: W = toml::from_str("pair = \"192.168.1.1:80\"").unwrap();
-        assert_eq!(w.pair.0, std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)));
+        assert_eq!(w.pair.0, IpNet::from(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1))));
         assert_eq!(w.pair.1, 80);
     }
 
@@ -628,10 +692,10 @@ action = "Reset"
     fn ip_port_deserialize_ipv6() {
         #[derive(Deserialize)]
         struct W {
-            pair: super::IpPort,
+            pair: super::IpNetPort,
         }
         let w: W = toml::from_str("pair = \"[::1]:443\"").unwrap();
-        assert_eq!(w.pair.0, std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+        assert_eq!(w.pair.0, IpNet::from(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)));
         assert_eq!(w.pair.1, 443);
     }
 
@@ -640,7 +704,8 @@ action = "Reset"
         #[derive(Deserialize)]
         #[allow(dead_code)] // only checks that deserialization fails
         struct W {
-            pair: super::IpPort,
+            #[allow(dead_code)]
+            pair: super::IpNetPort,
         }
         assert!(toml::from_str::<W>("pair = \"not-an-ip\"").is_err());
         assert!(toml::from_str::<W>("pair = \"192.168.1.1\"").is_err()); // missing port
@@ -659,5 +724,78 @@ ip_port_allowlist = { list = ["10.0.0.1:80", "10.0.0.2:443"] }
         assert_eq!(config.tcp.ip_port_allowlist.list.len(), 2);
         assert_eq!(config.tcp.ip_port_allowlist.list[0].1, 80);
         assert_eq!(config.tcp.ip_port_allowlist.list[1].1, 443);
+    }
+
+    #[test]
+    fn deserialize_ip_lists_with_subnets() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["10.0.0.0/8", "192.168.1.1", "2001:db8::/32", "::1"]
+action = "Drop"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let list: Vec<String> = config.ip.blocklist.list.iter().map(|n| n.to_string()).collect();
+        assert_eq!(list, ["10.0.0.0/8", "192.168.1.1/32", "2001:db8::/32", "::1/128"]);
+    }
+
+    #[test]
+    fn invalid_cidr_rejected_at_config_load() {
+        for bad in ["10.0.0.1/8", "10.0.0.0/33", "2001:db8::/129", "10.0.0.0/8x", "10.0.0.0/"] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let path = dir.path().join("censor.toml");
+            std::fs::write(
+                &path,
+                format!("[execution]\nmode = \"Python\"\n[ip.blocklist]\nlist = [\"{bad}\"]\n"),
+            )
+            .unwrap();
+            assert!(
+                matches!(Config::load(&path), Err(ConfigLoadError::Parse(_))),
+                "config with {bad:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn ip_port_deserialize_subnets() {
+        #[derive(Deserialize)]
+        struct W {
+            pair: super::IpNetPort,
+        }
+        let w: W = toml::from_str("pair = \"10.0.0.0/8:80\"").unwrap();
+        assert_eq!(w.pair.0.to_string(), "10.0.0.0/8");
+        assert_eq!(w.pair.1, 80);
+        let w: W = toml::from_str("pair = \"[2001:db8::/32]:443\"").unwrap();
+        assert_eq!(w.pair.0.to_string(), "2001:db8::/32");
+        assert_eq!(w.pair.1, 443);
+        let w: W = toml::from_str("pair = \"1.2.3.4:53\"").unwrap();
+        assert_eq!(w.pair.0.to_string(), "1.2.3.4/32");
+    }
+
+    #[test]
+    fn ip_port_deserialize_rejects_malformed() {
+        #[derive(Deserialize)]
+        struct W {
+            #[allow(dead_code)]
+            pair: super::IpNetPort,
+        }
+        for bad in [
+            "10.0.0.1/8:80",       // host bits
+            "10.0.0.0/33:80",      // prefix too long
+            "[2001:db8::/129]:80", // prefix too long
+            "::1:80",              // IPv6 must be bracketed
+            "[::1]x80",            // missing ':' after ']'
+            "[::1]:",              // empty port
+            "1.2.3.4:+80",         // signed port
+            "1.2.3.4:080",         // leading zero
+            "1.2.3.4:65536",       // port out of range
+            "[1.2.3.4]:80",        // IPv4 must not be bracketed
+            "1.2.3.4:80:80",
+            "1.2.3.4",             // missing port
+        ] {
+            assert!(toml::from_str::<W>(&format!("pair = \"{bad}\"")).is_err(), "accepted {bad:?}");
+        }
     }
 }

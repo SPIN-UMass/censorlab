@@ -535,8 +535,10 @@ pub mod rust_packet {
         VirtualMachine,
     };
     use tracing;
-    
+
+    use crate::subnet::IpNet;
     use std::io;
+    use std::net::IpAddr;
     use std::sync::mpsc;
 
     #[pyattr]
@@ -964,6 +966,49 @@ pub mod rust_packet {
         #[pygetset]
         fn state(&self) -> PyObjectRef {
             self.state.clone()
+        }
+    }
+
+    fn parse_subnet(cidr: &str, vm: &VirtualMachine) -> PyResult<IpNet> {
+        cidr.parse().map_err(|e| vm.new_value_error(format!("{e}")))
+    }
+    fn parse_addr(addr: &str, vm: &VirtualMachine) -> PyResult<IpAddr> {
+        addr.parse()
+            .map_err(|_| vm.new_value_error(format!("invalid IP address {addr:?}")))
+    }
+
+    /// Compile a CIDR subnet (e.g. "10.0.0.0/8", "2001:db8::/32", or a bare address).
+    /// Raises ValueError on malformed input or host bits set.
+    #[pyfunction]
+    fn subnet(cidr: String, vm: &VirtualMachine) -> PyResult<Subnet> {
+        parse_subnet(&cidr, vm).map(|inner| Subnet { inner })
+    }
+
+    /// Whether `addr` lies in the CIDR subnet `cidr`. Parses `cidr` on every call;
+    /// prefer a module-level `subnet(...)` object in per-packet code.
+    #[pyfunction]
+    fn ip_in(addr: String, cidr: String, vm: &VirtualMachine) -> PyResult<bool> {
+        let net = parse_subnet(&cidr, vm)?;
+        Ok(net.contains(parse_addr(&addr, vm)?))
+    }
+
+    #[pyattr]
+    #[pyclass(module = "rust", name = "Subnet")]
+    #[derive(Debug, PyPayload)]
+    struct Subnet {
+        inner: IpNet,
+    }
+    #[pyclass]
+    impl Subnet {
+        /// Whether `addr` (an address string such as packet.ip.src) is in this subnet.
+        /// Addresses of the other IP family never match. Raises ValueError on a malformed address.
+        #[pymethod]
+        fn contains(&self, addr: String, vm: &VirtualMachine) -> PyResult<bool> {
+            Ok(self.inner.contains(parse_addr(&addr, vm)?))
+        }
+        #[pymethod]
+        fn __str__(&self) -> String {
+            self.inner.to_string()
         }
     }
 

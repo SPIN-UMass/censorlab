@@ -475,6 +475,256 @@ action = "Drop"
 }
 
 // ==========================================================================
+// Test 8a: IP blocking via config-level CIDR subnet blocklist
+// ==========================================================================
+
+#[test]
+fn test_config_ip_subnet_blocklist() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: first address of 198.51.100.0/24 -> dropped
+        .add_frame(&tcp_frame(client, [198, 51, 100, 0], 50000, 80, TCP_SYN, 100, 0, &[]))
+        // frame 1: just below the subnet -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 99, 255], 50001, 80, TCP_SYN, 200, 0, &[]))
+        // frame 2: last address of the subnet -> dropped
+        .add_frame(&tcp_frame(client, [198, 51, 100, 255], 50002, 80, TCP_SYN, 300, 0, &[]))
+        // frame 3: just above the subnet -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 101, 0], 50003, 80, TCP_SYN, 400, 0, &[]))
+        // frame 4: single-address entry in the same list -> dropped
+        .add_frame(&tcp_frame(client, [203, 0, 113, 7], 50004, 80, TCP_SYN, 500, 0, &[]))
+        // frame 5: neighbour of the single address -> passes
+        .add_frame(&tcp_frame(client, [203, 0, 113, 8], 50005, 80, TCP_SYN, 600, 0, &[]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["198.51.100.0/24", "203.0.113.7", "2001:db8::/32"]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains("Drop"))
+        .map(|l| l.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0), frame_idx(2), frame_idx(4)],
+        "unexpected drops: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+// ==========================================================================
+// Test 8a': Config-level TCP ip:port blocklist with a subnet
+// ==========================================================================
+
+#[test]
+fn test_config_tcp_ip_port_subnet_blocklist() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: in subnet, matching port -> dropped
+        .add_frame(&tcp_frame(client, [93, 184, 7, 9], 50000, 443, TCP_SYN, 100, 0, &[]))
+        // frame 1: in subnet, other port -> passes
+        .add_frame(&tcp_frame(client, [93, 184, 7, 9], 50001, 80, TCP_SYN, 200, 0, &[]))
+        // frame 2: outside subnet, matching port -> passes
+        .add_frame(&tcp_frame(client, [93, 185, 0, 1], 50002, 443, TCP_SYN, 300, 0, &[]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.ip_port_blocklist]
+list = ["93.184.0.0/16:443"]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        result.action_lines.len(),
+        1,
+        "expected 1 drop action, got: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(0));
+    assert!(result.action_lines[0].action.contains("Drop"));
+}
+
+// ==========================================================================
+// Test 8a''': Python subnet helpers (rust.subnet / rust.ip_in)
+// ==========================================================================
+
+#[test]
+fn test_python_subnet_helpers() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: dst in 198.51.100.0/24 (precompiled subnet) -> dropped
+        .add_frame(&tcp_frame(client, [198, 51, 100, 9], 50000, 80, TCP_SYN, 100, 0, &[]))
+        // frame 1: dst outside both subnets -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 101, 9], 50001, 80, TCP_SYN, 200, 0, &[]))
+        // frame 2: dst in 203.0.113.0/28 (ip_in) -> dropped
+        .add_frame(&tcp_frame(client, [203, 0, 113, 15], 50002, 80, TCP_SYN, 300, 0, &[]))
+        // frame 3: dst just past the /28 -> passes
+        .add_frame(&tcp_frame(client, [203, 0, 113, 16], 50003, 80, TCP_SYN, 400, 0, &[]))
+        .write_to(&pcap_path);
+
+    write_temp_script(
+        &tmp,
+        "censor.py",
+        r#"from rust import subnet, ip_in
+
+BLOCKED = subnet("198.51.100.0/24")
+
+# Invalid subnets raise ValueError instead of matching nothing
+for bad in ["10.0.0.1/8", "10.0.0.0/33", "nonsense"]:
+    try:
+        subnet(bad)
+        raise Exception("accepted " + bad)
+    except ValueError:
+        pass
+try:
+    BLOCKED.contains("not-an-ip")
+    raise Exception("accepted bad address")
+except ValueError:
+    pass
+assert not BLOCKED.contains("::1")
+assert subnet("2001:db8::/32").contains("2001:db8::1")
+assert str(BLOCKED) == "198.51.100.0/24"
+
+def process(packet):
+    if BLOCKED.contains(packet.ip.dst):
+        return "drop"
+    if ip_in(packet.ip.dst, "203.0.113.0/28"):
+        return "drop"
+"#,
+    );
+    let config_str = r#"
+[execution]
+mode = "Python"
+script = "censor.py"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains("Drop"))
+        .map(|l| l.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0), frame_idx(2)],
+        "unexpected drops: {:?}\nstdout: {}\nstderr: {}",
+        result.action_lines,
+        result.stdout,
+        result.stderr
+    );
+}
+
+// ==========================================================================
+// Test 8a'''': CensorLang subnet directive + DST_IN
+// ==========================================================================
+
+#[test]
+fn test_censorlang_subnet_membership() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: dst in 198.51.100.0/24 -> terminated
+        .add_frame(&tcp_frame(client, [198, 51, 100, 5], 50000, 80, TCP_SYN, 100, 0, &[]))
+        // frame 1: dst outside -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 101, 5], 50001, 80, TCP_SYN, 200, 0, &[]))
+        .write_to(&pcap_path);
+
+    let cl_script = "subnet \"198.51.100.0/24\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\n";
+    let config_str = r#"
+[execution]
+mode = "CensorLang"
+script = "censor.cl"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains("Drop"))
+        .map(|l| l.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0)],
+        "unexpected drops: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+// ==========================================================================
+// Test 8a'': Invalid CIDR in config is rejected at load time
+// ==========================================================================
+
+#[test]
+fn test_config_invalid_cidr_rejected() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    PcapBuilder::new()
+        .add_frame(&tcp_frame([10, 0, 0, 1], [10, 0, 0, 2], 50000, 80, TCP_SYN, 100, 0, &[]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["198.51.100.1/24"]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_ne!(result.exit_code, 0, "config with host bits set should fail to load");
+    assert!(
+        result.stderr.contains("host bits"),
+        "error should mention host bits, stderr: {}",
+        result.stderr
+    );
+}
+
+// ==========================================================================
 // Test 8b: Config-level UDP port blocklist
 // ==========================================================================
 

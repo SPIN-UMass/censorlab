@@ -24,5 +24,6 @@ pub mod delay;
 pub mod ipc;
 pub mod model;
 pub mod program;
+pub mod subnet;
 pub mod sys;
 pub mod transport;
