@@ -1,21 +1,18 @@
 use super::{Action, Censor};
-use crate::arp::ArpCache;
-use crate::censor::{HandleIpcError, IpPair};
-use crate::watermark::Delayer;
+use crate::censor::{ClientAddrs, HandleIpcError, IpPair};
+use crate::delay::DelayQueue;
+use crate::inject::{InjectError, RawIpInjector};
+use crate::route;
 use clap::Parser;
-use mac_address::MacAddressError;
-use nfq::{Queue, Verdict};
+use nfq::{Message, Queue, Verdict};
 use ort::Error as OrtError;
 use procfs::ProcError;
-use smoltcp::phy::{Device, Medium, RawSocket, TxToken};
-use smoltcp::time::Instant as SmoltcpInstant;
-use smoltcp::time::Instant;
-use smoltcp::wire::{Error as SmoltcpError, EthernetAddress, IpAddress, TcpSeqNumber};
+use smoltcp::wire::{EthernetAddress, EthernetFrame, IpAddress, TcpSeqNumber};
 use std::fmt;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
+use std::time::Instant as StdInstant;
 use thiserror::Error;
-use tokio::task::JoinError;
 use tracing::{error, info, trace, warn};
 
 /// Default IPTables table
@@ -34,8 +31,12 @@ pub struct Args {
     /// Without 2 interfaces, we don't know how to determine the direction of traffic
     /// We need to arbitrarily choose a "client ip" that is used to calculate direction
     /// Anything coming to this IP is wan->cient. Anything from this IP is client->wan
-    #[clap(long)]
-    pub client_ip: Option<IpAddr>,
+    ///
+    /// May be repeated or comma-separated (e.g. `--client-ip 10.0.0.2,2001:db8::2`)
+    /// so both IPv4 and IPv6 traffic get a direction.  Defaults to every address
+    /// of the chosen interface (censor running on the client host itself).
+    #[clap(long, value_delimiter = ',')]
+    pub client_ip: Vec<IpAddr>,
     /// what to do with traffic that doesn't have a direction
     /// by default we have to ignore it because the model relies on direction info
     #[clap(long, default_value = "ignore")]
@@ -43,7 +44,9 @@ pub struct Args {
     /// IPTables arguments
     #[clap(flatten)]
     pub iptables: IpTablesArgs,
-    /// Interface to send packets to (defaults to first interface that can send AF_INET packets
+    /// Interface whose addresses are the default client addresses (defaults to the
+    /// interface of the lowest-metric IPv4 default route, else the IPv6 one).
+    /// Injected packets are routed by the kernel, not sent on this interface.
     pub interface: Option<String>,
 }
 /// IPTables data
@@ -110,8 +113,10 @@ impl IpTablesRule {
     /// Produce iptables rule from the given arguments
     fn rule_string(&self) -> String {
         format!(
-            "-j NFQUEUE --queue-num {} -m comment --comment \"{}\"",
-            self.queue_num, IPTABLES_COMMENT
+            // Packets we inject ourselves carry INJECT_MARK and must not be
+            // queued back to us
+            "-m mark ! --mark {:#x} -j NFQUEUE --queue-num {} -m comment --comment \"{}\"",
+            crate::inject::INJECT_MARK, self.queue_num, IPTABLES_COMMENT
         )
     }
     /// Activate the IPTables rule
@@ -218,98 +223,87 @@ impl Drop for IpTablesRuleActivated {
         }
     }
 }
-/// Context for the NFQ censor, providing network identity and packet delay support.
+/// Context for the NFQ censor, providing network identity.
 pub struct Context {
-    /// Stored for potential future use in RST packet construction.
-    #[allow(dead_code)]
-    pub client_mac: EthernetAddress,
-    pub client_ip: IpAddress,
+    pub client: ClientAddrs,
     /// Stored for potential future use in direction-less traffic handling.
     #[allow(dead_code)]
     pub no_dir_action: Action,
-    /// Module for delaying packets
-    pub delayer: Delayer,
+}
+
+/// Which netfilter queue a held message came from (its verdict must go back there).
+#[derive(Clone, Copy)]
+enum QueueSide {
+    In,
+    Out,
+}
+
+/// Strip the Ethernet header from a frame built by `construct_reset` /
+/// `construct_udp_inject`, leaving the IP packet that is injected.
+fn l3_payload(frame: &[u8]) -> Option<&[u8]> {
+    EthernetFrame::new_checked(frame).ok().map(|f| f.payload())
+}
+
+/// Inject a frame's IP packet, logging (not propagating) failures: a failed
+/// injection must not stop the censor (fail-open, like packet processing).
+fn inject_frame(injector: &RawIpInjector, frame: &[u8]) {
+    let result = match l3_payload(frame) {
+        Some(packet) => injector.send(packet),
+        None => Err(InjectError::Malformed),
+    };
+    if let Err(err) = result {
+        warn!("Failed to inject packet: {err}");
+    }
 }
 
 impl Censor {
     /// Run the censor in NFQ mode
-    pub async fn run_nfq(mut self, mut args: Args) -> Result<(), NfqModeError> {
-        // Here, we need to resolve 3 things
-        // 1. the network interface to use
-        // 2. the MAC of that interface
-        // 3. the IP of that interface
-        // We want to get these, so store them if we stumble upon them
-        let mut client_addrs = None;
-
-        // Start by looking for the default route
-        // This has the secondary effect of finding the default interface if not given
-        let mut default_route_ip = None;
-        // Load up the list of routes
-        for route in procfs::net::route().map_err(NfqModeError::OpenRoutes)? {
-            // If a specific interface was requested, prioritize that
-            if args.interface.as_ref() == Some(&route.iface) ||
-                // If a specific interface is not requested, look for a default route
-                route.destination == Ipv4Addr::new(0, 0, 0, 0)
-            {
-                args.interface = Some(route.iface);
-                default_route_ip = Some(route.gateway);
-                break;
-            }
-        }
-        // Default route IP and interface name should be definitive at this point
-        let default_route_ip = default_route_ip.ok_or(NfqModeError::DefaultRouteNotFound)?;
-        let interface_name = args.interface.ok_or(NfqModeError::NoInterfaceFound)?;
-        // Scan the arp table for the mac for our default route ip
-        let mut default_route_mac = None;
-        for arp_entry in procfs::net::arp().map_err(NfqModeError::OpenArp)? {
-            if arp_entry.ip_address == default_route_ip && arp_entry.device == interface_name {
-                default_route_mac = arp_entry.hw_address;
-            }
-        }
-
-        // Initialize an arp cache. This is used for resolving IPs to arp
-        let mut arp_cache = ArpCache::default();
-        // Iterate over interfaces, and store the client mac/ip for our preferred interface
-        for system_if in if_addrs::get_if_addrs().map_err(NfqModeError::Interface)? {
-            // Skip loopback
-            if system_if.is_loopback() {
-                continue;
-            }
-            // Get the mac address of the interface
-            if let Some(mac) = mac_address::mac_address_by_name(&system_if.name)? {
-                let mac = EthernetAddress(mac.bytes());
-                // Store that info in the arp cache
-                arp_cache.insert(system_if.ip().into(), mac);
-                // Store the addresses if they are the same
-                if interface_name == system_if.name && client_addrs.is_none() {
-                    client_addrs = Some((mac, system_if.ip().into()));
-                }
-            }
-        }
-        // At this point, client mac and ip should be definite
-        let (client_mac, own_ip) = client_addrs.ok_or(NfqModeError::InterfaceHasNoMac)?;
-        // Direction is computed relative to `--client-ip` when given (censor in
-        // the path between a client and the WAN); otherwise relative to our own
-        // address (censor running on the client host itself).
-        let client_ip: IpAddress = match args.client_ip {
-            Some(ip) => ip.into(),
-            None => own_ip,
+    pub async fn run_nfq(mut self, args: Args) -> Result<(), NfqModeError> {
+        // Pick the interface: the requested one, else that of the default route
+        let v4_defaults =
+            route::ipv4_default_routes(&procfs::net::route().map_err(NfqModeError::OpenRoutes)?);
+        let v6_defaults = match std::fs::read_to_string("/proc/net/ipv6_route") {
+            Ok(contents) => route::ipv6_default_routes(&contents)?,
+            // IPv6 disabled
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Vec::new(),
+            Err(err) => return Err(NfqModeError::OpenIpv6Routes(err)),
         };
-        if args.client_ip.is_some() {
-            info!("Computing traffic direction relative to client {client_ip}");
-        }
+        let interface_name =
+            route::select_interface(args.interface.as_deref(), &v4_defaults, &v6_defaults)?;
+        info!("Using interface {interface_name}");
 
-        // Open the interface as an IP raw socket
-        trace!("Opening raw socket for {}", interface_name);
-        let mut interface = RawSocket::new(&interface_name, Medium::Ethernet)
-            .map_err(NfqModeError::RawSocketOpen)?;
-        info!("Opened raw socket for {}", interface_name);
+        // Every address of the chosen interface (IPv4 and IPv6)
+        let own_addrs: Vec<IpAddress> = if_addrs::get_if_addrs()
+            .map_err(NfqModeError::Interface)?
+            .into_iter()
+            .filter(|system_if| system_if.name == interface_name)
+            .map(|system_if| system_if.ip().into())
+            .collect();
+        if own_addrs.is_empty() {
+            return Err(NfqModeError::InterfaceHasNoAddress(interface_name));
+        }
+        // Direction is computed relative to `--client-ip` when given (censor in
+        // the path between a client and the WAN); otherwise relative to every
+        // address of our interface (censor running on the client host itself).
+        let client = if args.client_ip.is_empty() {
+            ClientAddrs::new(own_addrs)
+        } else {
+            ClientAddrs::new(args.client_ip.iter().map(|ip| IpAddress::from(*ip)))
+        };
+        info!("Computing traffic direction relative to client address(es): {client}");
+
+        // Injected packets go through raw IP sockets so the kernel does
+        // routing and ARP/neighbour discovery (see crate::inject)
+        let ifindex = match std::ffi::CString::new(interface_name.clone()) {
+            // SAFETY: name is a valid NUL-terminated string for the call
+            Ok(name) => unsafe { libc::if_nametoindex(name.as_ptr()) },
+            Err(_) => 0,
+        };
+        let injector = RawIpInjector::new(ifindex).map_err(NfqModeError::RawSocketOpen)?;
         // Create our NFQ context
         let mut context_nfq = Context {
-            client_mac,
-            client_ip,
+            client,
             no_dir_action: args.no_dir_action.clone(),
-            delayer: Delayer::new(interface_name),
         };
         // Convert context to generic
         let mut context = (&mut context_nfq).into();
@@ -356,6 +350,11 @@ impl Censor {
         // Start processing packets
         info!("Starting packet loop");
         let mut packet_num = 0;
+        // Packets held by the delay action. We keep the NFQ message itself and
+        // only issue its Accept verdict once the deadline passes, so the kernel
+        // resumes the packet exactly where it was intercepted (correct
+        // direction, routing and link layer) without us re-crafting it.
+        let mut delayed: DelayQueue<(QueueSide, Message)> = DelayQueue::new();
         loop {
             // Handle any incoming ipc requests
             match self.handle_ipc() {
@@ -363,8 +362,22 @@ impl Censor {
                 Err(HandleIpcError::Shutdown) => break,
                 Err(err) => return Err(err.into()),
             }
+            // Release delayed packets whose deadline has passed
+            let now = StdInstant::now();
+            while let Some((side, mut msg)) = delayed.pop_due(now) {
+                trace!("Releasing delayed packet");
+                msg.set_verdict(Verdict::Accept);
+                let queue = match side {
+                    QueueSide::In => &mut queue_in,
+                    QueueSide::Out => &mut queue_out,
+                };
+                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+            }
             // Handle each queue
-            for queue in [&mut queue_in, &mut queue_out] {
+            for (side, queue) in [
+                (QueueSide::In, &mut queue_in),
+                (QueueSide::Out, &mut queue_out),
+            ] {
                 // Handle packets on the queue
                 match queue.recv() {
                     Ok(mut msg) => {
@@ -405,68 +418,28 @@ impl Censor {
                                 seq,
                                 ack,
                                 is_ack,
-                                payload_len,
+                                seg_len,
                             } => {
-                                // Time for misery
-                                let mut src_mac = [0; 6];
-                                let mut dst_mac = [0; 6];
-                                if let IpPair::V4 { src, dst } = ips {
-                                    // Resolve src mac addr
-                                    if let Some(mac) = arp_cache
-                                        .resolve(src.into())
-                                        .map_err(NfqModeError::OpenArp)?
-                                    {
-                                        src_mac = mac.0;
-                                    } else if IpAddress::from(src) != client_ip {
-                                        if let Some(mac) = default_route_mac {
-                                            src_mac = mac;
-                                        }
-                                    }
-                                    // Resolve dst mac addr
-                                    if let Some(mac) = arp_cache
-                                        .resolve(dst.into())
-                                        .map_err(NfqModeError::OpenArp)?
-                                    {
-                                        dst_mac = mac.0;
-                                    } else if IpAddress::from(dst) != client_ip {
-                                        if let Some(mac) = default_route_mac {
-                                            dst_mac = mac;
-                                        }
-                                    }
-                                }
-                                trace!("Sending bidirectional reset for {:?}<->{:?}, ips={:?}, ports={},{}, seq={},ack={}", src_mac, dst_mac, ips, src_port, dst_port, seq, ack);
-                                // Send resets, then accept the packet
+                                trace!("Sending bidirectional reset for ips={:?}, ports={},{}, seq={},ack={}", ips, src_port, dst_port, seq, ack);
+                                // The kernel does layer 2 for injected packets, so the
+                                // Ethernet addresses of the crafted frames are unused
                                 let (client_reset, server_reset) = Self::craft_resets(
-                                    client_mac.0,
-                                    src_mac,
-                                    dst_mac,
+                                    [0; 6],
+                                    [0; 6],
+                                    [0; 6],
                                     ips,
                                     ipid,
                                     src_port,
                                     dst_port,
                                     ack,
                                     seq,
-                                    payload_len,
+                                    seg_len,
                                     is_ack,
                                 )?;
                                 // Send the resets
                                 for _ in 0..self.reset_repeat {
-                                    if let Some(tx_token) =
-                                        interface.transmit(SmoltcpInstant::from_micros_const(0))
-                                    {
-                                        tx_token.consume(client_reset.len(), |tx_buf| {
-                                            tx_buf.copy_from_slice(&client_reset);
-                                            Ok::<(), SmoltcpError>(())
-                                        })?;
-                                    }
-                                    if let Some(tx_token) =
-                                        interface.transmit(Instant::from_micros_const(0))
-                                    {
-                                        tx_token.consume(server_reset.len(), |tx_buf| {
-                                            tx_buf.copy_from_slice(&server_reset);
-                                            Ok::<(), SmoltcpError>(())
-                                        })?;
-                                    }
+                                    inject_frame(&injector, &client_reset);
+                                    inject_frame(&injector, &server_reset);
                                 }
                                 // Accept the packet
                                 msg.set_verdict(Verdict::Accept);
@@ -480,58 +453,25 @@ impl Censor {
                                 dst_port: inject_dst_port,
                                 payload: inject_payload,
                             } => {
-                                // Resolve MAC addresses for the injection packet
-                                let mut inj_src_mac = [0u8; 6];
-                                let mut inj_dst_mac = [0u8; 6];
-                                if let IpPair::V4 { src, dst } = inject_ips {
-                                    if let Some(mac) = arp_cache
-                                        .resolve(src.into())
-                                        .map_err(NfqModeError::OpenArp)?
-                                    {
-                                        inj_src_mac = mac.0;
-                                    } else if IpAddress::from(src) != client_ip {
-                                        if let Some(mac) = default_route_mac {
-                                            inj_src_mac = mac;
-                                        }
-                                    }
-                                    if let Some(mac) = arp_cache
-                                        .resolve(dst.into())
-                                        .map_err(NfqModeError::OpenArp)?
-                                    {
-                                        inj_dst_mac = mac.0;
-                                    } else if IpAddress::from(dst) != client_ip {
-                                        if let Some(mac) = default_route_mac {
-                                            inj_dst_mac = mac;
-                                        }
-                                    }
-                                }
-                                // Construct and send the injection packet
-                                // Ethernet source is always our own MAC (see craft_resets)
-                                let _ = inj_src_mac;
+                                // Construct and send the injection packet (the kernel
+                                // does layer 2, see crate::inject)
                                 let inject_packet = crate::transport::construct_udp_inject(
-                                    client_mac,
-                                    EthernetAddress(inj_dst_mac),
+                                    EthernetAddress([0; 6]),
+                                    EthernetAddress([0; 6]),
                                     inject_ips,
                                     inject_src_port,
                                     inject_dst_port,
                                     &inject_payload,
                                 )?;
-                                if let Some(tx_token) =
-                                    interface.transmit(SmoltcpInstant::from_micros_const(0))
-                                {
-                                    tx_token.consume(inject_packet.len(), |tx_buf| {
-                                        tx_buf.copy_from_slice(&inject_packet);
-                                        Ok::<(), SmoltcpError>(())
-                                    })?;
-                                }
+                                inject_frame(&injector, &inject_packet);
                                 // Accept the original packet (race the real server, like GFW)
                                 msg.set_verdict(Verdict::Accept);
                                 queue.verdict(msg).map_err(NfqModeError::Nfq)?;
                             }
-                            Action::Delay(_) => {
-                                // Drop the original packet
-                                msg.set_verdict(Verdict::Drop);
-                                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+                            Action::Delay(until) => {
+                                // Hold the packet; its verdict is issued once `until` passes
+                                trace!("Delaying packet");
+                                delayed.push(until, (side, msg));
                             }
                             Action::Rewrite(rewrite) => {
                                 // Forward a mutated copy of the packet
@@ -553,6 +493,17 @@ impl Censor {
                 }
             }
         }
+        // Release any still-held packets rather than letting the kernel drop them on unbind
+        while let Some((side, mut msg)) = delayed.pop_any() {
+            msg.set_verdict(Verdict::Accept);
+            let queue = match side {
+                QueueSide::In => &mut queue_in,
+                QueueSide::Out => &mut queue_out,
+            };
+            if let Err(err) = queue.verdict(msg) {
+                warn!("Failed to release delayed packet on shutdown: {err}");
+            }
+        }
         // We initialized firewall rules after binding the queue, so we drop them
         // before the queue is unbound
         drop(rule_in_ipv4);
@@ -566,13 +517,6 @@ impl Censor {
         queue_out
             .unbind(args.iptables.queue_num_out)
             .map_err(NfqModeError::Nfq)?;
-        // Abort the thread used to delay packets
-        context_nfq.delayer.delay_thread.abort();
-        if let Err(err) = context_nfq.delayer.delay_thread.await {
-            if !err.is_cancelled() {
-                Err(err)?
-            }
-        }
         Ok(())
     }
     /// Build the two RST frames for an intercepted segment `src -> dst`.
@@ -583,7 +527,7 @@ impl Censor {
     /// attached to (it would move the peer's MAC onto our port) and stalls the
     /// very connections we are trying to reset.  `src_host_mac`/`dst_host_mac`
     /// are the next-hop MACs for the original source and destination.
-    fn craft_resets(
+    pub(super) fn craft_resets(
         own_mac: [u8; 6],
         src_host_mac: [u8; 6],
         dst_host_mac: [u8; 6],
@@ -593,15 +537,18 @@ impl Censor {
         dst_port: u16,
         ack: TcpSeqNumber,
         seq: TcpSeqNumber,
-        payload_len: usize,
+        seg_len: usize,
         is_ack: bool,
     ) -> Result<(Vec<u8>, Vec<u8>), smoltcp::wire::Error> {
-        // Intercepted packet goes src -> dst with seq and ack fields.
-        // For a RST to be accepted, its seq must be within the recipient's receive window.
-        //
-        // Reset to packet source (client_reset with swapped IPs):
-        // - seq should be what the source expects to receive = intercepted ack
-        // - ack can acknowledge what they sent = intercepted seq + payload_len
+        // The intercepted segment goes src -> dst with SEG.SEQ = `seq`, SEG.ACK = `ack`
+        // (valid only if `is_ack`) and SEG.LEN = `seg_len` (payload + SYN + FIN).
+        // A RST is accepted only if its seq is in the recipient's receive window.
+        let next_seq = seq + seg_len;
+        // Reset to packet source (swapped IPs), per RFC 9293 section 3.10.7.1:
+        // - if the segment had an ACK, the source expects to receive SEG.ACK next;
+        // - otherwise (e.g. a SYN, sender in SYN-SENT) there is no usable seq, so
+        //   <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>, whose ACK makes it acceptable.
+        // In both cases the RST acknowledges everything the source sent.
         let client_reset = crate::transport::construct_reset(
             EthernetAddress(own_mac),
             EthernetAddress(src_host_mac),
@@ -609,28 +556,21 @@ impl Censor {
             ipid,
             dst_port, // src port (swapped)
             src_port, // dst port (swapped)
-            // ack: acknowledge what they sent
-            if is_ack {
-                seq + payload_len
-            } else {
-                TcpSeqNumber(0)
-            },
-            // seq: what they expect to receive = their ack value
-            ack,
+            Some(next_seq),
+            if is_ack { ack } else { TcpSeqNumber(0) },
         )?;
-        // Reset to packet destination (server_reset with original IPs):
-        // - seq should be what the dest expects = intercepted seq + payload_len
-        //   (since the original packet is accepted, dest will have processed it)
-        // - ack = 0 is fine for RST
+        // Reset to packet destination (original IPs): the original segment is
+        // accepted, so the destination next expects SEG.SEQ + SEG.LEN. We know nothing
+        // the destination sent, so this is a bare RST with no ACK.
         let server_reset = crate::transport::construct_reset(
             EthernetAddress(own_mac),
             EthernetAddress(dst_host_mac),
             ips,
             ipid,
-            src_port,          // src port
-            dst_port,          // dst port
-            TcpSeqNumber(0),   // ack
-            seq + payload_len, // seq: what they expect after receiving the packet
+            src_port,
+            dst_port,
+            None,
+            next_seq,
         )?;
 
         Ok((client_reset, server_reset))
@@ -644,21 +584,17 @@ pub enum NfqModeError {
     IpTables(IpTablesError),
     #[error("Error listing interfaces: {0}")]
     Interface(io::Error),
-    #[error("Failed to find a suitable interface")]
-    NoInterfaceFound,
-    #[error("Failed to find MAC address of our chosen interface: {0}")]
-    MacAddressNotFound(#[from] MacAddressError),
-    #[error("Interface has no MAC address")]
-    InterfaceHasNoMac,
+    #[error("Interface {0} does not exist or has no IP address")]
+    InterfaceHasNoAddress(String),
+    #[error("Failed to choose an interface: {0}")]
+    SelectInterface(#[from] route::SelectInterfaceError),
     #[error("Failed to open routing table: {0}")]
     OpenRoutes(ProcError),
-    #[error("Failed to find ip for default route (0.0.0.0)")]
-    DefaultRouteNotFound,
-    #[error("Failed to open ARP table")]
-    OpenArp(ProcError),
-    #[error("Failed to find arp entry (containing MAC) for default route")]
-    NoArpEntryForDefaultRoute,
-    #[error("Failed to open raw IP socket on interface: {0}")]
+    #[error("Failed to open IPv6 routing table: {0}")]
+    OpenIpv6Routes(io::Error),
+    #[error("Failed to parse IPv6 routing table: {0}")]
+    Ipv6Routes(#[from] route::Ipv6RouteParseError),
+    #[error("Failed to open raw IP sockets for injection: {0}")]
     RawSocketOpen(io::Error),
     #[error("Error opening nfqueue: {0}")]
     NfqOpen(io::Error),
@@ -672,8 +608,6 @@ pub enum NfqModeError {
     Ort(#[from] OrtError),
     #[error("Error doing processing: {0}")]
     Process(#[from] smoltcp::wire::Error),
-    #[error("Error joining watermark thread :{0}")]
-    ThreadJoin(#[from] JoinError),
 }
 
 #[cfg(test)]
@@ -699,5 +633,104 @@ mod reset_frame_tests {
         assert_eq!(f1.dst_addr(), EthernetAddress(client));
         assert_eq!(f2.src_addr(), EthernetAddress(own));
         assert_eq!(f2.dst_addr(), EthernetAddress(server));
+    }
+
+    /// (seq, ack, ACK flag, RST flag) of a crafted IPv4 reset frame.
+    fn tcp_fields(frame: &[u8]) -> (TcpSeqNumber, TcpSeqNumber, bool, bool) {
+        use smoltcp::wire::{Ipv4Packet, TcpPacket};
+        let eth = EthernetFrame::new_checked(frame).unwrap();
+        let ip = Ipv4Packet::new_checked(eth.payload()).unwrap();
+        let tcp = TcpPacket::new_checked(ip.payload()).unwrap();
+        (tcp.seq_number(), tcp.ack_number(), tcp.ack(), tcp.rst())
+    }
+
+    fn resets(seq: i32, ack: i32, seg_len: usize, is_ack: bool) -> (Vec<u8>, Vec<u8>) {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        Censor::craft_resets([2; 6], [3; 6], [4; 6], ips, None, 40000, 443,
+                             TcpSeqNumber(ack), TcpSeqNumber(seq), seg_len, is_ack)
+            .unwrap()
+    }
+
+    #[test]
+    fn resets_for_data_segment_land_in_both_windows() {
+        // Client sent 100 bytes at seq 1000, acknowledging the server up to 5000
+        let (to_client, to_server) = resets(1000, 5000, 100, true);
+        // To the sender: <SEQ=SEG.ACK>, acknowledging what it sent
+        assert_eq!(tcp_fields(&to_client), (TcpSeqNumber(5000), TcpSeqNumber(1100), true, true));
+        // To the receiver: the next sequence number it expects from the sender
+        let (seq, _, ack_flag, rst) = tcp_fields(&to_server);
+        assert_eq!((seq, ack_flag, rst), (TcpSeqNumber(1100), false, true));
+    }
+
+    #[test]
+    fn resets_for_syn_follow_rfc793() {
+        // A SYN has no ACK and occupies one sequence number
+        let (to_client, to_server) = resets(7000, 0, 1, false);
+        // To a SYN-SENT client: <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
+        assert_eq!(tcp_fields(&to_client), (TcpSeqNumber(0), TcpSeqNumber(7001), true, true));
+        // To the server, which has seen the SYN and expects ISS+1
+        let (seq, _, ack_flag, rst) = tcp_fields(&to_server);
+        assert_eq!((seq, ack_flag, rst), (TcpSeqNumber(7001), false, true));
+    }
+}
+
+#[cfg(test)]
+mod args_tests {
+    use super::*;
+
+    #[test]
+    fn client_ip_repeated_or_comma_separated() {
+        let a = Args::try_parse_from([
+            "nfq",
+            "--client-ip",
+            "10.0.0.2",
+            "--client-ip",
+            "2001:db8::2",
+        ])
+        .unwrap();
+        let b = Args::try_parse_from(["nfq", "--client-ip", "10.0.0.2,2001:db8::2"]).unwrap();
+        assert_eq!(a.client_ip, b.client_ip);
+        assert_eq!(a.client_ip.len(), 2);
+        assert!(Args::try_parse_from(["nfq"]).unwrap().client_ip.is_empty());
+    }
+
+    #[test]
+    fn nfqueue_rule_skips_our_injected_packets() {
+        let rule = IpTablesRule {
+            table: "raw".into(),
+            chain: "OUTPUT".into(),
+            queue_num: 1,
+        };
+        let s = rule.rule_string();
+        assert!(
+            s.contains(&format!("-m mark ! --mark {:#x}", crate::inject::INJECT_MARK)),
+            "{s}"
+        );
+        // The match must come before the jump target
+        assert!(s.find("--mark").unwrap() < s.find("-j NFQUEUE").unwrap());
+    }
+
+    #[test]
+    fn resets_are_valid_ip_packets_after_stripping_l2() {
+        let ips = IpPair::V6 {
+            src: smoltcp::wire::Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+            dst: smoltcp::wire::Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2),
+        };
+        let (to_client, to_server) = Censor::craft_resets(
+            [0; 6], [0; 6], [0; 6], ips, None, 40000, 443,
+            TcpSeqNumber(2000), TcpSeqNumber(1000), 100, true,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::inject::ip_destination(l3_payload(&to_client).unwrap()),
+            Some("2001:db8::1".parse().unwrap())
+        );
+        assert_eq!(
+            crate::inject::ip_destination(l3_payload(&to_server).unwrap()),
+            Some("2001:db8::2".parse().unwrap())
+        );
     }
 }

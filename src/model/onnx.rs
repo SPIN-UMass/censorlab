@@ -14,7 +14,8 @@ pub const ENV_NAME: &str = "censorlab";
 #[derive(Debug)]
 pub struct Model {
     pub session: Session,
-    /// Input dimensions as reported by ONNX, where dynamic dimensions are -1
+    /// Input dimensions as reported by ONNX, where dynamic dimensions are -1.
+    /// Validated at load to be `[1 | -1, N | -1]`
     pub input_dims: Vec<i64>,
     pub prob_index: usize,
 }

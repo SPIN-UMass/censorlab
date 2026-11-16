@@ -1,6 +1,9 @@
 use crate::application::tls::ClientHelloAssembler;
 use crate::censor::{Action, Direction, IpPair};
+use crate::config::conntrack::Config as ConntrackConfig;
+use crate::expiring_map::ExpiringMap;
 use crate::model::ModelThreadMessage;
+use crate::program::check::ModelSignatures;
 use crate::program::config::Config as ProgramConfig;
 use crate::program::env::{ProgramEnv, Registers};
 use crate::program::packet::rust_dns;
@@ -31,13 +34,13 @@ use tracing::error;
 /// Connection key is an identifier that will always resolve to the same value for a connection
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ConnectionKey {
-    /// Lower (by sorting) IP addr
+    /// IP addr of the lower (by sorting (IP, port)) endpoint
     addr_low: IpAddress,
-    /// Higher (by sorting) IP addr
+    /// IP addr of the higher (by sorting (IP, port)) endpoint
     addr_high: IpAddress,
-    /// Lower (by sorting IP) port
+    /// Port belonging to `addr_low`
     port_low: u16,
-    /// Higher (by sorting IP) port
+    /// Port belonging to `addr_high`
     port_high: u16,
     /// Protocol
     proto: TransportProtocol,
@@ -48,9 +51,10 @@ impl ConnectionKey {
         // Extract IPs
         let ip_1 = ips.src();
         let ip_2 = ips.dst();
-        // Place values based on sorting IPs
-        // Sort by IP to ensure symmetric keys (port sort alternative benchmarked in TODO.md)
-        let (addr_low, addr_high, port_low, port_high) = if ip_1 <= ip_2 {
+        // Place values based on sorting (IP, port) endpoints so both directions
+        // map to the same key. Sorting by IP alone is ambiguous when both
+        // endpoints share an IP (loopback / same host), so ports break ties.
+        let (addr_low, addr_high, port_low, port_high) = if (ip_1, port_1) <= (ip_2, port_2) {
             (ip_1, ip_2, port_1, port_2)
         } else {
             (ip_2, ip_1, port_2, port_1)
@@ -64,35 +68,93 @@ impl ConnectionKey {
             proto,
         }
     }
+    /// Whether (`ip`, `port`) is the `addr_low`/`port_low` endpoint of this key
+    fn is_low_endpoint(&self, ip: IpAddress, port: u16) -> bool {
+        self.addr_low == ip && self.port_low == port
+    }
 }
 
-/// Per-host state shared across all connections from the same source IP
+/// Per-host state shared across all connections from the same IP
 #[derive(Debug)]
 pub struct HostState {
-    /// Number of connections initiated from this host
+    /// Number of connections whose first tracked packet came from this host
     pub num_connections: u32,
     /// Total number of packets seen from this host across all connections
     pub num_packets: u32,
     /// Host-level registers for CensorLang programs
     pub registers: Registers,
+    /// Persistent Python dict exposed as `host.state` / `dst_host.state`
+    /// (created lazily in Python mode)
+    py_state: Option<PyObjectRef>,
+}
+
+/// Packet time, in microseconds
+type Micros = u64;
+const MICROS_PER_SEC: u64 = 1_000_000;
+
+/// Source of "now" for connection-tracking timeouts
+#[derive(Debug)]
+enum Clock {
+    /// Live modes: time elapsed since the tracker was created
+    Monotonic(std::time::Instant),
+    /// PCAP mode: the latest capture timestamp seen so far
+    Packet(Micros),
+}
+
+/// Minimal TCP lifecycle: enough to know when a connection has ended so that
+/// a later SYN on the same 5-tuple starts a fresh connection
+#[derive(Clone, Copy, Debug, Default)]
+struct TcpLifecycle {
+    /// FIN seen from the `addr_low`/`port_low` endpoint
+    fin_low: bool,
+    /// FIN seen from the `addr_high`/`port_high` endpoint
+    fin_high: bool,
+    /// RST seen from either endpoint
+    rst: bool,
+}
+impl TcpLifecycle {
+    fn closed(&self) -> bool {
+        self.rst || (self.fin_low && self.fin_high)
+    }
 }
 
 /// Aggregate object used to manage state for many different connections
+///
+/// # State lifetime
+/// Connection and host state is bounded (see [`crate::config::conntrack`]):
+/// * A TCP connection is *closed* once a RST, or a FIN from both endpoints,
+///   has been processed. Packets that follow (final ACKs, retransmissions)
+///   still go to the same per-connection script state. A SYN without ACK on
+///   a closed connection starts a fresh one (script initialization re-runs).
+///   Closed connections are forgotten after `tcp_closed_timeout`.
+/// * Open TCP connections and UDP flows are forgotten after
+///   `tcp_idle_timeout` / `udp_idle_timeout` seconds without packets; a later
+///   packet on the same 5-tuple starts a fresh connection.
+/// * At most `max_connections` connections are tracked; beyond that the one
+///   closest to expiring is evicted.
+/// * Per-host state (counters, CensorLang host registers and the Python
+///   `host.state`/`dst_host.state` dicts) is kept for every IP that sends or
+///   receives traffic, for at most `max_hosts` hosts (least recently seen
+///   evicted first) and, if `host_idle_timeout` is set, until the host has
+///   been idle that long. An evicted host starts again from empty state.
 pub struct TransportState {
     /// Internal tracker for connections
-    connections: HashMap<ConnectionKey, ConnectionInfo>,
-    /// Per-host state keyed by source IP
-    host_states: HashMap<IpAddress, HostState>,
-    /// Persistent Python dicts for per-host user state (keyed by IP string)
-    python_host_dicts: HashMap<String, PyObjectRef>,
+    connections: ExpiringMap<ConnectionKey, ConnectionInfo>,
+    /// Per-host state keyed by IP
+    hosts: ExpiringMap<IpAddress, HostState>,
+    /// Limits on tracked state
+    conntrack: ConntrackConfig,
+    /// Time source for timeouts
+    clock: Clock,
     /// Execution mode
     execution_mode: ExecutionMode,
     /// Interpreter used for executing all python code
     vm: vm::Interpreter,
-    /// Code that is run by interpreter on the first packet
-    code: PyRef<PyCode>,
-    /// Code that is run by interpreter on each packet
-    process: PyRef<PyCode>,
+    /// Compiled censor script, run once per connection on its first packet
+    /// (None in CensorLang mode or when no Python script is configured)
+    code: Option<PyRef<PyCode>>,
+    /// What to do with a packet when the censor script fails
+    on_script_error: ScriptErrorPolicy,
     /// Sender used to make requests of the model executor
     model_sender: mpsc::SyncSender<ModelThreadMessage>,
     /// CensorLang program (when in CensorLang mode)
@@ -107,12 +169,18 @@ pub struct ConnectionInfo {
     is_first: bool,
     /// Reassembles the client's TLS ClientHello across segments
     client_hello: ClientHelloAssembler,
+    /// Only meaningful for TCP
+    tcp: TcpLifecycle,
+    /// The connection's client: the sender of the first packet seen on it
+    /// (the SYN sender for TCP connections observed from the start).
+    /// CensorLang host registers (`hreg`) are this host's.
+    client_ip: IpAddress,
 }
 
 #[derive(Debug, Error)]
 pub enum TransportStateInitError {
-    #[error("Failed to initialize Python environment: {0:?}")]
-    PythonInit(PyBaseExceptionRef),
+    #[error("Invalid censor script {}:\n{msg}", path.display())]
+    InvalidScript { path: PathBuf, msg: String },
     #[error("Failed to do something with ONNX: {0}")]
     OnnxError(#[from] OrtError),
     #[error("Could not find input named float_input with dimensions 1xN for model {name}")]
@@ -141,11 +209,149 @@ pub enum ExecutionMode {
     CensorLang,
 }
 
+/// What to do with a packet when the Python censor script fails on it
+/// (`process()` raised, or the script failed to initialize for its connection).
+/// Every such failure is logged either way.
+#[derive(Debug, Default, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptErrorPolicy {
+    /// Fail open: let the packet through
+    #[default]
+    Allow,
+    /// Fail closed: drop the packet
+    Drop,
+}
+impl ScriptErrorPolicy {
+    fn action(self) -> Action {
+        match self {
+            ScriptErrorPolicy::Allow => Action::None,
+            ScriptErrorPolicy::Drop => Action::Drop,
+        }
+    }
+}
+
 /// Execution environment
 #[derive(Debug)]
 pub enum ExecutionEnvironment {
-    Python { scope: Scope },
+    Python { scope: Scope, state: PythonConnState },
     CensorLang { env: ProgramEnv },
+}
+
+/// Lifecycle of one connection's Python script environment
+#[derive(Debug)]
+pub enum PythonConnState {
+    /// The module body has not run for this connection yet
+    Uninitialized,
+    /// The module body ran; this is the script's callable `process`
+    Ready(PyObjectRef),
+    /// The module body raised or left no callable `process` (already logged)
+    Failed,
+}
+
+/// Human-readable connection label for log messages
+struct ConnectionLabel {
+    proto: TransportProtocol,
+    ips: IpPair,
+    src_port: u16,
+    dst_port: u16,
+}
+impl ConnectionLabel {
+    fn of(ips: IpPair, packet: &Packet) -> Self {
+        Self {
+            proto: packet.transport_proto(),
+            ips,
+            src_port: packet.transport.src,
+            dst_port: packet.transport.dst,
+        }
+    }
+}
+impl std::fmt::Display for ConnectionLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:?} {}:{} -> {}:{}",
+            self.proto,
+            self.ips.src(),
+            self.src_port,
+            self.ips.dst(),
+            self.dst_port
+        )
+    }
+}
+
+/// Render a Python exception (with traceback) as a string for logging
+fn format_exception(vm: &vm::VirtualMachine, exc: &PyBaseExceptionRef) -> String {
+    let mut out = String::new();
+    if vm.write_exception(&mut out, exc).is_err() {
+        out = format!("{exc:?}");
+    }
+    out.trim_end().to_owned()
+}
+
+/// Run the censor script's module body in `scope` (with `model` defined) and
+/// return its `process` function, which must exist and be callable.
+fn init_python_scope(
+    vm: &vm::VirtualMachine,
+    code: PyRef<PyCode>,
+    scope: &Scope,
+    model_sender: mpsc::SyncSender<ModelThreadMessage>,
+) -> Result<PyObjectRef, String> {
+    let model = PythonModel::new(model_sender).to_pyobject(vm);
+    scope
+        .globals
+        .set_item(MODEL, model, vm)
+        .map_err(|err| format_exception(vm, &err))?;
+    vm.run_code_obj(code, scope.clone())
+        .map_err(|err| format_exception(vm, &err))?;
+    let process = scope
+        .globals
+        .get_item_opt(PROCESS, vm)
+        .map_err(|err| format_exception(vm, &err))?
+        .ok_or_else(|| "script does not define a `process(packet)` function".to_owned())?;
+    if !process.is_callable() {
+        return Err(format!(
+            "`process` must be callable, but it is a {}",
+            process.class().name()
+        ));
+    }
+    Ok(process)
+}
+
+/// Build the Reset action for the TCP connection a packet belongs to.
+///
+/// This is the only place a Reset is populated from a packet, so every source of a
+/// Reset (scripts, CensorLang, config lists) targets the same connection the same way.
+/// Returns `None` for non-TCP packets, which have no connection to reset.
+pub fn reset_for(
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Option<Action> {
+    let TransportMetadataExtra::Tcp(tcp) = transport.extra else {
+        return None;
+    };
+    // SYN and FIN each occupy one sequence number (RFC 9293 section 3.4)
+    let seg_len = payload_len + usize::from(tcp.flags.syn) + usize::from(tcp.flags.fin);
+    Some(Action::Reset {
+        src_mac: [0; 6],
+        dst_mac: [0; 6],
+        ips,
+        ipid: None,
+        src_port: transport.src,
+        dst_port: transport.dst,
+        seq: tcp.seq,
+        ack: tcp.ack,
+        seg_len,
+        is_ack: tcp.flags.ack,
+    })
+}
+
+/// [`reset_for`], falling back to Drop for traffic that has no TCP connection to reset.
+pub fn reset_or_drop(
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Action {
+    reset_for(ips, transport, payload_len).unwrap_or(Action::Drop)
 }
 
 /// Recognize the value returned by a PyCL `process()` call and map it to an
@@ -158,7 +364,7 @@ pub enum ExecutionEnvironment {
 /// None                         -> continue (Action::None)
 /// "allow" | "drop" | "reset"   -> the named action
 /// bytes                        -> inject these bytes as a UDP response
-/// ("delay",   seconds: number) -> hold the packet for `seconds` (Tap/NFQ mode)
+/// ("delay",   seconds: number) -> hold the packet for `seconds` (NFQ; wire forwards)
 /// ("rewrite", {"ttl": int})    -> forward a copy with the IP TTL/hop limit set
 /// ```
 ///
@@ -177,24 +383,7 @@ fn action_from_python(
     }
     if let Some(s) = result.payload::<PyStr>() {
         return match s.as_str().to_lowercase().as_str() {
-            "reset" => {
-                if let TransportMetadataExtra::Tcp(tcp_metadata) = transport.extra {
-                    Action::Reset {
-                        src_mac: [0; 6],
-                        dst_mac: [0; 6],
-                        ips,
-                        ipid: None,
-                        src_port: transport.src,
-                        dst_port: transport.dst,
-                        seq: tcp_metadata.seq,
-                        ack: tcp_metadata.ack,
-                        payload_len,
-                        is_ack: tcp_metadata.flags.ack,
-                    }
-                } else {
-                    Action::Drop
-                }
-            }
+            "reset" => reset_or_drop(ips, transport, payload_len),
             "drop" => Action::Drop,
             "allow" => Action::None,
             other => {
@@ -275,93 +464,169 @@ fn action_from_python(
     Action::None
 }
 
+/// The only modules a censor script may import: CensorLab's native modules
+const ALLOWED_IMPORTS: &[&str] = &["rust", "dns", "tls", "quic"];
+
+/// Native stdlib modules the interpreter itself imports while initializing
+/// (stdio, importlib, codecs). They are not importable by scripts.
+const INTERPRETER_INIT_MODULES: &[&str] = &[
+    "_typing", "_signal", "_ast", "_io", "_thread", "_warnings", "_weakref", "_imp", "_codecs",
+];
+
+/// `builtins.__import__` replacement: only absolute imports of
+/// [`ALLOWED_IMPORTS`] reach the real import machinery.
+fn sandboxed_import(args: vm::function::FuncArgs, vm: &vm::VirtualMachine) -> vm::PyResult {
+    use rustpython_vm::builtins::PyStr;
+    let name = args.args.first().and_then(|n| n.payload::<PyStr>()).map(|n| n.as_str().to_owned());
+    // __import__(name, globals=None, locals=None, fromlist=(), level=0)
+    let level = args
+        .args
+        .get(4)
+        .or_else(|| args.kwargs.get("level"))
+        .map(|level| level.try_to_value::<usize>(vm))
+        .transpose()?
+        .unwrap_or(0);
+    match name {
+        Some(name) if level == 0 && ALLOWED_IMPORTS.contains(&name.as_str()) => {
+            vm.import_func.call(args, vm)
+        }
+        name => {
+            let shown = name.unwrap_or_else(|| "<non-string>".to_owned());
+            Err(vm.new_import_error(
+                format!(
+                    "censor scripts may only import {}; '{shown}' is not available",
+                    ALLOWED_IMPORTS.join(", ")
+                ),
+                vm.ctx.new_str(shown),
+            ))
+        }
+    }
+}
+
+/// Build the RustPython interpreter that censor scripts run in.
+///
+/// Scripts run inside the censor process, which holds CAP_NET_ADMIN/CAP_NET_RAW,
+/// so the interpreter is restricted to what censor scripts need:
+/// - Only the native modules required to initialize the interpreter are
+///   registered, plus CensorLab's own `rust`, `dns`, `tls` and `quic`; there is
+///   no `posix`/`os`, `time`, `pwd`, ... and no filesystem import path.
+/// - `__import__` only admits [`ALLOWED_IMPORTS`], and `sys.modules` is
+///   emptied of the interpreter's own modules so they can't be re-imported
+///   from the cache.
+/// - `open` is removed from builtins.
+///
+/// This is a Python-level restriction, not an OS-level sandbox: objects that
+/// exist in the interpreter (e.g. `_io` classes reachable through
+/// `object.__subclasses__()`) are still reachable by introspection.
+pub(crate) fn new_python_interpreter(hash_seed: u32) -> vm::Interpreter {
+    // Initialize interpreter settings
+    let mut settings: Settings = Default::default();
+    // Ignore PYTHON* environment variables and user site-packages
+    settings.isolated = true;
+    settings.ignore_environment = true;
+    // No filesystem-based imports (also keeps importlib from loading posix)
+    settings.allow_external_library = false;
+    settings.path_list = Vec::new();
+    // Don't have the python subprograms implement sigint
+    settings.install_signal_handlers = false;
+    settings.hash_seed = Some(hash_seed);
+    // Want to make sure nothing is passed
+    settings.argv = Vec::new();
+    // settings.stdio_unbuffered = true;
+    // -OO optimization
+    settings.optimize = 2;
+    // Initialize the interpreter
+    let interpreter = vm::Interpreter::with_init(settings, |vm| {
+        // Register only the native modules the interpreter needs to start
+        vm::common::rc::PyRc::get_mut(&mut vm.state)
+            .expect("interpreter state is not shared during initialization")
+            .module_inits
+            .retain(|name, _| INTERPRETER_INIT_MODULES.contains(&name.as_ref()));
+        // Import the native rust module used to define the packet interface
+        vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
+        // Import the native rust module used for dns parsing
+        vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
+        // Import the native rust module used for TLS ClientHello parsing
+        vm.add_native_module("tls".to_owned(), Box::new(rust_tls::make_module));
+        // Import the native rust module used for QUIC Initial parsing
+        vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
+    });
+    interpreter
+        .enter(|vm| {
+            // Gate imports
+            let import = vm.new_function("__import__", sandboxed_import);
+            vm.builtins.set_attr("__import__", import, vm)?;
+            // Drop the interpreter's own modules from the import cache, which
+            // `import x` consults before calling __import__
+            vm.sys_module.set_attr("modules", vm.ctx.new_dict(), vm)?;
+            // No file access
+            vm.builtins.dict().del_item("open", vm)?;
+            Ok::<_, PyBaseExceptionRef>(())
+        })
+        .unwrap_or_else(|err| {
+            interpreter.enter(|vm| vm.print_exception(err));
+            panic!("failed to restrict the censor-script interpreter");
+        });
+    interpreter
+}
+
 impl TransportState {
     pub fn new(
-        _model_config: HashMap<String, crate::config::model::Model>,
+        model_config: HashMap<String, crate::config::model::Model>,
         _decision_log_path: Option<PathBuf>,
         execution_config: crate::config::execution::Config,
+        conntrack: ConntrackConfig,
         model_sender: mpsc::SyncSender<ModelThreadMessage>,
     ) -> Result<Self, TransportStateInitError> {
-        // Initialize interpreter settings
-        let mut settings: Settings = Default::default();
-        //settings.isolated = true;
-        // Don't have the python subprograms implement sigint
-        settings.install_signal_handlers = false;
-        settings.hash_seed = Some(execution_config.hash_seed);
-        // Want to make sure nothing is passed
-        settings.argv = Vec::new();
-        // settings.stdio_unbuffered = true;
-        // -OO optimization
-        settings.optimize = 2;
-        // Initialize the interpreter
-        let vm = vm::Interpreter::with_init(settings, |vm| {
-            // Import the native rust module used to define the packet interface
-            vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
-            // Import the native rust module used for dns parsing
-            vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
-            // Import the native rust module used for TLS ClientHello parsing
-            vm.add_native_module("tls".to_owned(), Box::new(rust_tls::make_module));
-            // Import the native rust module used for QUIC Initial parsing
-            vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
-        });
+        let vm = new_python_interpreter(execution_config.hash_seed);
         // Only compile the script as Python if we're in Python mode
         let python_script = match execution_config.mode {
             ExecutionMode::Python => execution_config.script.as_ref(),
             ExecutionMode::CensorLang => None,
         };
-        let (code, process) = if let Some(script_path) = python_script {
+        let code = if let Some(script_path) = python_script {
             let source = std::fs::read_to_string(script_path)
                 .map_err(TransportStateInitError::ReadScript)?;
-            // Do some initialization tasks, eventually returning the compiled code object
-            vm.enter(move |vm| {
-                // Import the native module so types work
-                vm.import("rust", 0)?;
-                vm.import("tls", 0)?;
-                let source = &source;
-                // Compile the given source code
+            let filename = script_path.display().to_string();
+            // Compile the script, then validate it once up front by running its
+            // module body in a throwaway scope: a broken script (exception in
+            // the module body, no callable `process`) fails here, at startup,
+            // instead of silently on every connection.
+            let validated = vm.enter(|vm| {
+                // Import the native modules so their types (Model, Packet,
+                // ClientHello, ...) are initialized before we construct any of them
+                vm.import("rust", 0).map_err(|err| format_exception(vm, &err))?;
+                vm.import("tls", 0).map_err(|err| format_exception(vm, &err))?;
                 let code = vm
-                    .compile(source, vm::compiler::Mode::Exec, "<embedded>".to_owned())
-                    .map_err(|err| vm.new_syntax_error(&err, Some(source)))?;
-                let process_source = "process(packet)";
-                let process = vm
-                    .compile(
-                        process_source,
-                        vm::compiler::Mode::Exec,
-                        "<embedded>".to_owned(),
-                    )
-                    .map_err(|err| vm.new_syntax_error(&err, Some(process_source)))?;
-                Ok((code, process))
-            })
-            .map_err(TransportStateInitError::PythonInit)?
+                    .compile(&source, vm::compiler::Mode::Exec, filename)
+                    .map_err(|err| format_exception(vm, &vm.new_syntax_error(&err, Some(&source))))?;
+                let scope = vm.new_scope_with_builtins();
+                init_python_scope(vm, code.clone(), &scope, model_sender.clone())?;
+                Ok::<_, String>(code)
+            });
+            Some(validated.map_err(|msg| TransportStateInitError::InvalidScript {
+                path: script_path.clone(),
+                msg,
+            })?)
         } else {
-            vm.enter(move |vm| {
-                // Import the native module so types work
-                vm.import("rust", 0)?;
-                vm.import("tls", 0)?;
-                let source = "";
-                // Compile the given source code
-                let code = vm
-                    .compile(source, vm::compiler::Mode::Exec, "<embedded>".to_owned())
-                    .map_err(|err| vm.new_syntax_error(&err, Some(source)))?;
-                let process_source = "";
-                let process = vm
-                    .compile(
-                        process_source,
-                        vm::compiler::Mode::Exec,
-                        "<embedded>".to_owned(),
-                    )
-                    .map_err(|err| vm.new_syntax_error(&err, Some(process_source)))?;
-                Ok((code, process))
-            })
-            .map_err(TransportStateInitError::PythonInit)?
+            None
         };
         // Load CensorLang program if in CensorLang mode
         let censorlang_program = match execution_config.mode {
             ExecutionMode::CensorLang => {
                 if let Some(ref script_path) = execution_config.script {
-                    Some(
-                        Program::load(script_path.clone())?,
-                    )
+                    // Models the program may reference.  Their input lengths
+                    // are only known once the model thread has loaded them,
+                    // so indices are bounded by check::MAX_MODEL_INPUTS.
+                    let models: ModelSignatures =
+                        model_config.keys().map(|name| (name.clone(), None)).collect();
+                    // Rejects (at startup) any program that is malformed or
+                    // exceeds the configured limits
+                    Some(Program::load(
+                        script_path.clone(),
+                        &execution_config.censorlang,
+                        Some(&models),
+                    )?)
                 } else {
                     Some(Program::default())
                 }
@@ -370,16 +635,17 @@ impl TransportState {
         };
         // Construct the overall connection manager
         Ok(TransportState {
-            connections: HashMap::new(),
-            host_states: HashMap::new(),
-            python_host_dicts: HashMap::new(),
+            connections: ExpiringMap::new(),
+            hosts: ExpiringMap::new(),
+            conntrack,
+            clock: Clock::Monotonic(std::time::Instant::now()),
             execution_mode: execution_config.mode,
             vm,
             code,
-            process,
+            on_script_error: execution_config.on_script_error,
             model_sender,
             censorlang_program,
-            censorlang_config: ProgramConfig::default(),
+            censorlang_config: execution_config.censorlang,
         })
     }
     /// Processes the tcp packet based on its metadata and our internal state
@@ -396,7 +662,6 @@ impl TransportState {
     ) -> Result<Action, SmoltcpError> {
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.
-        let mut packet = packet;
         packet.set_direction(direction);
         // Make a connection key
         let key = ConnectionKey::new(
@@ -405,47 +670,62 @@ impl TransportState {
             packet.transport.dst,
             packet.transport_proto(),
         );
-        let new_key = key.clone();
-        // Get a reference to the tracker's packet list
-        let ConnectionInfo {
-            is_first,
-            env,
-            client_hello,
-        } =
-            self.connections.entry(new_key).or_insert_with(|| {
-                // Initialize the per-connection state
-                ConnectionInfo {
-                    env: match self.execution_mode {
-                        ExecutionMode::Python => {
-                            // New connection means we should initialize a new Python scope
-                            let scope = self
-                                .vm
-                                .enter(|vm| {
-                                    // Initialize the scope
-                                    let scope = vm.new_scope_with_builtins();
-                                    // Return the scope
-                                    Ok::<Scope, PyBaseExceptionRef>(scope)
-                                })
-                                .unwrap();
-                            ExecutionEnvironment::Python { scope }
-                        }
-                        ExecutionMode::CensorLang => {
-                            let env = ProgramEnv::new(
-                                packet.connection_identifier(),
-                                &self.censorlang_config,
-                            );
-                            ExecutionEnvironment::CensorLang { env }
-                        }
-                    },
-                    is_first: true,
-                    client_hello: ClientHelloAssembler::new(),
+        let now = self.now();
+        // Forget idle state first so this packet never lands in a timed-out connection
+        self.expire(now);
+        let src_port = packet.transport.src;
+        let tcp_flags = match packet.transport.extra {
+            TransportMetadataExtra::Tcp(tcp_metadata) => Some(tcp_metadata.flags),
+            _ => None,
+        };
+        // A bare SYN on a closed TCP connection is a new connection reusing the 5-tuple
+        let is_bare_syn = tcp_flags.is_some_and(|flags| flags.syn && !flags.ack);
+        if is_bare_syn && self.connections.get(&key).is_some_and(|c| c.tcp.closed()) {
+            if let Some(old) = self.connections.remove(&key) {
+                self.teardown(vec![old.env], Vec::new());
+            }
+        }
+        if !self.connections.contains_key(&key) {
+            // Initialize the per-connection state
+            let env = match self.execution_mode {
+                ExecutionMode::Python => {
+                    // New connection means we should initialize a new Python scope
+                    let scope = self.vm.enter(|vm| vm.new_scope_with_builtins());
+                    ExecutionEnvironment::Python {
+                        scope,
+                        state: PythonConnState::Uninitialized,
+                    }
                 }
-            });
-        // Track the client's ClientHello across segments so programs see it once complete
+                ExecutionMode::CensorLang => {
+                    let env = ProgramEnv::new(
+                        packet.connection_identifier(),
+                        &self.censorlang_config,
+                    );
+                    ExecutionEnvironment::CensorLang { env }
+                }
+            };
+            let info = ConnectionInfo {
+                env,
+                is_first: true,
+                tcp: TcpLifecycle::default(),
+                client_ip: ips.src(),
+                client_hello: ClientHelloAssembler::new(),
+            };
+            // The real deadline is set once the packet has been processed
+            self.connections.insert(key.clone(), info, now);
+        }
+        // Track the client's ClientHello across segments so programs see it once
+        // complete. The assembler lives in ConnectionInfo, so it is reset along
+        // with the rest of the connection state on 5-tuple reuse or expiry.
         if let TransportMetadataExtra::Tcp(tcp) = packet.transport.extra {
+            let client_hello = &mut self
+                .connections
+                .get_mut(&key)
+                .expect("connection was inserted above")
+                .client_hello;
             client_hello.observe(
                 (ips.src(), packet.transport.src),
-                tcp.seq.0 as u32,
+                tcp.seq_number(),
                 tcp.flags.syn,
                 tcp.flags.ack,
                 &packet.payload,
@@ -453,18 +733,13 @@ impl TransportState {
             packet.tls_client_hello = client_hello.client_hello().cloned();
         }
         // Copy of is_first for the execution
-        let is_first_cl = *is_first;
+        let is_first_cl = self.connections.get(&key).is_some_and(|c| c.is_first);
 
         // Update per-host state for the source IP
         let src_ip = ips.src();
         let dst_ip = ips.dst();
-        let config = &self.censorlang_config;
         let (host_num_connections, host_num_packets) = {
-            let host = self.host_states.entry(src_ip).or_insert_with(|| HostState {
-                num_connections: 0,
-                num_packets: 0,
-                registers: Registers::new(config.program.num_registers.into(), config.env.relax_register_types),
-            });
+            let host = self.touch_host(src_ip, now);
             host.num_packets += 1;
             if is_first_cl {
                 host.num_connections += 1;
@@ -473,50 +748,50 @@ impl TransportState {
         };
         // Get dst host counters (don't increment -- dst didn't send this packet)
         let (dst_host_num_connections, dst_host_num_packets) = {
-            let dst_host = self.host_states.entry(dst_ip).or_insert_with(|| HostState {
-                num_connections: 0,
-                num_packets: 0,
-                registers: Registers::new(config.program.num_registers.into(), config.env.relax_register_types),
-            });
+            let dst_host = self.touch_host(dst_ip, now);
             (dst_host.num_connections, dst_host.num_packets)
         };
+        // Per-host persistent Python dicts
+        let host_dicts = match self.execution_mode {
+            ExecutionMode::Python => Some((self.host_py_state(src_ip), self.host_py_state(dst_ip))),
+            ExecutionMode::CensorLang => None,
+        };
 
+        let ConnectionInfo { env, client_ip, .. } = self
+            .connections
+            .get_mut(&key)
+            .expect("connection was inserted above");
         // If the connection is set up for a Python environment, use that
         let action = match env {
-            ExecutionEnvironment::Python { scope } => {
+            // Python mode without a script: nothing to run
+            ExecutionEnvironment::Python { .. } if self.code.is_none() => Action::None,
+            ExecutionEnvironment::Python { scope, state } => {
                 // Copy the code references
-                let code = self.code.clone();
-                let _process = self.process.clone();
+                let code = self.code.clone().expect("checked above");
+                let on_script_error = self.on_script_error;
+                let conn = ConnectionLabel::of(ips, &packet);
+                let conn_ref = &conn;
                 // Create a python-objectified version of the Packet struct
                 let transport = packet.transport;
                 let len = packet.payload.len();
                 let mut packet = PythonPacket::from(packet);
                 packet.set_direction(direction);
                 let sender = self.model_sender.clone();
-                // Get existing per-host Python dict (if any) for persistent user state
-                let src_ip_key = src_ip.to_string();
-                let dst_ip_key = dst_ip.to_string();
-                let existing_host_dict = self.python_host_dicts.get(&src_ip_key).cloned();
-                let existing_dst_host_dict = self.python_host_dicts.get(&dst_ip_key).cloned();
-                let need_store_dict = existing_host_dict.is_none();
-                let need_store_dst_dict = existing_dst_host_dict.is_none();
+                // Per-host persistent user state dicts (always present in Python mode)
+                let (host_dict, dst_host_dict) =
+                    host_dicts.expect("host dicts are created in Python mode");
                 // Run a function using the per-connection scope
                 match self.vm.enter(move |vm| {
-                    // Create or reuse the per-host state dict
-                    let host_dict = existing_host_dict
-                        .unwrap_or_else(|| vm.ctx.new_dict().to_pyobject(vm));
-                    let dst_host_dict = existing_dst_host_dict
-                        .unwrap_or_else(|| vm.ctx.new_dict().to_pyobject(vm));
                     // Build host object with counters + persistent state dict
                     let host = PythonHost::new(
                         host_num_connections,
                         host_num_packets,
-                        host_dict.clone(),
+                        host_dict,
                     );
                     let dst_host = PythonHost::new(
                         dst_host_num_connections,
                         dst_host_num_packets,
-                        dst_host_dict.clone(),
+                        dst_host_dict,
                     );
                     scope
                         .locals
@@ -527,55 +802,51 @@ impl TransportState {
                     // Add in the current packet as an object
                     let pkt = packet.to_pyobject(vm);
                     scope.locals.set_item(PACKET, pkt, vm)?;
-                    // Execute our censor program initialization
-                    if is_first_cl {
-                        if let Err(err) = vm.run_code_obj(code, scope.clone()) {
-                            error!("Error initializing environment: {:?}", err);
-                            vm.print_exception(err);
-                            return Ok((Action::None, host_dict, dst_host_dict));
-                        }
-                        let model = PythonModel::new(sender);
-                        let model = model.to_pyobject(vm);
-                        scope.locals.set_item(MODEL, model, vm)?;
+                    // On the connection's first packet, run the module body and
+                    // look up `process`.  A failure is logged here, once; the
+                    // connection then gets the script-error policy on every packet.
+                    if let PythonConnState::Uninitialized = state {
+                        *state = match init_python_scope(vm, code, scope, sender) {
+                            Ok(process) => PythonConnState::Ready(process),
+                            Err(msg) => {
+                                error!(
+                                    "{conn_ref}: censor script failed to initialize; applying \
+                                     on_script_error = {on_script_error:?} to the whole connection:\n{msg}"
+                                );
+                                PythonConnState::Failed
+                            }
+                        };
                     }
                     // Run the per-packet code
-                    let action = if let Ok(process_function) = scope.locals.get_item(PROCESS, vm) {
-                        if let Some(process_callable) = process_function.to_callable() {
-                            if let Ok(pkt) = scope.locals.get_item(PACKET, vm) {
-                                match process_callable.invoke((pkt,), vm) {
-                                    Ok(result) => action_from_python(result, vm, ips, &transport, len),
-                                    Err(err) => {
-                                        error!("Error calling processing function: {:?}", err);
-                                        vm.print_exception(err);
-                                        Action::None
-                                    }
+                    let action = match state {
+                        PythonConnState::Ready(process) => {
+                            let pkt = scope.locals.get_item(PACKET, vm)?;
+                            match process.call((pkt,), vm) {
+                                Ok(result) => action_from_python(result, vm, ips, &transport, len),
+                                Err(err) => {
+                                    error!(
+                                        "{conn_ref}: process() raised; applying on_script_error = \
+                                         {on_script_error:?}:\n{}",
+                                        format_exception(vm, &err)
+                                    );
+                                    on_script_error.action()
                                 }
-                            } else {
-                                Action::None
                             }
-                        } else {
-                            Action::None
                         }
-                    } else {
-                        Action::None
+                        PythonConnState::Failed => on_script_error.action(),
+                        PythonConnState::Uninitialized => unreachable!("initialized above"),
                     };
-                    //let result = vm.run_code_obj(process, scope.clone())?;
                     // Finally, return that everything went fine
-                    Ok::<_, PyBaseExceptionRef>((action, host_dict, dst_host_dict))
+                    Ok::<_, PyBaseExceptionRef>(action)
                 }) {
-                    Ok((action, host_dict, dst_host_dict)) => {
-                        // Store the host dicts back if they were newly created
-                        if need_store_dict {
-                            self.python_host_dicts.insert(src_ip_key, host_dict);
-                        }
-                        if need_store_dst_dict {
-                            self.python_host_dicts.insert(dst_ip_key, dst_host_dict);
-                        }
-                        action
-                    }
+                    Ok(action) => action,
                     Err(err) => {
-                        self.vm.enter(|vm| vm.print_exception(err));
-                        Action::None
+                        let msg = self.vm.enter(|vm| format_exception(vm, &err));
+                        error!(
+                            "{conn}: failed to set up the Python environment for this packet; \
+                             applying on_script_error = {on_script_error:?}:\n{msg}"
+                        );
+                        on_script_error.action()
                     }
                 }
             }
@@ -583,7 +854,14 @@ impl TransportState {
                 // Get the program (should always exist in CensorLang mode)
                 if let Some(ref program) = self.censorlang_program {
                     let field_default_on_error = self.censorlang_config.env.field_default_on_error;
-                    let host = self.host_states.get_mut(&src_ip).unwrap();
+                    // Host registers are keyed on the connection's client, so both
+                    // directions of a connection share one bank (the counters
+                    // above stay keyed on the packet's sender, like PyCL's `host`).
+                    // Both endpoints' host states were touched above.
+                    let host = self
+                        .hosts
+                        .get_mut(&*client_ip)
+                        .expect("both endpoint hosts were touched above");
                     let program_action = env.process(
                         &packet,
                         program,
@@ -601,25 +879,7 @@ impl TransportState {
                         ProgramAction::AllowAll => Action::Ignore,
                         ProgramAction::TerminateAll => Action::Drop,
                         ProgramAction::ResetAll => {
-                            if let TransportMetadataExtra::Tcp(tcp_metadata) =
-                                packet.transport.extra
-                            {
-                                Action::Reset {
-                                    src_mac: [0; 6],
-                                    dst_mac: [0; 6],
-                                    ips,
-                                    ipid: None,
-                                    src_port: packet.transport.src,
-                                    dst_port: packet.transport.dst,
-                                    seq: tcp_metadata.seq,
-                                    ack: tcp_metadata.ack,
-                                    payload_len: packet.payload.len(),
-                                    is_ack: tcp_metadata.flags.ack,
-                                }
-                            } else {
-                                // Reset is only meaningful for TCP; fall back to Drop for UDP
-                                Action::Drop
-                            }
+                            reset_or_drop(ips, &packet.transport, packet.payload.len())
                         }
                     }
                 } else {
@@ -627,10 +887,150 @@ impl TransportState {
                 }
             }
         };
-        if *is_first {
-            *is_first = false;
+        // Update the connection lifecycle now that the script has seen this packet
+        let info = self
+            .connections
+            .get_mut(&key)
+            .expect("connection is only removed below");
+        info.is_first = false;
+        if let Some(flags) = tcp_flags {
+            if flags.rst {
+                info.tcp.rst = true;
+            }
+            if flags.fin {
+                if key.is_low_endpoint(src_ip, src_port) {
+                    info.tcp.fin_low = true;
+                } else {
+                    info.tcp.fin_high = true;
+                }
+            }
         }
+        let timeout = match key.proto {
+            TransportProtocol::Tcp if info.tcp.closed() => self.conntrack.tcp_closed_timeout,
+            TransportProtocol::Tcp => self.conntrack.tcp_idle_timeout,
+            TransportProtocol::Udp => self.conntrack.udp_idle_timeout,
+        };
+        self.connections
+            .set_deadline(&key, now.saturating_add(timeout.get().saturating_mul(MICROS_PER_SEC)));
+        self.enforce_limits();
         Ok(action)
+    }
+
+    /// Use capture timestamps (see [`Self::set_packet_time`]) instead of a
+    /// monotonic clock for timeouts. Used in PCAP mode.
+    pub fn use_packet_clock(&mut self) {
+        self.clock = Clock::Packet(0);
+    }
+
+    /// Advance the packet clock to `micros` (microseconds since the epoch).
+    /// Time never moves backwards, so out-of-order timestamps are ignored.
+    /// Has no effect unless [`Self::use_packet_clock`] was called.
+    pub fn set_packet_time(&mut self, micros: u64) {
+        if let Clock::Packet(now) = &mut self.clock {
+            *now = (*now).max(micros);
+        }
+    }
+
+    fn now(&self) -> Micros {
+        match &self.clock {
+            Clock::Monotonic(start) => start.elapsed().as_micros().try_into().unwrap_or(u64::MAX),
+            Clock::Packet(now) => *now,
+        }
+    }
+
+    /// Deadline for a host's state if it is last seen at `now`. Without an
+    /// idle timeout the deadline is just `now`, which orders hosts by recency
+    fn host_deadline(&self, now: Micros) -> Micros {
+        match self.conntrack.host_idle_timeout {
+            Some(timeout) => now.saturating_add(timeout.get().saturating_mul(MICROS_PER_SEC)),
+            None => now,
+        }
+    }
+
+    /// Get (creating if needed) the state for host `ip` and mark it as seen at `now`
+    fn touch_host(&mut self, ip: IpAddress, now: Micros) -> &mut HostState {
+        let deadline = self.host_deadline(now);
+        if !self.hosts.set_deadline(&ip, deadline) {
+            let config = &self.censorlang_config;
+            let host = HostState {
+                num_connections: 0,
+                num_packets: 0,
+                registers: Registers::new(
+                    config.program.num_registers.into(),
+                    config.env.relax_register_types,
+                ),
+                py_state: None,
+            };
+            self.hosts.insert(ip, host, deadline);
+        }
+        self.hosts.get_mut(&ip).expect("host was inserted above")
+    }
+
+    /// Get (creating if needed) the persistent Python dict for host `ip`,
+    /// which must already be tracked
+    fn host_py_state(&mut self, ip: IpAddress) -> PyObjectRef {
+        let host = self.hosts.get_mut(&ip).expect("host was touched");
+        host.py_state
+            .get_or_insert_with(|| self.vm.enter(|vm| vm.ctx.new_dict().to_pyobject(vm)))
+            .clone()
+    }
+
+    /// Forget connections and hosts whose idle timeout has passed
+    fn expire(&mut self, now: Micros) {
+        let mut envs = Vec::new();
+        while let Some((_, info)) = self.connections.pop_expired(now) {
+            envs.push(info.env);
+        }
+        let mut hosts = Vec::new();
+        if self.conntrack.host_idle_timeout.is_some() {
+            while let Some((_, host)) = self.hosts.pop_expired(now) {
+                hosts.push(host);
+            }
+        }
+        self.teardown(envs, hosts);
+    }
+
+    /// Evict state until the configured size caps are respected
+    fn enforce_limits(&mut self) {
+        let mut envs = Vec::new();
+        while self.connections.len() > self.conntrack.max_connections.get() {
+            match self.connections.pop_first() {
+                Some((_, info)) => envs.push(info.env),
+                None => break,
+            }
+        }
+        let mut hosts = Vec::new();
+        while self.hosts.len() > self.conntrack.max_hosts.get() {
+            match self.hosts.pop_first() {
+                Some((_, host)) => hosts.push(host),
+                None => break,
+            }
+        }
+        self.teardown(envs, hosts);
+    }
+
+    /// Release removed connection and host state
+    ///
+    /// Python objects are released inside the interpreter so `__del__` can
+    /// run. A connection's scope is cleared first: functions defined by the
+    /// script reference the scope's globals, forming a cycle that reference
+    /// counting alone would never free.
+    fn teardown(&self, envs: Vec<ExecutionEnvironment>, hosts: Vec<HostState>) {
+        let has_python = envs
+            .iter()
+            .any(|env| matches!(env, ExecutionEnvironment::Python { .. }))
+            || hosts.iter().any(|host| host.py_state.is_some());
+        if !has_python {
+            return;
+        }
+        self.vm.enter(|_vm| {
+            for env in envs {
+                if let ExecutionEnvironment::Python { scope, .. } = env {
+                    scope.globals.clear();
+                }
+            }
+            drop(hosts);
+        });
     }
 }
 
@@ -639,7 +1039,12 @@ const IPV4_HEADER_LEN: u8 = 20;
 const IPV6_HEADER_LEN: u8 = 40;
 const TCP_HEADER_LEN: u8 = 20;
 const UDP_HEADER_LEN: u8 = 8;
+/// IPv6 hop limit for injected packets (matches the IPv4 TTL of 64; a zero
+/// hop limit is discarded by the first router).
+const INJECTED_HOP_LIMIT: u8 = 64;
 
+/// Build an Ethernet/IP/TCP RST frame. With `ack: Some(n)` the RST carries the ACK
+/// flag and acknowledgment number `n`; with `None` it is a bare RST.
 pub fn construct_reset(
     src_mac: EthernetAddress,
     dst_mac: EthernetAddress,
@@ -647,7 +1052,7 @@ pub fn construct_reset(
     ipid: Option<u16>,
     src_port: u16,
     dst_port: u16,
-    ack: TcpSeqNumber,
+    ack: Option<TcpSeqNumber>,
     seq: TcpSeqNumber,
 ) -> Result<Vec<u8>, SmoltcpError> {
     let total_length = ETH_HEADER_LEN
@@ -690,6 +1095,7 @@ pub fn construct_reset(
             // Set the length to the length of a TCP header
             ip_packet.set_payload_len(TCP_HEADER_LEN.into());
             ip_packet.set_version(6);
+            ip_packet.set_hop_limit(INJECTED_HOP_LIMIT);
             // Make sure the length is good
             ip_packet.check_len()?;
             // Store the source and dst ip addresess
@@ -707,7 +1113,7 @@ fn fill_reset(
     ips: IpPair,
     src_port: u16,
     dst_port: u16,
-    ack: TcpSeqNumber,
+    ack: Option<TcpSeqNumber>,
     seq: TcpSeqNumber,
 ) -> Result<(), SmoltcpError> {
     let mut tcp_packet = TcpPacket::new_unchecked(ip_payload);
@@ -715,10 +1121,10 @@ fn fill_reset(
     tcp_packet.check_len()?;
     tcp_packet.set_src_port(src_port);
     tcp_packet.set_dst_port(dst_port);
-    tcp_packet.set_ack_number(ack);
+    tcp_packet.set_ack_number(ack.unwrap_or(TcpSeqNumber(0)));
     tcp_packet.set_seq_number(seq);
     tcp_packet.clear_flags();
-    tcp_packet.set_ack(true);
+    tcp_packet.set_ack(ack.is_some());
     tcp_packet.set_rst(true);
     tcp_packet.fill_checksum(&ips.src(), &ips.dst());
     Ok(())
@@ -767,6 +1173,7 @@ pub fn construct_udp_inject(
             let mut ip_packet = Ipv6Packet::new_unchecked(eth_packet.payload_mut());
             ip_packet.set_payload_len(udp_total_len as u16);
             ip_packet.set_version(6);
+            ip_packet.set_hop_limit(INJECTED_HOP_LIMIT);
             ip_packet.check_len()?;
             ip_packet.set_src_addr(src);
             ip_packet.set_dst_addr(dst);
@@ -800,6 +1207,65 @@ mod tests {
     use super::*;
     use smoltcp::wire::{EthernetAddress, Ipv4Address, Ipv6Address, TcpSeqNumber};
 
+    // --- Python environment tests ---
+
+    /// Run `source` in a fresh censor-script interpreter and return the
+    /// value of the global `result` (which the source must set to a bool).
+    fn run_python_bool(source: &str) -> bool {
+        let interp = new_python_interpreter(1337);
+        interp.enter(|vm| {
+            let scope = vm.new_scope_with_builtins();
+            if let Err(err) = vm.run_code_string(scope.clone(), source, "<test>".to_owned()) {
+                vm.print_exception(err);
+                panic!("test script raised");
+            }
+            let result = scope.globals.get_item("result", vm).expect("result not set");
+            result.try_to_bool(vm).expect("result not a bool")
+        })
+    }
+
+    #[test]
+    fn python_invalid_regex_raises_value_error() {
+        assert!(run_python_bool(
+            "from rust import regex\n\
+             try:\n    regex('(')\n    result = False\n\
+             except ValueError:\n    result = True\n"
+        ));
+    }
+
+    #[test]
+    fn python_model_errors_instead_of_hanging_when_model_thread_dies() {
+        // A "model thread" that takes one request and dies without replying
+        let (model_tx, model_rx) = mpsc::sync_channel::<ModelThreadMessage>(1);
+        std::thread::spawn(move || {
+            let _request = model_rx.recv();
+        });
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let interp = new_python_interpreter(1337);
+            let raised = interp.enter(|vm| {
+                vm.import("rust", 0).unwrap();
+                let scope = vm.new_scope_with_builtins();
+                let model = PythonModel::new(model_tx).to_pyobject(vm);
+                scope.globals.set_item(MODEL, model, vm).unwrap();
+                vm.run_code_string(scope, "model.evaluate('m', [1.0])", "<test>".to_owned())
+                    .is_err()
+            });
+            let _ = done_tx.send(raised);
+        });
+        let raised = done_rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("model.evaluate() hung after the model thread died");
+        assert!(raised, "model.evaluate() should raise when the model thread dies");
+    }
+
+    #[test]
+    fn python_valid_regex_matches() {
+        assert!(run_python_bool(
+            "from rust import regex\nresult = regex('^ab+c').is_match(b'abbbc')\n"
+        ));
+    }
+
     // --- ConnectionKey tests ---
 
     #[test]
@@ -814,6 +1280,19 @@ mod tests {
         };
         let key_fwd = ConnectionKey::new(ips_fwd, 1234, 80, TransportProtocol::Tcp);
         let key_rev = ConnectionKey::new(ips_rev, 80, 1234, TransportProtocol::Tcp);
+        assert_eq!(key_fwd, key_rev);
+    }
+
+    #[test]
+    fn connection_key_symmetric_same_ip() {
+        // Loopback / same-host traffic: both endpoints share an IP, so the
+        // ports must decide the ordering.
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(127, 0, 0, 1),
+            dst: Ipv4Address::new(127, 0, 0, 1),
+        };
+        let key_fwd = ConnectionKey::new(ips, 50000, 80, TransportProtocol::Tcp);
+        let key_rev = ConnectionKey::new(ips, 80, 50000, TransportProtocol::Tcp);
         assert_eq!(key_fwd, key_rev);
     }
 
@@ -838,7 +1317,7 @@ mod tests {
             src: Ipv4Address::new(10, 0, 0, 1),
             dst: Ipv4Address::new(10, 0, 0, 2),
         };
-        let key_a = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_a = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Tcp);
         let key_b = ConnectionKey::new(ips, 1234, 443, TransportProtocol::Tcp);
         assert_ne!(key_a, key_b);
     }
@@ -849,7 +1328,7 @@ mod tests {
             src: Ipv4Address::new(10, 0, 0, 1),
             dst: Ipv4Address::new(10, 0, 0, 2),
         };
-        let key_tcp = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_tcp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Tcp);
         let key_udp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Udp);
         assert_ne!(key_tcp, key_udp);
     }
@@ -871,7 +1350,7 @@ mod tests {
             Some(0x1234),
             12345,
             80,
-            TcpSeqNumber(1000),
+            Some(TcpSeqNumber(1000)),
             TcpSeqNumber(2000),
         );
         let pkt = result.unwrap();
@@ -913,7 +1392,7 @@ mod tests {
             None,
             443,
             50000,
-            TcpSeqNumber(500),
+            Some(TcpSeqNumber(500)),
             TcpSeqNumber(600),
         );
         let pkt = result.unwrap();
@@ -933,5 +1412,106 @@ mod tests {
         assert_eq!(tcp.dst_port(), 50000);
         assert!(tcp.rst());
         assert!(tcp.ack());
+    }
+
+    #[test]
+    fn construct_reset_without_ack_clears_ack_flag() {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(192, 168, 1, 1),
+            dst: Ipv4Address::new(10, 0, 0, 1),
+        };
+        let pkt = construct_reset(EthernetAddress([0; 6]), EthernetAddress([0; 6]), ips, None,
+                                  1, 2, None, TcpSeqNumber(42)).unwrap();
+        let eth = EthernetFrame::new_unchecked(&pkt);
+        let ip = Ipv4Packet::new_unchecked(eth.payload());
+        let tcp = TcpPacket::new_checked(ip.payload()).unwrap();
+        assert!(tcp.rst());
+        assert!(!tcp.ack());
+        assert_eq!(tcp.ack_number(), TcpSeqNumber(0));
+        assert_eq!(tcp.seq_number(), TcpSeqNumber(42));
+        assert!(tcp.verify_checksum(&ips.src(), &ips.dst()));
+    }
+
+    // --- reset_for tests ---
+
+    fn tcp_transport(syn: bool, fin: bool, ack: bool) -> crate::program::packet::TransportMetadata {
+        use crate::program::packet::{TcpFlags, TcpMetadata, TransportMetadata};
+        TransportMetadata {
+            src: 40000,
+            dst: 443,
+            extra: TransportMetadataExtra::Tcp(TcpMetadata {
+                seq: TcpSeqNumber(1000),
+                ack: TcpSeqNumber(2000),
+                header_len: 20,
+                urgent_at: 0,
+                window_len: 0,
+                flags: TcpFlags {
+                    fin, syn, rst: false, psh: false, ack, urg: false, ece: false, cwr: false, ns: false,
+                },
+            }),
+        }
+    }
+
+    fn seg_len_of(action: Option<Action>) -> usize {
+        match action {
+            Some(Action::Reset { seg_len, .. }) => seg_len,
+            other => panic!("expected Reset, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reset_for_counts_syn_and_fin_in_segment_length() {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(false, false, true), 5)), 5);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(true, false, false), 0)), 1);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(false, true, true), 5)), 6);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(true, true, false), 3)), 5);
+    }
+
+    // --- IPv6 hop limit (a zeroed hop limit is discarded by the first router) ---
+
+    fn v6_pair() -> IpPair {
+        IpPair::V6 {
+            src: Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+            dst: Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2),
+        }
+    }
+
+    #[test]
+    fn construct_reset_ipv6_sets_hop_limit() {
+        let pkt = construct_reset(
+            EthernetAddress([0; 6]),
+            EthernetAddress([0; 6]),
+            v6_pair(),
+            None,
+            443,
+            50000,
+            Some(TcpSeqNumber(2)),
+            TcpSeqNumber(1),
+        )
+        .unwrap();
+        let eth = EthernetFrame::new_checked(&pkt[..]).unwrap();
+        let ip = Ipv6Packet::new_checked(eth.payload()).unwrap();
+        assert_eq!(ip.hop_limit(), 64);
+    }
+
+    #[test]
+    fn construct_udp_inject_ipv6_sets_hop_limit() {
+        let pkt = construct_udp_inject(
+            EthernetAddress([0; 6]),
+            EthernetAddress([0; 6]),
+            v6_pair(),
+            53,
+            40000,
+            b"forged",
+        )
+        .unwrap();
+        let eth = EthernetFrame::new_checked(&pkt[..]).unwrap();
+        let ip = Ipv6Packet::new_checked(eth.payload()).unwrap();
+        assert_eq!(ip.hop_limit(), 64);
+        assert_eq!(ip.next_header(), IpProtocol::Udp);
     }
 }

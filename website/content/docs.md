@@ -27,14 +27,15 @@ git submodule update --init
 # Interactive shell
 bash docker/censorlab.sh --shell
 
-# Run directly (NFQ mode — requires sudo for live interception)
-sudo bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
+# Run directly (NFQ mode — intercepts traffic inside the container only)
+bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
 
-# Run directly (PCAP mode — no special permissions needed)
-bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap traffic.pcap 192.168.1.100
+# Run directly (PCAP mode — no special permissions needed; mount the capture in)
+DOCKER_ARGS="-v $PWD/traffic.pcap:/tmp/traffic.pcap:ro" \
+  bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap /tmp/traffic.pcap 192.168.1.100
 ```
 
-The Docker wrapper auto-detects NFQ vs PCAP mode and configures networking and capabilities accordingly. The image is automatically rebuilt when source files change.
+The Docker wrapper auto-detects NFQ vs PCAP mode and grants the `NET_ADMIN`/`NET_RAW` capabilities NFQ needs. Both modes run in the container's own isolated network namespace (no host networking), so NFQ mode only intercepts traffic originating inside the container — use `--shell` and generate traffic from there. The image is automatically rebuilt when source files change.
 
 ### Build from Source
 
@@ -110,7 +111,7 @@ censorlab -c censor.toml nfq [OPTIONS] [INTERFACE]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--client-ip <IP>` | *(auto-detected)* | IP address considered the "client" for direction calculation |
+| `--client-ip <IP>[,<IP>...]` | *(all addresses of the interface)* | Address(es) considered the "client" for direction calculation; repeat or comma-separate to give both an IPv4 and an IPv6 address |
 | `--no-dir-action <ACTION>` | `ignore` | Action for traffic without a determinable direction |
 | `--iptables-table <TABLE>` | `raw` | iptables table to intercept at |
 | `--iptables-chain-in <CHAIN>` | `PREROUTING` | iptables chain for inbound packets |
@@ -118,7 +119,7 @@ censorlab -c censor.toml nfq [OPTIONS] [INTERFACE]
 | `--queue-num-in <NUM>` | `0` | NFQUEUE number for inbound packets |
 | `--queue-num-out <NUM>` | `1` | NFQUEUE number for outbound packets |
 | `--force-iptables` | | Force rule insertion even if conflicting NFQUEUE rules exist |
-| `[INTERFACE]` | *(auto-detected)* | Network interface to use for sending packets |
+| `[INTERFACE]` | *(interface of the default route)* | Interface whose addresses are the default client addresses. Injected RSTs/responses are sent via raw IP sockets and routed by the kernel |
 
 CensorLab determines packet direction by comparing source/destination addresses against the client IP. Traffic from the client IP is considered client-to-WAN; traffic to it is WAN-to-client.
 
@@ -133,11 +134,11 @@ censorlab -c censor.toml pcap <PCAP_PATH> <CLIENT_IP>
 | Argument | Description |
 |----------|-------------|
 | `<PCAP_PATH>` | Path to the `.pcap` file to analyze |
-| `<CLIENT_IP>` | Client IP address for direction calculation |
+| `<CLIENT_IP>` | Client IP address(es) for direction calculation (comma-separated, e.g. `10.0.0.1,2001:db8::1`) |
 
 ### Wire Mode
 
-In wire mode, CensorLab sits between two network interfaces (WAN and client) and forwards packets between them. It can drop, delay, or modify packets inline. This mode requires the `wire` feature flag at build time.
+In wire mode, CensorLab is a transparent bridge between two network interfaces (WAN and client), which it puts in promiscuous mode. It can drop, reset (RSTs out of both interfaces), inject forged UDP responses, or rewrite packets inline; delay is not supported. This mode requires the `wire` feature flag at build time.
 
 ```bash
 cargo build --release --features wire
@@ -150,6 +151,14 @@ censorlab -c censor.toml wire <WAN_INTERFACE> <CLIENT_INTERFACE> [OPTIONS]
 | `<CLIENT_INTERFACE>` | | Client-side network interface |
 | `--wan-packets <NUM>` | `1` | Max packets from WAN before polling client |
 | `--client-packets <NUM>` | `1` | Max packets from client before polling WAN |
+
+### Analyze (static analysis)
+
+Statically analyzes a CensorLang program and reports its per-connection/per-host memory and worst-case per-packet operation counts. No traffic is processed and no config is needed.
+
+```bash
+censorlab analyze <PROGRAM.cl> [--json]
+```
 
 ## Packet Processing Pipeline
 
@@ -209,7 +218,7 @@ CensorLab is configured via TOML files, passed with the `-c` flag. Paths to scri
 
 ## `[execution]`
 
-Controls which scripting engine to use and global execution parameters.
+Controls which scripting engine to use and global execution parameters. The whole section is optional: a config containing only allow/blocklists is valid.
 
 | Key             | Type     | Default    | Description |
 |-----------------|----------|------------|-------------|
@@ -217,6 +226,7 @@ Controls which scripting engine to use and global execution parameters.
 | `script`        | string   | *(none)*   | Path to the censor script (relative to config file) |
 | `hash_seed`     | integer  | `1337`     | Hash seed for Python VM reproducibility |
 | `reset_repeat`  | integer  | `5`        | Number of times to repeat sending a TCP RST packet |
+| `on_script_error` | string | `"Allow"` | Python mode: what to do with a packet when the script raises (`"Allow"` or `"Drop"`). Failures are always logged; a script whose module body raises or that lacks a callable `process` is rejected at startup |
 
 ## Layer Filtering
 
@@ -241,10 +251,15 @@ CensorLab processes packets through a layered pipeline. Each layer can have allo
 | Key           | Type       | Description |
 |---------------|------------|-------------|
 | `unknown`     | action     | Action for unknown IP next-header protocols |
-| `allowlist`   | list block | IP address allowlist |
-| `blocklist`   | list block | IP address blocklist |
+| `allowlist`   | list block | IP address / subnet allowlist |
+| `blocklist`   | list block | IP address / subnet blocklist |
 
-IP addresses are strings like `"192.168.1.1"` or `"::1"`.
+Entries are single addresses like `"192.168.1.1"` or `"::1"`, or CIDR subnets like `"10.0.0.0/8"` or `"2001:db8::/32"`; the two may be mixed in one list. A bare address is equivalent to a `/32` (IPv4) or `/128` (IPv6). Lookups use a sorted range table, so large subnet lists stay cheap.
+
+Subnets are parsed strictly and a bad entry makes the config fail to load:
+
+- the prefix must be plain decimal with no sign or leading zeros, and at most 32 (IPv4) or 128 (IPv6);
+- no bits may be set after the prefix — `"10.0.0.1/8"` is rejected (with a hint to write `"10.0.0.0/8"`) rather than silently widened to the whole `/8`.
 
 ### `[icmp]`
 
@@ -261,7 +276,7 @@ IP addresses are strings like `"192.168.1.1"` or `"::1"`.
 | `ip_port_allowlist`  | list block | IP:port pair allowlist |
 | `ip_port_blocklist`  | list block | IP:port pair blocklist |
 
-Port lists contain integers (e.g. `[80, 443]`). IP:port pairs are strings like `"10.0.0.1:80"` or `"[::1]:443"`.
+Port lists contain integers (e.g. `[80, 443]`). IP:port pairs are strings like `"10.0.0.1:80"` or `"[::1]:443"`, and the address part may be a CIDR subnet: `"10.0.0.0/8:80"`, `"[2001:db8::/32]:443"`. IPv6 addresses must be in brackets and IPv4 addresses must not be. Ports must be plain decimal (0–65535).
 
 ### List Block Format
 
@@ -269,7 +284,7 @@ Allowlist and blocklist sections share a common format:
 
 ```toml
 [ip.blocklist]
-list = ["192.168.1.1", "10.0.0.0"]
+list = ["192.168.1.1", "10.0.0.0/8", "2001:db8::/32"]
 action = "Drop"
 ```
 
@@ -295,9 +310,9 @@ Actions control what happens to a packet at a given processing layer.
 | `"None"`   | Continue processing through subsequent layers |
 | `"Ignore"` | Forward the packet immediately, skip further processing |
 | `"Drop"`   | Silently drop the packet |
-| `"Reset"`  | Send TCP RST packets in both directions (only valid for TCP-layer lists) |
+| `"Reset"`  | Send TCP RST packets in both directions to tear down the matching connection (valid on `[tcp]` and `[ip]` lists) |
 
-`"Reset"` is only valid on `[tcp]` lists. Using it on `[ethernet]`, `[arp]`, `[ip]`, or `[icmp]` sections will produce a validation error.
+`"Reset"` is valid on `[tcp]` lists and on `[ip]` (`allowlist`, `blocklist`, `unknown`). On an `[ip]` rule, a matching TCP packet gets a RST for its connection, while any other traffic it matches (ICMP, UDP, other protocols, fragments, truncated TCP) is dropped. `ip.unknown` never matches TCP, so `"Reset"` there behaves as `"Drop"`. Using `"Reset"` on `[ethernet]`, `[arp]`, `[icmp]`, or any `[udp]` list produces a validation error at startup.
 
 ## Example Configuration
 
@@ -309,7 +324,7 @@ hash_seed = 1337
 reset_repeat = 5
 
 [ip.blocklist]
-list = ["198.51.100.1", "203.0.113.0"]
+list = ["198.51.100.1", "203.0.113.0/24"]
 action = "Drop"
 
 [tcp.port_blocklist]
@@ -334,7 +349,7 @@ ip_port_allowlist = { list = [] }
 path = "models/classifier.onnx.ml"
 ```
 
-**Note:** `"Reset"` is only valid on `[tcp]` lists. Using it on `[ip]`, `[ethernet]`, `[arp]`, `[udp]`, or `[icmp]` sections will produce a validation error at startup. Use `"Drop"` for non-TCP layers.
+**Note:** `"Reset"` is valid on `[tcp]` and `[ip]` lists; on `[ip]` it resets TCP connections and drops everything else. Using it on `[ethernet]`, `[arp]`, `[udp]`, or `[icmp]` sections will produce a validation error at startup. Use `"Drop"` for those layers.
 
 ---
 
@@ -351,7 +366,7 @@ PyCL is CensorLab's Python scripting API, powered by RustPython. Scripts run per
 ## Imports
 
 ```python
-from rust import Packet, Model, regex
+from rust import Packet, Model, regex, subnet, ip_in
 ```
 
 This brings all core types into scope. Protocol-specific modules are imported separately:
@@ -373,6 +388,8 @@ The `process()` function should return one of:
 | `"drop"`       | Drop the packet silently |
 | `"reset"`      | Send TCP RST in both directions (falls back to `"drop"` for non-TCP) |
 | `bytes`        | Inject a forged UDP response (e.g., DNS poisoning) while allowing the original packet through |
+| `("delay", seconds)` | Hold the packet for `seconds` (non-negative number) before releasing it. NFQ mode only; PCAP mode reports the decision, wire mode forwards the packet unchanged |
+| `("rewrite", {"ttl": n})` | Forward a copy of the packet with the IP TTL / hop limit set to `n` (0–255) |
 
 Returning raw `bytes` triggers packet injection — CensorLab constructs a UDP response packet with the returned bytes as payload and sends it back to the client, while the original packet is forwarded normally. This is used for techniques like DNS poisoning where the censor races a forged response against the legitimate one. See `dns.craft_response()` below.
 
@@ -393,6 +410,7 @@ The `packet` object is passed to `process()` and provides read-only access to pa
 | `packet.payload_entropy`| `float`         | Shannon entropy of the payload, scaled 0.0–1.0 |
 | `packet.payload_avg_popcount` | `float`   | Average number of set bits per byte (0.0–8.0) |
 | `packet.tls_client_hello` | `ClientHelloInfo` or `None` | The connection's TLS ClientHello, reassembled across TCP segments and TLS records. `None` until it has fully arrived (see [TLS Module](#tls-module)) |
+| `packet.payload_printable_fraction` | `float` | Fraction of payload bytes that are printable ASCII (0x20–0x7e) |
 | `packet.ip`             | `IpPacket`      | IP layer metadata |
 | `packet.tcp`            | `TcpPacket` or `None` | TCP metadata (None if not TCP) |
 | `packet.udp`            | `UdpPacket` or `None` | UDP metadata (None if not UDP) |
@@ -439,8 +457,8 @@ Accessed via `packet.tcp`. Returns `None` if the packet is not TCP.
 |---------------|------------|-------------|
 | `.src`        | `int`      | Source port |
 | `.dst`        | `int`      | Destination port |
-| `.seq`        | `int`      | Sequence number |
-| `.ack`        | `int`      | Acknowledgement number |
+| `.seq`        | `int`      | Sequence number (unsigned, 0 to 2^32-1) |
+| `.ack`        | `int`      | Acknowledgement number (unsigned, 0 to 2^32-1) |
 | `.header_len` | `int`      | TCP header length in bytes |
 | `.urgent_at`  | `int`      | Urgent pointer |
 | `.window_len` | `int`      | Window size |
@@ -677,6 +695,37 @@ def process(packet):
 |---------------------|---------|-------------|
 | `.is_match(bytes)`  | `bool`  | True if the pattern matches anywhere in the byte string |
 
+## Subnets
+
+CIDR subnet membership for address strings such as `packet.ip.src` / `packet.ip.dst`. Subnets use the same strict syntax as the configuration file (see `[ip]` above).
+
+```python
+from rust import subnet, ip_in
+
+# Compile once at module level...
+blocked = subnet("198.51.100.0/24")
+
+def process(packet):
+    if blocked.contains(packet.ip.dst):
+        return "drop"
+    # ...or test ad hoc (parses the subnet on every call)
+    if ip_in(packet.ip.src, "2001:db8::/32"):
+        return "drop"
+```
+
+### `subnet(cidr)` → `Subnet`
+
+Raises `ValueError` if `cidr` is malformed, has a prefix longer than the address, or has host bits set. A bare address is a `/32` or `/128`.
+
+| Method            | Returns | Description |
+|-------------------|---------|-------------|
+| `.contains(addr)` | `bool`  | True if the address string lies in the subnet. Addresses of the other IP family never match. Raises `ValueError` on a malformed address |
+| `str(s)`          | `str`   | Canonical form, e.g. `"10.0.0.0/8"` |
+
+### `ip_in(addr, cidr)` → `bool`
+
+Same as `subnet(cidr).contains(addr)`.
+
 ## Model
 
 Evaluate ONNX models defined in the configuration file.
@@ -774,12 +823,39 @@ mode = "CensorLang"
 script = "censor.cl"
 ```
 
-CensorLang programs also respect these environment settings (from the internal program config):
+CensorLang settings and limits are set in an optional `[execution.censorlang]` table (unknown keys are rejected):
 
-| Setting                | Default | Description |
-|------------------------|---------|-------------|
-| `field_default_on_error` | `true`  | Return 0/false instead of erroring when accessing a field from the wrong protocol |
-| `relax_register_types`   | `false` | Allow writing values into register banks of a different type |
+```toml
+[execution.censorlang]
+field_default_on_error = true      # default
+relax_register_types = false       # default
+num_registers = 16                 # default
+num_lines = 256                    # default
+# operators = ["<", "==", "&&"]    # default: all operators
+# actions = ["allow", "terminate"] # default: all actions
+```
+
+| Setting                  | Default | Description |
+|--------------------------|---------|-------------|
+| `field_default_on_error` | `true`  | Return the field type's zero value (`0`, `0.0` or `False`) instead of erroring when a field is absent from the packet (e.g. a TCP field of a UDP packet) |
+| `relax_register_types`   | `false` | Allow writing values into register banks of a different type (the value is stored in the bank of its own type) |
+| `num_registers`          | `16`    | Registers per bank (`reg:x.0` .. `reg:x.<num_registers - 1>`, same for `hreg`) |
+| `num_lines`              | `256`   | Maximum number of program lines (comments, blank lines and `regex` directives do not count) |
+| `operators`              | all     | Condition operators the program may use |
+| `actions`                | all     | `RETURN` actions the program may use |
+
+### Load-time checking
+
+Programs are checked once, when CensorLab starts, and rejected with a list of every problem (with source line numbers) if any check fails:
+
+- the program has at most `num_lines` lines;
+- every register index is below `num_registers`;
+- every operation writes a value of its destination register's type (unless `relax_register_types` is set). Result types are static: `COPY` keeps the source's type; `ADD`/`SUB`/`MUL`/`DIV`/`MOD` produce a float if either operand is a float and an int otherwise (so `DIV field:tcp.payload.len, 2 -> reg:f.0` is rejected, while `DIV field:tcp.payload.len, 2.0 -> reg:f.0` is accepted); `AND`/`OR`/`XOR`/`REGEX` produce a bool;
+- every `REGEX <n>` refers to a declared `regex` directive;
+- only the configured operators and actions are used;
+- every model referenced (`MODEL`, `model:<name>:in/out:<n>`) is configured in `[models]`, and model input indices are below 4096.
+
+After checking, the program is optimised (see Compiler Optimizations below); the optimised program is what runs.
 
 ## Syntax
 
@@ -838,7 +914,7 @@ DIV <value>, <value> -> <register>
 MOD <value>, <value> -> <register>
 ```
 
-Division and modulo by zero return zero (no error).
+Division and modulo by zero return zero (no error). Integer arithmetic wraps on overflow (two's complement: `ADD 9223372036854775807, 1` gives `-9223372036854775808`, and `DIV -9223372036854775808, -1` gives `-9223372036854775808`), so arithmetic never faults. `DIV` of two ints is integer division (truncating toward zero).
 
 Type coercion: when operand types differ, the result is promoted (bool → int → float).
 
@@ -853,6 +929,21 @@ XOR <value>, <value> -> <register>
 ```
 
 Values are converted to bool before the operation (`0` / `0.0` / `false` → false, everything else → true).
+
+### Subnet membership: `SRC_IN`, `DST_IN`
+
+Declare subnets with `subnet "<cidr>"` directives (numbered from 0 in order, same strict syntax as the configuration file), then test whether the packet's source or destination address lies in one. The result is written to a register as a bool.
+
+```
+subnet "198.51.100.0/24"
+subnet "2001:db8::/32"
+DST_IN 0 -> reg:b.0
+if reg:b.0 == True: RETURN terminate
+SRC_IN 1 -> reg:b.1
+if reg:b.1 == True: RETURN terminate
+```
+
+Addresses of the other IP family never match. A malformed subnet, or an index that doesn't refer to a declared subnet, is rejected when the program is loaded.
 
 ### `NOOP`
 
@@ -892,7 +983,9 @@ Registers are per-connection persistent storage, organized into three typed bank
 | `reg:i.N`| int   | `0`           |
 | `reg:b.N`| bool  | `false`       |
 
-The default bank size is 16 registers per type. Writing a value to a register of the wrong type is an error unless `relax_register_types` is enabled.
+Host registers (`hreg:f.N`, `hreg:i.N`, `hreg:b.N`) have the same three banks but are shared by every connection of a host and persist across connections. They belong to the connection's *client* (the sender of the first packet seen on the connection, i.e. the SYN sender for TCP), so packets in both directions of a connection read and write the client's bank. (The `host.*`/`dst_host.*` counter fields, like PyCL's `host`/`dst_host`, instead refer to the packet's sender and receiver.)
+
+The default bank size is 16 registers per type (`num_registers`). Writing a value to a register of the wrong type, or using an index outside the bank, is rejected when the program is loaded (type mismatches are allowed if `relax_register_types` is enabled).
 
 ## Fields
 
@@ -942,8 +1035,8 @@ Fields read packet metadata. Accessing a field from the wrong protocol (e.g. `fi
 
 | Field                  | Type | Description |
 |------------------------|------|-------------|
-| `field:tcp.seq`        | int  | Sequence number |
-| `field:tcp.ack`        | int  | Acknowledgement number |
+| `field:tcp.seq`        | int  | Sequence number (unsigned, 0 to 2^32-1) |
+| `field:tcp.ack`        | int  | Acknowledgement number (unsigned, 0 to 2^32-1) |
 | `field:tcp.len`        | int  | Total TCP segment length (header + payload) |
 | `field:tcp.header.len` | int  | TCP header length |
 | `field:tcp.payload.len`| int  | TCP payload length |

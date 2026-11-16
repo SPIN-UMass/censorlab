@@ -59,13 +59,16 @@ CensorLab ships with several ready-to-use demos. Let's try the DNS blocking demo
 ### Using Docker
 
 ```bash
-# Intercept live traffic (requires host networking)
+# Intercept live traffic generated inside the container
+# (the container has NET_ADMIN/NET_RAW but its own isolated network namespace,
+#  so traffic from the host is not intercepted)
 ./docker/censorlab.sh --shell
 $ censorlab -c demos/dns_blocking/censor.toml nfq &
 $ curl https://google.com  # This will fail
 
-# Analyze a PCAP file (no special permissions needed)
-bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap demos/dns_blocking/example.pcap 192.168.1.100
+# Analyze a PCAP file (no special permissions needed); mount your capture into the container
+DOCKER_ARGS="-v $PWD/capture.pcap:/tmp/capture.pcap:ro" \
+  bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap /tmp/capture.pcap 192.168.1.100
 ```
 
 Other demos you can try:
@@ -88,7 +91,8 @@ The `demos/https_blocking_tls/` demo blocks HTTPS connections to `example.com` b
 ### Using Docker
 
 ```bash
-# Open the CensorLab shell (has host networking + capabilities for NFQ)
+# Open the CensorLab shell (has NET_ADMIN/NET_RAW for NFQ; traffic you generate
+# inside this container is intercepted, host traffic is not)
 bash docker/censorlab.sh --shell
 
 # Inside the container, start CensorLab in the background
