@@ -2907,7 +2907,7 @@ mod tests {
         // Display round-trips
         let reparsed: Program = prog.to_string().parse().unwrap();
         assert_eq!(reparsed.to_string(), prog.to_string());
-        assert!(prog.to_string().contains("SRC_IN 2->reg:b.0"), "{prog}");
+        assert!(prog.to_string().contains("SRC_IN 2 -> reg:b.0"), "{prog}");
     }
 
     #[test]

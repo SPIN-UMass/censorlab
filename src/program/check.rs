@@ -137,7 +137,11 @@ pub fn output_type(operation: &Operation) -> Option<(RegisterType, &Register)> {
             };
             Some((ty, out))
         }
-        And { out, .. } | Or { out, .. } | Xor { out, .. } | Regex { out, .. } => {
+        And { out, .. }
+        | Or { out, .. }
+        | Xor { out, .. }
+        | Regex { out, .. }
+        | SubnetIn { out, .. } => {
             Some((RegisterType::Bool, out))
         }
         Return(_) | Noop | Model { .. } | CopyToModel { .. } => None,
@@ -164,7 +168,7 @@ fn line_inputs(line: &Line) -> Vec<&Input> {
             inputs.push(lhs);
             inputs.push(rhs);
         }
-        Regex { .. } | Return(_) | Noop | Model { .. } => {}
+        Regex { .. } | SubnetIn { .. } | Return(_) | Noop | Model { .. } => {}
     }
     inputs
 }
