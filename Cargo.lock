@@ -348,7 +348,7 @@ dependencies = [
  "sha2",
  "smoltcp",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-byteorder",
  "toml",

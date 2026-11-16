@@ -30,7 +30,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_with = "3"
 smoltcp = { git = "https://github.com/smoltcp-rs/smoltcp", default-features = false, features = ["proto-ipv4", "proto-ipv6", "std", "medium-ethernet", "medium-ip", "phy-raw_socket", "socket-raw"], rev = "a2b92ed6e8d7ae7b1229665c5b3f2e801de111e9", version = "0.11.0" }
-thiserror = "1"
+thiserror = "2"
 tokio = {version="1.40", features=["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"]}
 tokio-byteorder = "0.3"
 toml = "0.8"
