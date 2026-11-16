@@ -18,7 +18,8 @@ experiments/
 │   ├── pcaprecords.py        fast libpcap record / 5-tuple parser (no Scapy)
 │   └── baseline.pcap         one-frame PCAP used to measure process startup
 ├── tools/                  third-party tool configs (suricata/, snort/, opengfw/ incl. nix package)
-├── datasets/               real background traffic: fetch_ustc_tfc2016.sh, interleave.py
+├── datasets/               real background traffic: fetch_ustc_tfc2016.sh, fetch_iscxvpn2016.sh,
+│                           normalize_pcap.py, interleave.py (see "Background datasets")
 ├── scripts/                run_all.sh, run_all_docker.sh, aggregate_results.py
 │
 ├── 01_http_keyword/        ┐
@@ -89,7 +90,7 @@ pipeline inside a nix-in-docker container.
 
 ```bash
 bash experiments/scripts/run_all.sh [ITERATIONS]      # 01-05 showcase, 07 benchmarks, 09 static analysis, aggregation
-bash experiments/08_real_traffic/scripts/prepare.sh && bash experiments/08_real_traffic/scripts/run.sh 3
+bash experiments/08_real_traffic/scripts/prepare.sh && bash experiments/08_real_traffic/scripts/run.sh 3   # BACKGROUND=ustc|iscx|combined (default combined)
 bash experiments/10_nfq_end_to_end/scripts/run.sh     # docker
 bash experiments/11_resilience_matrix/scripts/capture.sh && python3 experiments/11_resilience_matrix/scripts/matrix.py
 python3 experiments/scripts/aggregate_results.py --output experiments/results.tex
@@ -109,7 +110,7 @@ Single scenario: `bash experiments/03_tls_sni/scripts/run_showcase.sh 5 && pytho
 | — | OpenGFW rulesets for 01–04 | MR1 |
 | 06 | Model extraction against a censor's classifier | Fig. 2 |
 | 07 | PCAP-mode throughput (1k–50k packets, null/SNI/entropy censors) | MR2 |
-| 08 | Real-traffic workloads: scenarios interleaved with USTC-TFC2016 at 50/90/97.5 % background; wall ± sd, startup, net, CPU, RSS, TPR/TNR, background collateral | MR4, reviewers B/D |
+| 08 | Real-traffic workloads: scenarios interleaved with USTC-TFC2016 + ISCXVPN2016 (or either alone) at 50/90/97.5 % background; wall ± sd, startup, net, CPU, RSS, TPR/TNR, background collateral | MR4, reviewers B/D |
 | 09 | CensorLang static cost bounds per corpus program | reviewers A/E |
 | 10 | Live NFQ end-to-end: TPR/TNR, per-connection latency, iperf3 throughput for none/null/PyCL/CensorLang | MR2, reviewer A |
 | 11 | Resilience matrix: corpus × real Shadowsocks/obfs4/Snowflake + benign control | reviewer E |
@@ -118,9 +119,55 @@ Corpus additions (TLS-in-TLS detector, TSPU TTL normalization using the new
 `Rewrite` action, Delay-based throttling) live in `demos/` and are exercised by
 the integration tests and by experiment 11.
 
+## Background datasets
+
+Experiment 08 interleaves the labelled scenario flows with real captures from
+two public datasets.  `BACKGROUND=ustc|iscx|combined` (default `combined`)
+selects which; `combined` takes half of each mix's background packets from each
+dataset (`datasets/interleave.py`, repeated `--background`).
+
+| Dataset | Content used | Fetch | Location | Size |
+|---------|--------------|-------|----------|------|
+| **USTC-TFC2016** — W. Wang, M. Zhu, X. Zeng, X. Ye, Y. Sheng, "Malware traffic classification using convolutional neural network for representation learning", ICOIN 2017 | benign half: BitTorrent, Facetime, FTP, Gmail, MySQL, Outlook, Skype, World of Warcraft (SMB/Weibo ship as .7z and are skipped); Ethernet pcap | automatic, `datasets/fetch_ustc_tfc2016.sh` (GitHub copy `davidyslu/USTC-TFC2016`, SHA-256 pinned) | `datasets/ustc-tfc2016/` (git-ignored) | ~140 MB |
+| **ISCXVPN2016** — G. Draper-Gil, A. H. Lashkari, M. S. I. Mamun, A. A. Ghorbani, "Characterization of Encrypted and VPN Traffic Using Time-Related Features", ICISSP 2016, pp. 407–414 | non-VPN application captures, one per application (YouTube, Skype audio/video/file/chat, e-mail, Netflix, Facebook chat/audio/video, SFTP, Spotify, Hangouts video/audio/chat, BitTorrent, ICQ, FTPS, Vimeo, VoipBuster, AIM, SCP, Gmail chat), each capped at `ISCX_MAX_PACKETS` (20 000) IP frames | **manual download** (registration form), then `datasets/fetch_iscxvpn2016.sh` ingests | `$ISCXVPN2016_DIR` (default `/mnt/nas/jsheffey/censorlab/datasets/iscxvpn2016`), symlinked as `datasets/iscxvpn2016` (git-ignored) | 28 GB captured for the whole dataset per UNB (only the three NonVPN archives are needed; exact archive sizes not yet measured); ingested `pcap/` ≤ 23 × 20 000 frames |
+
+**ISCXVPN2016 manual step.** The Canadian Institute for Cybersecurity (UNB)
+serves the dataset only after a registration form (name, e-mail, organisation,
+job title, country) at <http://cicresearch.ca/CICDataset/ISCX-VPN-NonVPN-2016/>;
+there is no direct, non-interactive URL, and unofficial mirrors are not used.
+After submitting the form, "Browse files" → `Dataset/PCAPs/`, download
+`NonVPN-PCAPs-01.zip`, `NonVPN-PCAPs-02.zip` and `NonVPN-PCAPs-03.zip` into
+`$ISCXVPN2016_DIR/archives/`, then run
+
+```bash
+nix develop .#experiments    # provides editcap (wireshark-cli) and unzip
+bash experiments/datasets/fetch_iscxvpn2016.sh
+```
+
+The script records each archive's SHA-256 on first sight (`archives.sha256`)
+and verifies it on every later run; pin the printed sums in the script's
+`ARCHIVE_SHA256` table.  Each selected capture is converted from pcapng if
+needed (`editcap -F pcap`), re-framed as Ethernet (`normalize_pcap.py`: only
+Ethernet, Linux SLL and raw-IP link types are accepted; anything else is
+rejected, non-IP frames are dropped) and written to `pcap/NN_<app>.pcap`;
+`MANIFEST.tsv` records the source member, original format and link type, frame
+counts and SHA-256 of every file, and `SHA256SUMS` is re-verified on each run.
+
+**Licence.** ISCXVPN2016: "publicly available for researchers"; users must
+cite Draper-Gil et al. (ICISSP 2016) — the archives are not redistributed
+here.  USTC-TFC2016 is published by its authors for research use; cite Wang
+et al. (ICOIN 2017).
+
+**Why non-VPN only.** The VPN captures are OpenVPN (UDP) tunnels of the same
+applications: one encrypted UDP flow per capture, which adds packets but no
+flow or protocol diversity, and would act as a deliberate positive for the
+fully-encrypted/ML scenarios rather than as benign background.  They could be
+added as a separate background class later; `fetch_iscxvpn2016.sh` never
+selects members whose name starts with `vpn`.
+
 ## Aggregating results
 
 `python3 experiments/scripts/aggregate_results.py --output experiments/results.tex`
 reads every experiment's JSON results and emits `\newcommand` macros:
 `\Result<Scenario><Tool>{Time,Loc,WallTime,WallStdev,StartupTime,NetTime,Cpu,Rss,Runs,Status}`,
-`\Acc<Scenario><Tool>{TPR,TNR}`, `\Bench…`, `\Static<Program>…`, `\Real<Scenario><Mix><Tool>…`.
+`\Acc<Scenario><Tool>{TPR,TNR}`, `\Bench…`, `\Static<Program>…`, `\Real<Scenario><Mix><Tool>…` (Mix suffixed `Iscx`/`Combined` for non-USTC backgrounds).
