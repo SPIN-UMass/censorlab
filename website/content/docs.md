@@ -396,6 +396,8 @@ The `packet` object is passed to `process()` and provides read-only access to pa
 | `packet.ip`             | `IpPacket`      | IP layer metadata |
 | `packet.tcp`            | `TcpPacket` or `None` | TCP metadata (None if not TCP) |
 | `packet.udp`            | `UdpPacket` or `None` | UDP metadata (None if not UDP) |
+| `packet.tls_hello_state` | `str`          | `"idle"`, `"pending"`, `"complete"`, `"failed"` or `"ambiguous"` |
+| `packet.tls_hello_error` | `str` or `None` | Why recognition failed, when the state is `"failed"` |
 
 ### `IpPacket`
 
@@ -570,18 +572,24 @@ The `.data` attribute returns a tuple whose first element is the record type str
 
 ## TLS Module
 
-The simplest way to get a connection's ClientHello is `packet.tls_client_hello`. CensorLab reassembles the start of the client's TCP stream by sequence number, so this works even when the ClientHello is split across several TCP segments or TLS records. Modern clients split it by default: a post-quantum key share (X25519MLKEM768, default since OpenSSL 3.5) makes the ClientHello ~1.6 KB. It is `None` until the whole ClientHello has arrived, then set on that packet and every later packet of the connection.
+The simplest way to get a connection's ClientHello is `packet.tls_client_hello`. CensorLab reassembles the start of the client's TCP stream by sequence number, so this works even when the ClientHello is split across several TCP segments or TLS records. Modern clients split it by default: a post-quantum key share (X25519MLKEM768, default since OpenSSL 3.5) makes the ClientHello ~1.6 KB, and deliberate splitting is a known evasion. It is `None` until the whole ClientHello has arrived, then set on that packet and every later packet of the connection.
 
 ```python
 def process(packet):
+    if packet.tls_hello_state == "ambiguous":
+        return "reset"          # conflicting overlapping segments
     hello = packet.tls_client_hello
-    if hello and hello.sni and b"blocked.com" in hello.sni:
-        return "reset"
+    if hello is not None:
+        for name in hello.sni_list:
+            if name.endswith(b"blocked.com"):
+                return "reset"
 ```
 
-Reassembly details: the client is the sender of the first SYN, and the stream starts after it (if no SYN was seen, the first packet carrying data starts it). Duplicate and out-of-order segments are handled, and where overlapping segments disagree the first bytes received win. At most 32 KiB is buffered per connection, and only until a ClientHello is found or the stream turns out not to start with one.
+Reassembly details: reassembly covers only the client's first flight. The client is the sender of the SYN, and the stream starts after it. If no SYN was seen, the SYN-ACK's acknowledgement number or the first data segment starts it instead. Out-of-order segments are placed by sequence number, identical retransmissions are accepted, and handshake fragments are concatenated across TLS records. At most 16 KiB of stream is buffered per connection, and only until a ClientHello is found or recognition fails; a larger ClientHello fails with a buffer-limit error. If a segment overlaps already-received bytes with *different* data, `tls_hello_state` becomes `"ambiguous"` and no ClientHello is reported, because the server could keep either copy. Overlaps after the ClientHello is complete are not examined.
 
-The functions below parse a single buffer, such as one packet's payload, and only see a ClientHello that fits entirely in it.
+Recognition is exact: every TLS length field must match. Every record before the ClientHello must be a Handshake record of 1–2^14 bytes. Extra handshake bytes after the ClientHello in the same record are rejected. A malformed SNI/ALPN/supported_versions extension is listed in `malformed_extensions` and does not abort parsing of the others.
+
+The functions below parse a single buffer, such as one packet's payload or a QUIC CRYPTO frame, and only see a ClientHello that fits entirely in it.
 
 ### Functions
 
@@ -596,8 +604,15 @@ Both return a `ClientHelloInfo`.
 
 | Attribute            | Type              | Description |
 |----------------------|-------------------|-------------|
-| `.sni`               | `str` or `None`   | Server Name Indication hostname |
+| `.sni`               | `bytes` or `None` | First SNI `host_name` entry (raw bytes) |
+| `.sni_list`          | `list[bytes]`     | Every SNI `host_name` entry, in order (more than one is non-standard; check them all) |
+| `.sni_invalid_utf8`  | `bool`            | Some SNI entry is not valid UTF-8 (parsing continues) |
 | `.alpn`              | `list[str]`       | ALPN protocol names (e.g. `["h2", "http/1.1"]`) |
+| `.duplicate_extensions` | `bool`         | An extension type occurs more than once |
+| `.malformed_extensions` | `list[int]`    | Types of SNI/ALPN/supported_versions extensions that were malformed |
+| `.record_count`      | `int`             | TLS records the ClientHello spanned (0 for a bare message) |
+| `.tcp_segments`      | `int`             | TCP segments that contributed bytes (0 if not reassembled) |
+| `.reassembled`       | `bool`            | Spanned more than one record or segment |
 | `.client_version`    | `int`             | Legacy TLS version from ClientHello (e.g. `0x0303`) |
 | `.supported_versions`| `list[int]`       | Supported TLS versions from extension |
 | `.cipher_suites_count` | `int`           | Number of cipher suites offered |
@@ -952,6 +967,34 @@ Fields read packet metadata. Accessing a field from the wrong protocol (e.g. `fi
 | Field                            | Type  | Description |
 |----------------------------------|-------|-------------|
 | `field:transport.payload.entropy`| float | Shannon entropy of payload (0.0–1.0) |
+
+### TLS ClientHello (TCP-reassembled)
+
+CensorLab reassembles each TCP connection's ClientHello across segments and
+`tls.hello.complete` exist on every packet; the other fields exist once the
+ClientHello has been recognised, on the completing packet and every later packet (before that an error, or 0/False with
+packet that completed the ClientHello (otherwise an error, or 0/False with
+`field_default_on_error`).
+
+| Field                                   | Type | Description |
+|-----------------------------------------|------|-------------|
+| `field:tls.hello.state`                 | int  | 0 idle, 1 pending, 2 complete, 3 failed, 4 ambiguous |
+| `field:tls.hello.complete`              | bool | True once the ClientHello has been recognised |
+| `field:tls.hello.sni_count`             | int  | Number of SNI `host_name` entries |
+| `field:tls.hello.sni_invalid_utf8`      | bool | Some SNI entry is not valid UTF-8 |
+| `field:tls.hello.duplicate_extensions`  | bool | An extension type occurs more than once |
+| `field:tls.hello.malformed_extensions`  | int  | Number of malformed SNI/ALPN/supported_versions extensions |
+| `field:tls.hello.record_count`          | int  | TLS records the ClientHello spanned |
+| `field:tls.hello.tcp_segments`          | int  | TCP segments that contributed bytes |
+
+`REGEX_SNI n -> reg:b.x` stores whether regex `n` matches any SNI `host_name`
+of the connection's recognised ClientHello (False until one has been recognised):
+
+```
+regex "(^|\.)example\.com$"
+REGEX_SNI 0 -> reg:b.0
+if reg:b.0 == True: RETURN reset
+```
 
 ## Conditions
 
