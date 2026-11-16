@@ -164,6 +164,7 @@ pub mod execution {
     use std::path::PathBuf;
 
     #[derive(Default, Deserialize)]
+    #[serde(deny_unknown_fields)]
     /// Config related to the execution environment
     pub struct Config {
         #[serde(default)]
@@ -385,6 +386,19 @@ mode = "Python"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(config.models.is_empty());
+    }
+
+    #[test]
+    fn unknown_execution_keys_are_rejected() {
+        // Misplaced settings must not be silently ignored
+        let toml_str = r#"
+[execution]
+mode = "CensorLang"
+[execution.program]
+num_registers = 32
+"#;
+        assert!(toml::from_str::<Config>(toml_str).is_err());
+        assert!(toml::from_str::<Config>("[execution]\nmod = \"Python\"").is_err());
     }
 
     #[test]
