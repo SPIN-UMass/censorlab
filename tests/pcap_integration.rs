@@ -1793,6 +1793,19 @@ fn test_censorlang_direction_field() {
                result.action_lines, result.stdout);
 }
 
+// ===========================================================================
+// Exit status: a censor run that fails must exit nonzero so harnesses notice.
+// ===========================================================================
+#[test]
+fn test_pcap_missing_file_exits_nonzero() {
+    let tmp = TempDir::new().unwrap();
+    let missing = tmp.path().join("does_not_exist.pcap");
+    let result = run_pcap_with_config(&demo_config("null"), &missing, "10.0.0.1");
+    assert_ne!(result.exit_code, 0,
+               "pcap mode on a nonexistent file must fail\nstdout: {}\nstderr: {}",
+               result.stdout, result.stderr);
+}
+
 // ==========================================================================
 // Allowlists accept a packet if either endpoint is listed
 // ==========================================================================

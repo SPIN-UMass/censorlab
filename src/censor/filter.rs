@@ -227,7 +227,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod tests {
+mod subnet_tests {
     use super::*;
     use crate::config::IpNetPort;
     use crate::subnet::IpNet;

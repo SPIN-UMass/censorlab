@@ -269,7 +269,7 @@ fn tls_client_hello_message(sni: &str, padding: usize) -> Vec<u8> {
         extensions.extend_from_slice(&[0x00, 0x15]);
         extensions.push(((padding >> 8) & 0xff) as u8);
         extensions.push((padding & 0xff) as u8);
-        extensions.extend(std::iter::repeat(0u8).take(padding));
+        extensions.extend(std::iter::repeat_n(0u8, padding));
     }
 
     let ch_body_len = 2 + 32 + 1 + 2 + 2 + 1 + 1 + 2 + extensions.len();
