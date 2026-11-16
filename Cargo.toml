@@ -22,7 +22,7 @@ nfq = "0.2"
 num = "0.4"
 ort = { version = "=2.0.0-rc.11", default-features = false, features = ["alternative-backend", "ndarray", "std"] }
 ort-tract = "0.2"
-pcap-parser = "0.16"
+pcap-parser = "0.17"
 procfs = "0.18"
 regex = "1.10"
 rustpython-vm = { git = "https://github.com/RustPython/RustPython", features = ["jit"], rev = "76236682564d53da2853e45daf9da205628b657f", version = "0.4.0" }
