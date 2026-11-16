@@ -158,14 +158,14 @@ pub enum IpVersionMetadata {
     },
 }
 impl IpMetadata {
-    fn src(&self) -> IpAddress {
+    pub(crate) fn src(&self) -> IpAddress {
         use IpVersionMetadata::*;
         match self.version {
             V4 { src, .. } => src.into(),
             V6 { src, .. } => src.into(),
         }
     }
-    fn dst(&self) -> IpAddress {
+    pub(crate) fn dst(&self) -> IpAddress {
         use IpVersionMetadata::*;
         match self.version {
             V4 { dst, .. } => dst.into(),
