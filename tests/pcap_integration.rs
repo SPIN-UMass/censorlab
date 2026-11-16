@@ -1793,6 +1793,74 @@ fn test_censorlang_direction_field() {
                result.action_lines, result.stdout);
 }
 
+// ==========================================================================
+// demos/model: ONNX classifier over the first 10 (payload_len, direction)
+// pairs of a connection
+// ==========================================================================
+
+/// Build a TCP flow from `(payload_len, from_client)` pairs.
+fn model_demo_flow(pcap_path: &std::path::Path, shape: &[(usize, bool)]) {
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    let mut b = PcapBuilder::new();
+    for &(len, from_client) in shape {
+        let payload = vec![0x41u8; len];
+        let frame = if from_client {
+            tcp_frame(client, server, 50000, 8388, TCP_ACK, 100, 200, &payload)
+        } else {
+            tcp_frame(server, client, 8388, 50000, TCP_ACK, 200, 100, &payload)
+        };
+        b = b.add_frame(&frame);
+    }
+    b.write_to(pcap_path);
+}
+
+fn assert_model_demo_ran_cleanly(result: &common::runner::RunResult) {
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert!(
+        !result.stderr.contains("Error calling processing function"),
+        "script raised: {}",
+        result.stderr
+    );
+}
+
+#[test]
+fn test_model_demo_flags_connection() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    // Ten empty segments alternating server/client: the bundled model scores
+    // this shape above 0.5, so the 10th packet must be dropped.
+    let shape: Vec<(usize, bool)> = (0..10).map(|i| (0, i % 2 == 1)).collect();
+    model_demo_flow(&pcap_path, &shape);
+
+    let result = run_pcap_with_config(&demo_config("model"), &pcap_path, "10.0.0.1");
+    assert_model_demo_ran_cleanly(&result);
+    let dropped: Vec<usize> = result.action_lines.iter()
+        .filter(|l| l.action.contains("Drop")).map(|l| l.packet_index).collect();
+    assert_eq!(dropped, vec![frame_idx(9)],
+               "the 10th packet must be dropped: {:?}\n{}", result.action_lines, result.stdout);
+}
+
+#[test]
+fn test_model_demo_allows_http_like_connection() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    // handshake, request, response, ACKs: the model scores this ~0
+    let shape = [
+        (0, true), (0, false), (0, true), (97, true), (0, false),
+        (87, false), (0, true), (0, true), (0, false), (0, true),
+    ];
+    model_demo_flow(&pcap_path, &shape);
+
+    let result = run_pcap_with_config(&demo_config("model"), &pcap_path, "10.0.0.1");
+    assert_model_demo_ran_cleanly(&result);
+    assert!(
+        result.action_lines.iter().all(|l| !l.action.contains("Drop")),
+        "benign flow must not be dropped: {:?}",
+        result.action_lines
+    );
+}
+
 // ===========================================================================
 // Exit status: a censor run that fails must exit nonzero so harnesses notice.
 // ===========================================================================

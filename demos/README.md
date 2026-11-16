@@ -12,11 +12,12 @@ Paths in censor.toml are relative to the TOML file itself, including for the Cen
 |------|--------------------|--------------|
 | `dns_blocking` | DNS response injection (GFW) | inject |
 | `http_blocking` | HTTP keyword / Host filtering | reset |
-| `https_blocking`, `https_blocking_tls` | TLS SNI filtering | reset |
+| `https_blocking` | TLS SNI filtering (substring match on payload) | drop |
+| `https_blocking_tls` | TLS SNI filtering (reassembled ClientHello) | reset |
 | `quic_blocking` | QUIC Initial SNI filtering | drop |
-| `ip_blocking` | IP blocklist (addresses or CIDR subnets, e.g. `"198.51.100.0/24"`) | reset |
+| `ip_blocking` | IP blocklist (addresses or CIDR subnets, e.g. `"198.51.100.0/24"`) | drop |
 | `shadowsocks_gfw` | Fully-encrypted-traffic heuristics (Wu et al. 2023) | drop |
-| `shadowsocks_poisoned` | ML classifier with poisoned model | drop |
+| `shadowsocks_poisoned` | ML classifier with poisoned model | reset |
 | `model` | ONNX model inference | drop |
 | `mega_gfw` | Combined GFW techniques | all |
 | `tls_in_tls` | Tunnelled-TLS (TLS-in-TLS) shape detection as reported for Russia's TSPU (ntc.party, net4people/bbs) | reset |

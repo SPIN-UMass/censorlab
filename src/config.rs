@@ -11,7 +11,9 @@ use thiserror::Error;
 /// Censorlab config
 #[derive(Default, Deserialize)]
 pub struct Config {
-    /// Execution environment
+    /// Execution environment (defaults to Python mode with no script, so a
+    /// config may consist of allow/blocklists only)
+    #[serde(default)]
     pub execution: execution::Config,
     /// Behaviors for ethernet layer
     #[serde(default)]
@@ -117,7 +119,8 @@ impl Config {
 /// Used for both allowlist and blocklist
 #[derive(Debug, Default, Deserialize)]
 pub struct List<T> {
-    /// List of values to allow/block
+    /// List of values to allow/block (empty if omitted)
+    #[serde(default)]
     pub list: T,
     /// Action to taken if a value is/isn't in the list
     #[serde(default)]
@@ -188,7 +191,7 @@ pub mod execution {
     use crate::transport::ExecutionMode;
     use std::path::PathBuf;
 
-    #[derive(Default, Deserialize)]
+    #[derive(Deserialize)]
     /// Config related to the execution environment
     pub struct Config {
         #[serde(default)]
@@ -204,6 +207,19 @@ pub mod execution {
         /// Number of times to repeat sending a TCP RST packet (default: 5)
         #[serde(default = "default_reset_repeat")]
         pub reset_repeat: usize,
+    }
+
+    // Hand-written so Config::default() (used when no config file is given, or
+    // when [execution] is omitted) agrees with the serde field defaults below.
+    impl Default for Config {
+        fn default() -> Self {
+            Self {
+                mode: ExecutionMode::default(),
+                script: None,
+                hash_seed: default_hash_seed(),
+                reset_repeat: default_reset_repeat(),
+            }
+        }
     }
 
     fn default_hash_seed() -> u32 {
@@ -408,6 +424,7 @@ pub mod tcp {
         #[serde(default)]
         /// Blocklist of ports
         pub port_blocklist: List<Vec<u16>>,
+        #[serde(default)]
         /// Allowlist of ip-port pairs
         pub ip_port_allowlist: List<Vec<IpNetPort>>,
         #[serde(default)]
@@ -430,6 +447,7 @@ pub mod udp {
         #[serde(default)]
         /// Blocklist of ports
         pub port_blocklist: List<Vec<u16>>,
+        #[serde(default)]
         /// Allowlist of ip-port pairs
         pub ip_port_allowlist: List<Vec<IpNetPort>>,
         #[serde(default)]
@@ -545,6 +563,66 @@ action = "Reset"
         assert!(config.ip.blocklist.list.is_empty());
         assert!(config.tcp.port_blocklist.list.is_empty());
         assert!(config.models.is_empty());
+    }
+
+    #[test]
+    fn tcp_udp_sections_without_ip_port_allowlist() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[tcp.port_blocklist]
+list = [80]
+action = "Drop"
+
+[udp.port_blocklist]
+list = [53]
+action = "Drop"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.tcp.ip_port_allowlist.list.is_empty());
+        assert_eq!(config.tcp.ip_port_allowlist.action, Action::None);
+        assert!(config.udp.ip_port_allowlist.list.is_empty());
+        assert_eq!(config.udp.ip_port_allowlist.action, Action::None);
+    }
+
+    #[test]
+    fn list_block_without_list_key_defaults_to_empty() {
+        let toml_str = r#"
+[ip.allowlist]
+action = "Drop"
+
+[tcp.port_blocklist]
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.ip.allowlist.list.is_empty());
+        assert_eq!(config.ip.allowlist.action, Action::Drop);
+        assert!(config.tcp.port_blocklist.list.is_empty());
+    }
+
+    #[test]
+    fn config_without_execution_section_uses_execution_defaults() {
+        let toml_str = r#"
+[ip.blocklist]
+list = ["192.168.1.1"]
+action = "Drop"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(matches!(config.execution.mode, crate::transport::ExecutionMode::Python));
+        assert!(config.execution.script.is_none());
+        assert_eq!(config.execution.hash_seed, 1337);
+        assert_eq!(config.execution.reset_repeat, 5);
+    }
+
+    #[test]
+    fn default_config_matches_empty_execution_section() {
+        // Config::default() is used when no -c is given; it must agree with
+        // what an empty [execution] table deserializes to.
+        let parsed: Config = toml::from_str("[execution]\n").unwrap();
+        let default = Config::default();
+        assert_eq!(default.execution.hash_seed, parsed.execution.hash_seed);
+        assert_eq!(default.execution.reset_repeat, parsed.execution.reset_repeat);
     }
 
     #[test]
