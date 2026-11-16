@@ -329,51 +329,40 @@ pub fn high_entropy_payload(len: usize) -> Vec<u8> {
         .collect()
 }
 
-/// Build a QUIC Initial packet (unencrypted) wrapping a TLS ClientHello with the given SNI.
-///
-/// The payload is NOT encrypted — suitable for testing the QUIC parser.
+/// QUIC client Initial DCID used by the fixtures below.
+const QUIC_DCID: [u8; 8] = [0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
+
+/// Seal one protected (RFC 9001) QUIC v1 client Initial whose frames are
+/// `frames`, padded to the 1162-byte payload real clients use.
+fn sealed_initial(pn: u64, mut frames: Vec<u8>) -> Vec<u8> {
+    use censorlab::application::quic::{seal_client_initial, QuicVersion};
+    frames.resize(frames.len().max(1162), 0x00); // PADDING frames
+    seal_client_initial(QuicVersion::V1, &QUIC_DCID, &[], &[], pn, 1, &frames)
+}
+
+/// Build a protected QUIC v1 client Initial carrying a TLS ClientHello with
+/// the given SNI, encrypted with the Initial keys derived from its DCID
+/// exactly as a real client would.
 pub fn quic_initial_packet(sni: &str) -> Vec<u8> {
+    use censorlab::application::quic::crypto_frame;
+    sealed_initial(0, crypto_frame(0, &tls_client_hello_message(sni, 0)))
+}
+
+/// Two protected client Initial datagrams of one connection whose
+/// ClientHello (with the given SNI) is split between them, like large
+/// post-quantum ClientHellos. Neither datagram alone contains the full SNI.
+pub fn quic_initial_split_datagrams(sni: &str) -> (Vec<u8>, Vec<u8>) {
+    use censorlab::application::quic::crypto_frame;
     let ch = tls_client_hello_message(sni, 0);
-
-    // CRYPTO frame
-    let mut crypto_frame = Vec::new();
-    crypto_frame.push(0x06); // CRYPTO frame type
-    crypto_frame.push(0x00); // offset = 0
-    if ch.len() < 64 {
-        crypto_frame.push(ch.len() as u8);
-    } else {
-        let len = ch.len() as u16;
-        crypto_frame.push(0x40 | ((len >> 8) as u8));
-        crypto_frame.push((len & 0xff) as u8);
-    }
-    crypto_frame.extend_from_slice(&ch);
-
-    // Packet number (1 byte)
-    let pn = vec![0x00u8];
-    let payload = [pn.as_slice(), crypto_frame.as_slice()].concat();
-
-    let dcid: &[u8] = &[0x01, 0x02, 0x03, 0x04];
-    let scid: &[u8] = &[];
-
-    // QUIC long header
-    let mut buf = Vec::new();
-    buf.push(0xC0); // Initial long header
-    buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]); // QUIC v1
-    buf.push(dcid.len() as u8);
-    buf.extend_from_slice(dcid);
-    buf.push(scid.len() as u8);
-    buf.extend_from_slice(scid);
-    buf.push(0x00); // token length: 0
-    if payload.len() < 64 {
-        buf.push(payload.len() as u8);
-    } else {
-        let len = payload.len() as u16;
-        buf.push(0x40 | ((len >> 8) as u8));
-        buf.push((len & 0xff) as u8);
-    }
-    buf.extend_from_slice(&payload);
-
-    buf
+    // Split inside the SNI value.
+    let sni_pos = ch
+        .windows(sni.len())
+        .position(|w| w == sni.as_bytes())
+        .expect("SNI is in the ClientHello");
+    let split = sni_pos + sni.len() / 2;
+    let first = sealed_initial(0, crypto_frame(0, &ch[..split]));
+    let second = sealed_initial(1, crypto_frame(split as u64, &ch[split..]));
+    (first, second)
 }
 
 // ---------------------------------------------------------------------------
