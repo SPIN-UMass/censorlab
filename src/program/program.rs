@@ -3,7 +3,7 @@ use crate::program::packet::Packet;
 use crate::program::packet::{IpVersionMetadata, TcpFlags, TransportMetadataExtra};
 use fnv::FnvHashSet;
 use lalrpop_util::lalrpop_mod;
-use num::Zero;
+
 use regex::bytes::Regex as BytesRegex;
 use serde::Deserialize;
 use serde_with::DeserializeFromStr;
@@ -1519,9 +1519,8 @@ impl MathOperator {
                 (Value::Float(l), Value::Float(r)) => Value::Float(op.call(*l, *r)),
                 (Value::Int(l), Value::Int(r)) => Value::Int(op.call(*l, *r)),
                 (Value::Bool(l), Value::Bool(r)) => {
-                    let l_i = u8::from(*l);
-                    let r_i = u8::from(*r);
-                    Value::Int(i64::from(op.call(l_i, r_i)))
+                    // Promote to Int first (False - True == -1, not a u8 underflow)
+                    Value::Int(op.call(i64::from(*l), i64::from(*r)))
                 }
                 // LHS is the base, and RHS should be made compatible
                 (Value::Float(l), Value::Int(r)) => {
@@ -1558,37 +1557,80 @@ impl MathOperator {
         }
     }
 }
-use std::ops::{Add, Div, Mul, Rem, Sub};
+/// Arithmetic as CensorLang defines it.  Every operation is total, so a program
+/// can never fault (or panic the engine) on any packet:
+///
+/// * integers use two's-complement wrapping (`i64::MAX + 1 == i64::MIN`,
+///   `i64::MIN / -1 == i64::MIN`, `i64::MIN % -1 == 0`), identically in debug
+///   and release builds;
+/// * division and modulo by zero yield zero, for integers and floats alike;
+/// * floats otherwise follow IEEE 754.
+trait Arith: Copy {
+    fn cl_add(self, rhs: Self) -> Self;
+    fn cl_sub(self, rhs: Self) -> Self;
+    fn cl_mul(self, rhs: Self) -> Self;
+    fn cl_div(self, rhs: Self) -> Self;
+    fn cl_rem(self, rhs: Self) -> Self;
+}
+impl Arith for i64 {
+    fn cl_add(self, rhs: Self) -> Self {
+        self.wrapping_add(rhs)
+    }
+    fn cl_sub(self, rhs: Self) -> Self {
+        self.wrapping_sub(rhs)
+    }
+    fn cl_mul(self, rhs: Self) -> Self {
+        self.wrapping_mul(rhs)
+    }
+    fn cl_div(self, rhs: Self) -> Self {
+        if rhs == 0 {
+            0
+        } else {
+            self.wrapping_div(rhs)
+        }
+    }
+    fn cl_rem(self, rhs: Self) -> Self {
+        if rhs == 0 {
+            0
+        } else {
+            self.wrapping_rem(rhs)
+        }
+    }
+}
+impl Arith for f64 {
+    fn cl_add(self, rhs: Self) -> Self {
+        self + rhs
+    }
+    fn cl_sub(self, rhs: Self) -> Self {
+        self - rhs
+    }
+    fn cl_mul(self, rhs: Self) -> Self {
+        self * rhs
+    }
+    fn cl_div(self, rhs: Self) -> Self {
+        if rhs == 0.0 {
+            0.0
+        } else {
+            self / rhs
+        }
+    }
+    fn cl_rem(self, rhs: Self) -> Self {
+        if rhs == 0.0 {
+            0.0
+        } else {
+            self % rhs
+        }
+    }
+}
 impl MathOperatorNumeric {
-    fn call<T>(&self, lhs: T, rhs: T) -> T
-    where
-        T: Add<Output = T>
-            + Sub<Output = T>
-            + Mul<Output = T>
-            + Div<Output = T>
-            + Rem<Output = T>
-            + Zero
-            + PartialEq,
-    {
+    fn call<T: Arith>(&self, lhs: T, rhs: T) -> T {
         use MathOperatorNumeric::*;
         match self {
-            Add => lhs + rhs,
-            Sub => lhs - rhs,
-            Mul => lhs * rhs,
-            Div => {
-                if rhs != T::zero() {
-                    lhs / rhs
-                } else {
-                    T::zero()
-                }
-            }
-            Mod => {
-                if rhs != T::zero() {
-                    lhs % rhs
-                } else {
-                    T::zero()
-                }
-            }
+            Add => lhs.cl_add(rhs),
+            Sub => lhs.cl_sub(rhs),
+            Mul => lhs.cl_mul(rhs),
+            Div => lhs.cl_div(rhs),
+            Mod => lhs.cl_rem(rhs),
         }
     }
 }
@@ -2925,6 +2967,52 @@ mod tests {
         assert!(
             matches!(&prog.lines[0].operation, Operation::Model { name } if name == "wf")
         );
+    }
+
+    // --- Integer arithmetic is total: two's-complement wrapping, x/0 = x%0 = 0 ---
+
+    fn int_op(op: MathOperatorNumeric, l: i64, r: i64) -> i64 {
+        match MathOperator::Numeric(op).call(&Value::Int(l), &Value::Int(r)) {
+            Value::Int(i) => i,
+            other => panic!("expected Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn math_int_overflow_wraps() {
+        assert_eq!(int_op(MathOperatorNumeric::Add, i64::MAX, 1), i64::MIN);
+        assert_eq!(int_op(MathOperatorNumeric::Sub, i64::MIN, 1), i64::MAX);
+        assert_eq!(int_op(MathOperatorNumeric::Mul, i64::MAX, 2), -2);
+        assert_eq!(int_op(MathOperatorNumeric::Div, i64::MIN, -1), i64::MIN);
+        assert_eq!(int_op(MathOperatorNumeric::Mod, i64::MIN, -1), 0);
+        assert_eq!(int_op(MathOperatorNumeric::Div, i64::MIN, 0), 0);
+        assert_eq!(int_op(MathOperatorNumeric::Mod, 7, 0), 0);
+        assert_eq!(int_op(MathOperatorNumeric::Div, -7, 2), -3);
+        assert_eq!(int_op(MathOperatorNumeric::Mod, -7, 2), -1);
+    }
+
+    #[test]
+    fn math_bool_bool_promotes_to_int() {
+        let v = MathOperator::Numeric(MathOperatorNumeric::Sub).call(&Value::Bool(false), &Value::Bool(true));
+        assert!(matches!(v, Value::Int(-1)));
+    }
+
+    #[test]
+    fn optimise_folds_overflowing_constants_without_panicking() {
+        let prog: Program = "DIV -9223372036854775808, -1 -> reg:i.0\nif reg:i.0 < 0: RETURN terminate"
+            .parse()
+            .unwrap();
+        let prog = Program::new(prog.lines);
+        assert!(matches!(
+            &prog.lines[0].operation,
+            Operation::Copy { from: Input::Int(i64::MIN), .. }
+        ));
+    }
+
+    #[test]
+    fn math_float_division_by_zero_is_zero() {
+        let v = MathOperator::Numeric(MathOperatorNumeric::Div).call(&Value::Float(1.0), &Value::Float(0.0));
+        assert!(matches!(v, Value::Float(f) if f == 0.0));
     }
 
     // --- Parser robustness: numeric literals are recognized, never panic ---

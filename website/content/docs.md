@@ -814,7 +814,7 @@ DIV <value>, <value> -> <register>
 MOD <value>, <value> -> <register>
 ```
 
-Division and modulo by zero return zero (no error).
+Division and modulo by zero return zero (no error). Integer arithmetic wraps on overflow (two's complement: `ADD 9223372036854775807, 1` gives `-9223372036854775808`, and `DIV -9223372036854775808, -1` gives `-9223372036854775808`), so arithmetic never faults. `DIV` of two ints is integer division (truncating toward zero).
 
 Type coercion: when operand types differ, the result is promoted (bool → int → float).
 
