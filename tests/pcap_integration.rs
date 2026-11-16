@@ -1538,3 +1538,50 @@ fn test_censorlang_direction_field() {
                "the connection must be terminated at the first wan->client packet: {:?}\n{}",
                result.action_lines, result.stdout);
 }
+
+// ==========================================================================
+// Allowlists accept a packet if either endpoint is listed
+// ==========================================================================
+
+#[test]
+fn test_config_tcp_port_allowlist_matches_either_endpoint() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+
+    PcapBuilder::new()
+        // frame 0: ephemeral client port -> 443 (allowlisted) -> passes
+        .add_frame(&tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]))
+        // frame 1: reply 443 -> ephemeral port -> passes
+        .add_frame(&tcp_frame(server, client, 443, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]))
+        // frame 2: ephemeral client port -> 80 (not allowlisted) -> dropped
+        .add_frame(&tcp_frame(client, server, 50001, 80, TCP_SYN, 300, 0, &[]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.port_allowlist]
+list = [443]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        result.action_lines.len(),
+        1,
+        "only the port-80 SYN should be dropped, got: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(2));
+    assert!(result.action_lines[0].action.contains("Drop"));
+}
