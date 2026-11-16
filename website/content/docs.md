@@ -497,7 +497,8 @@ def process(packet):
     if udp and udp.uses_port(53):
         dns = parse_dns(packet.payload)
         for question in dns.questions:
-            if "example.com" in question.qname:
+            # qtype may be anything, including "HTTPS" or "SVCB"
+            if b"example.com" in question.qname.lower():
                 # Inject a forged DNS response pointing to a decoy IP
                 return craft_response(packet.payload, "10.10.10.10")
 ```
@@ -506,11 +507,16 @@ def process(packet):
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `parse(bytes)` | `DnsPacket` | Parse a DNS packet from raw bytes |
+| `parse(bytes)` | `DnsPacket` | Parse a DNS message from a UDP payload |
+| `parse_tcp(bytes)` | `list[DnsPacket]` | Parse a DNS-over-TCP payload (one or more messages, each with a 2-byte length prefix); raises if a frame is incomplete |
 | `craft_response(query_bytes, ip)` | `bytes` | Craft a forged DNS A-record response from a query, with default TTL of 300 |
 | `craft_response(query_bytes, ip, ttl)` | `bytes` | Same as above, with a custom TTL value |
 
 Returning the `bytes` from `craft_response()` causes CensorLab to inject the forged response while allowing the original query through — the same technique used by the GFW for DNS poisoning.
+
+The parser recognizes the entire message before returning it and raises on anything malformed: truncated sections, labels over 63 octets, names over 255 octets, compression pointers that are not strictly backward (loops, forward pointers, pointer chains), misplaced or duplicate OPT records, or known record types whose RDATA does not match their format. Record types and classes it does not know (e.g. `HTTPS`, `SVCB`, or unassigned values) are never an error; they appear as `"TYPE<n>"` / `"CLASS<n>"` and opaque RDATA. Bytes after the last section are not interpreted; their count is in `.trailing_len`.
+
+Names are rendered in DNS presentation format without the trailing dot: labels joined by `.`, with `.` and `\` inside a label escaped as `\.` and `\\`, and non-printable octets as `\DDD`. Use `.labels` for the raw label bytes.
 
 ### `DnsPacket`
 
@@ -532,26 +538,44 @@ Returned by `parse(bytes)`.
 | `.answers`      | `list[ResourceRecord]` | Answer records |
 | `.nameservers`  | `list[ResourceRecord]` | Authority records |
 | `.additional`   | `list[ResourceRecord]` | Additional records |
-| `.opt`          | `Record` or `None`     | OPT pseudo-record |
+| `.opt`          | `Record` or `None`     | EDNS(0) OPT pseudo-record (not included in `.additional`) |
+| `.trailing_len` | `int`                  | Number of uninterpreted bytes after the last section |
 
 ### `Question`
 
 | Attribute        | Type   | Description |
 |------------------|--------|-------------|
-| `.qname`         | `str`  | Queried domain name |
-| `.prefer_unicast`| `bool` | Unicast response preferred |
-| `.qtype`         | `str`  | Query type (e.g. `"A"`, `"AAAA"`) |
-| `.qclass`        | `str`  | Query class (e.g. `"IN"`) |
+| `.qname`         | `bytes`| Queried domain name (presentation format) |
+| `.labels`        | `list[bytes]` | Raw labels of the name |
+| `.prefer_unicast`| `bool` | mDNS unicast-response bit |
+| `.qtype`         | `str`  | Query type (e.g. `"A"`, `"AAAA"`, `"HTTPS"`, `"TYPE65280"`) |
+| `.qtype_code`    | `int`  | Numeric query type |
+| `.qclass`        | `str`  | Query class (e.g. `"IN"`, `"CLASS1234"`) |
+| `.qclass_code`   | `int`  | Numeric query class (without the mDNS bit) |
 
 ### `ResourceRecord`
 
 | Attribute          | Type   | Description |
 |--------------------|--------|-------------|
-| `.name`            | `str`  | Record name |
-| `.multicast_unique`| `bool` | Multicast unique flag |
+| `.name`            | `str`  | Record name (presentation format) |
+| `.labels`          | `list[bytes]` | Raw labels of the name |
+| `.multicast_unique`| `bool` | mDNS cache-flush bit |
+| `.rtype`           | `str`  | Record type (e.g. `"A"`, `"HTTPS"`, `"TYPE65280"`) |
+| `.rtype_code`      | `int`  | Numeric record type |
 | `.cls`             | `str`  | Record class (e.g. `"IN"`) |
-| `.ttl`             | `int`  | Time-to-live in seconds |
+| `.cls_code`        | `int`  | Numeric record class (without the mDNS bit) |
+| `.ttl`             | `int`  | Time-to-live in seconds (values above 2^31-1 read as 0) |
 | `.data`            | `tuple`| Record data as a tagged tuple (see below) |
+
+### `Record` (OPT)
+
+| Attribute   | Type  | Description |
+|-------------|-------|-------------|
+| `.udp`      | `int` | Requestor's UDP payload size |
+| `.extrcode` | `int` | Upper 8 bits of the extended RCODE |
+| `.version`  | `int` | EDNS version |
+| `.flags`    | `int` | EDNS flags (DO bit is `0x8000`) |
+| `.options`  | `list[tuple[int, bytes]]` | `(option_code, option_data)` pairs |
 
 The `.data` attribute returns a tuple whose first element is the record type string:
 
@@ -566,7 +590,7 @@ The `.data` attribute returns a tuple whose first element is the record type str
 | SOA     | `("SOA", primary_ns, mailbox, serial, refresh, retry, expire, minimum_ttl)` |
 | SRV     | `("SRV", priority, weight, port, "target.example.com")` |
 | TXT     | `("TXT", [b"text data", ...])` |
-| Unknown | `("UNKNOWN",)` |
+| Other   | `("UNKNOWN", type_code, b"raw rdata")` |
 
 ## TLS Module
 
