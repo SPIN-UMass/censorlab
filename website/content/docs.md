@@ -295,9 +295,9 @@ Actions control what happens to a packet at a given processing layer.
 | `"None"`   | Continue processing through subsequent layers |
 | `"Ignore"` | Forward the packet immediately, skip further processing |
 | `"Drop"`   | Silently drop the packet |
-| `"Reset"`  | Send TCP RST packets in both directions (only valid for TCP-layer lists) |
+| `"Reset"`  | Send TCP RST packets in both directions to tear down the matching connection (valid on `[tcp]` and `[ip]` lists) |
 
-`"Reset"` is only valid on `[tcp]` lists. Using it on `[ethernet]`, `[arp]`, `[ip]`, or `[icmp]` sections will produce a validation error.
+`"Reset"` is valid on `[tcp]` lists and on `[ip]` (`allowlist`, `blocklist`, `unknown`). On an `[ip]` rule, a matching TCP packet gets a RST for its connection, while any other traffic it matches (ICMP, UDP, other protocols, fragments, truncated TCP) is dropped. `ip.unknown` never matches TCP, so `"Reset"` there behaves as `"Drop"`. Using `"Reset"` on `[ethernet]`, `[arp]`, `[icmp]`, or any `[udp]` list produces a validation error at startup.
 
 ## Example Configuration
 
@@ -334,7 +334,7 @@ ip_port_allowlist = { list = [] }
 path = "models/classifier.onnx.ml"
 ```
 
-**Note:** `"Reset"` is only valid on `[tcp]` lists. Using it on `[ip]`, `[ethernet]`, `[arp]`, `[udp]`, or `[icmp]` sections will produce a validation error at startup. Use `"Drop"` for non-TCP layers.
+**Note:** `"Reset"` is valid on `[tcp]` and `[ip]` lists; on `[ip]` it resets TCP connections and drops everything else. Using it on `[ethernet]`, `[arp]`, `[udp]`, or `[icmp]` sections will produce a validation error at startup. Use `"Drop"` for those layers.
 
 ---
 
