@@ -1,9 +1,9 @@
 mod common;
 
 use common::packet_builder::{
-    dns_query, high_entropy_payload, http_get, quic_initial_packet, ssh_banner, tcp_frame,
-    tls_client_hello_record, tls_client_hello_record_padded, udp_frame, TCP_ACK, TCP_PSH_ACK,
-    TCP_SYN,
+    dns_query, high_entropy_payload, http_get, icmp_echo, ipv4_raw_frame, ipv6_raw_frame,
+    quic_initial_packet, raw_tcp_header, ssh_banner, tcp_frame, tls_client_hello_record,
+    tls_client_hello_record_padded, udp_frame, TCP_ACK, TCP_PSH_ACK, TCP_SYN,
 };
 use common::pcap_builder::PcapBuilder;
 use common::runner::run_pcap_with_config;
@@ -1584,4 +1584,198 @@ action = "Drop"
     );
     assert_eq!(result.action_lines[0].packet_index, frame_idx(2));
     assert!(result.action_lines[0].action.contains("Drop"));
+}
+
+// ==========================================================================
+// IP-layer rules apply regardless of the transport protocol
+// ==========================================================================
+
+const V6_CLIENT: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+const V6_SERVER: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+/// IPv6 next-header values
+const HOP_BY_HOP: u8 = 0;
+const ICMPV6: u8 = 58;
+const TCP: u8 = 6;
+
+/// An 8-byte hop-by-hop options header (PadN) followed by `inner`.
+fn hop_by_hop(next: u8, inner: &[u8]) -> Vec<u8> {
+    let mut v = vec![next, 0, 1, 4, 0, 0, 0, 0];
+    v.extend_from_slice(inner);
+    v
+}
+
+/// Indices of frames that produced an action containing `needle`.
+fn frames_with(result: &common::runner::RunResult, needle: &str) -> Vec<usize> {
+    result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains(needle))
+        .map(|l| l.packet_index)
+        .collect()
+}
+
+#[test]
+fn test_ip_blocklist_applies_to_non_tcp_udp() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let blocked = [8, 8, 8, 8];
+    let allowed = [1, 1, 1, 1];
+
+    PcapBuilder::new()
+        // frame 0: ICMP echo to blocked IP
+        .add_frame(&ipv4_raw_frame(client, blocked, 1, &icmp_echo(8)))
+        // frame 1: GRE to blocked IP
+        .add_frame(&ipv4_raw_frame(client, blocked, 47, &[0; 8]))
+        // frame 2: truncated TCP header to blocked IP
+        .add_frame(&ipv4_raw_frame(client, blocked, 6, &[0; 4]))
+        // frame 3: ICMPv6 behind a hop-by-hop header from a blocked IPv6 address
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP, &hop_by_hop(ICMPV6, &icmp_echo(128))))
+        // frame 4: ICMP echo to an allowed IP -> passes
+        .add_frame(&ipv4_raw_frame(client, allowed, 1, &icmp_echo(8)))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["8.8.8.8", "2001:db8::2"]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(0), frame_idx(1), frame_idx(2), frame_idx(3)],
+        "{:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines.len(), 4, "{:?}", result.action_lines);
+}
+
+#[test]
+fn test_icmp_action_covers_icmpv4_and_icmpv6() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [8, 8, 8, 8];
+
+    PcapBuilder::new()
+        // frame 0: ICMPv4 echo
+        .add_frame(&ipv4_raw_frame(client, server, 1, &icmp_echo(8)))
+        // frame 1: ICMPv6 echo
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, ICMPV6, &icmp_echo(128)))
+        // frame 2: ICMPv6 behind a hop-by-hop header (e.g. MLD)
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP, &hop_by_hop(ICMPV6, &icmp_echo(128))))
+        // frame 3: truncated ICMPv4 header: still ICMP
+        .add_frame(&ipv4_raw_frame(client, server, 1, &[8, 0]))
+        // frame 4: GRE is not ICMP -> ip.unknown (default: continue)
+        .add_frame(&ipv4_raw_frame(client, server, 47, &[0; 8]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[icmp]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(0), frame_idx(1), frame_idx(2), frame_idx(3)],
+        "{:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines.len(), 4, "{:?}", result.action_lines);
+}
+
+#[test]
+fn test_ip_unknown_applies_to_unknown_protocols_only() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [8, 8, 8, 8];
+
+    PcapBuilder::new()
+        // frame 0: GRE -> unknown
+        .add_frame(&ipv4_raw_frame(client, server, 47, &[0; 8]))
+        // frame 1: ICMP -> icmp.action (default: continue)
+        .add_frame(&ipv4_raw_frame(client, server, 1, &icmp_echo(8)))
+        // frame 2: TCP behind a hop-by-hop header is TCP, not unknown
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP,
+                                   &hop_by_hop(TCP, &raw_tcp_header(50000, 80, TCP_SYN, 1, 0))))
+        // frame 3: GRE over IPv6 behind a hop-by-hop header -> unknown
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP, &hop_by_hop(47, &[0; 8])))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip]
+unknown = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(0), frame_idx(3)],
+        "{:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines.len(), 2, "{:?}", result.action_lines);
+}
+
+#[test]
+fn test_tcp_port_blocklist_sees_through_ipv6_extension_headers() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    PcapBuilder::new()
+        // frame 0: TCP SYN to port 443 behind a hop-by-hop header -> dropped
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP,
+                                   &hop_by_hop(TCP, &raw_tcp_header(50000, 443, TCP_SYN, 1, 0))))
+        // frame 1: TCP SYN to port 80 behind a hop-by-hop header -> passes
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP,
+                                   &hop_by_hop(TCP, &raw_tcp_header(50001, 80, TCP_SYN, 1, 0))))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.port_blocklist]
+list = [443]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "2001:db8::1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(0)],
+        "{:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines.len(), 1, "{:?}", result.action_lines);
 }

@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::ipc::{ipc_thread, ModelThreadError};
 use crate::model::onnx::ModelLoadError;
 use crate::model::ModelThreadMessage;
-use crate::program::packet::Packet;
+use crate::program::packet::{IpLayer, Packet};
 use crate::transport::{TransportState, TransportStateInitError};
 use bitvec::prelude::*;
 #[cfg(feature = "wire")]
@@ -27,8 +27,8 @@ use smoltcp::phy::RawSocket;
 use smoltcp::phy::Device;
 use smoltcp::wire::Error as SmoltcpError;
 use smoltcp::wire::{
-    ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol as EtherType, Icmpv4Packet,
-    Icmpv6Packet, IpAddress, IpProtocol, Ipv4Address, Ipv4Packet, Ipv6Address, Ipv6Packet,
+    ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol as EtherType,
+    IpAddress, IpProtocol, Ipv4Address, Ipv4Packet, Ipv6Address, Ipv6Packet,
     TcpSeqNumber,
 };
 use std::cmp::Ordering;
@@ -419,26 +419,11 @@ impl Censor {
         censor_ctx: &mut Context,
     ) -> Result<Action, SmoltcpError> {
         coz::progress!("process_frame_payload");
-        // For non-IP ethertypes, skip full packet parsing
         let action = match ethertype {
             EtherType::Arp => return self.process_arp(&payload),
             EtherType::Unknown(_) => return Ok(self.ethernet_unknown.clone()),
-            // IP packets need full parsing for transport-layer processing
-            EtherType::Ipv4 | EtherType::Ipv6 => {
-                match Packet::from_ts_bytes(None, payload.as_ref(), ethertype) {
-                    Ok(packet) => match ethertype {
-                        EtherType::Ipv4 => self.process_ipv4(&payload, censor_ctx, packet),
-                        EtherType::Ipv6 => self.process_ipv6(&payload, censor_ctx, packet),
-                        _ => unreachable!(),
-                    },
-                    // Unparseable packets are expected (e.g. truncated frames) and
-                    // should not block traffic.
-                    Err(err) => {
-                        warn!("Error parsing packet, allowing through: {:?}", err);
-                        return Ok(Default::default());
-                    }
-                }
-            }
+            EtherType::Ipv4 => self.process_ipv4(&payload, censor_ctx),
+            EtherType::Ipv6 => self.process_ipv6(&payload, censor_ctx),
         };
         // Handle the delayer if relevant
         match action? {
@@ -503,10 +488,16 @@ impl Censor {
         &mut self,
         data: T,
         censor_ctx: &mut Context,
-        packet: Packet,
     ) -> Result<Action, SmoltcpError> {
-        // Just make sure the packet is indeed ipv4
-        let ipv4_packet = Ipv4Packet::new_checked(data.as_ref())?;
+        // Without a well-formed IP header there are no addresses to apply rules to.
+        // Such packets are expected (e.g. truncated frames) and should not block traffic.
+        let ipv4_packet = match Ipv4Packet::new_checked(data.as_ref()) {
+            Ok(ipv4_packet) => ipv4_packet,
+            Err(err) => {
+                warn!("Error parsing IPv4 header, allowing through: {:?}", err);
+                return Ok(Action::None);
+            }
+        };
         // Check config-level IP allow/blocklist
         match self
             .ipv4_list
@@ -546,11 +537,8 @@ impl Censor {
                 src: ipv4_packet.src_addr(),
                 dst: ipv4_packet.dst_addr(),
             },
-            Some(ipv4_packet.ident()),
-            ipv4_packet.next_header(),
             direction,
-            ipv4_packet.payload(),
-            packet,
+            IpLayer::from_ipv4(&ipv4_packet),
         );
         result.map(|action| action.add_ipid(ipv4_packet.ident()))
     }
@@ -562,10 +550,16 @@ impl Censor {
         &mut self,
         data: T,
         censor_ctx: &mut Context,
-        packet: Packet,
     ) -> Result<Action, SmoltcpError> {
-        // Just make sure the packet is indeed ipv6
-        let ipv6_packet = Ipv6Packet::new_checked(data.as_ref())?;
+        // Without a well-formed IP header there are no addresses to apply rules to.
+        // Such packets are expected (e.g. truncated frames) and should not block traffic.
+        let ipv6_packet = match Ipv6Packet::new_checked(data.as_ref()) {
+            Ok(ipv6_packet) => ipv6_packet,
+            Err(err) => {
+                warn!("Error parsing IPv6 header, allowing through: {:?}", err);
+                return Ok(Action::None);
+            }
+        };
         // Check config-level IP allow/blocklist
         match self
             .ipv6_list
@@ -599,38 +593,36 @@ impl Censor {
                 }
             }
         };
-        // Process the remainder using the generic IP handler
-        self.process_ip(
-            IpPair::V6 {
-                src: ipv6_packet.src_addr(),
-                dst: ipv6_packet.dst_addr(),
-            },
-            None,
-            ipv6_packet.next_header(),
-            direction,
-            ipv6_packet.payload(),
-            packet,
-        )
+        let ips = IpPair::V6 {
+            src: ipv6_packet.src_addr(),
+            dst: ipv6_packet.dst_addr(),
+        };
+        // Find the upper-layer protocol behind any extension headers
+        match IpLayer::from_ipv6(&ipv6_packet) {
+            // Process the remainder using the generic IP handler
+            Ok(ip_layer) => self.process_ip(ips, direction, ip_layer),
+            // A broken extension-header chain hides the upper-layer protocol
+            Err(err) => {
+                debug!(
+                    "Could not determine upper-layer protocol ({}). Performing {} action",
+                    err, self.ip_unknown
+                );
+                Ok(self.ip_unknown.clone())
+            }
+        }
     }
     /// Generic IP processing function that simplifies some of the logic and avoids exponential
-    /// branching
+    /// branching. Called only after the IP-layer allow/blocklists have passed.
     ///
     /// # Parameters
-    /// * `ip_src` - source ip
-    /// * `ip_dst` - destination ip
-    /// * `next_header` -  protocol of the underlying packet
+    /// * `ips` - source and destination ip
     /// * `direction` - which direction this packet was processed in
-    /// * `data` - payload of ip packet
-    /// * `reset` - Whether we should issue a reset if tcp
-    /// * `swap` - Whether we should swap src and dst fields
-    fn process_ip<T: AsRef<[u8]>>(
+    /// * `ip_layer` - the recognized IP layer, including the upper-layer protocol and payload
+    fn process_ip(
         &mut self,
         ips: IpPair,
-        _ipid: Option<u16>,
-        next_header: IpProtocol,
         direction: Direction,
-        data: T,
-        packet: Packet,
+        ip_layer: IpLayer,
     ) -> Result<Action, SmoltcpError> {
         // Enrich logging
         let span = info_span!(
@@ -641,12 +633,26 @@ impl Censor {
         );
         let _enter = span.enter();
         // Dispatch processing based on protocol
-        match next_header {
-            IpProtocol::Tcp | IpProtocol::Udp => {
-                self.process_transport(ips, data.as_ref(), direction, packet)
+        match (ip_layer.protocol, ips) {
+            (IpProtocol::Tcp | IpProtocol::Udp, _) => {
+                match Packet::from_ip_layer(None, &ip_layer) {
+                    Ok(packet) => self.process_transport(ips, direction, packet),
+                    // The IP-layer rules have already passed. Without a transport header
+                    // (truncated/malformed, or a non-first fragment) there are no ports
+                    // to match and no connection to track, so let the packet through.
+                    Err(err) => {
+                        warn!(
+                            "Error parsing {} header, allowing through: {}",
+                            ip_layer.protocol, err
+                        );
+                        Ok(Action::None)
+                    }
+                }
             }
-            IpProtocol::Icmp => self.process_icmp(ips, direction, data.as_ref()),
-            other => {
+            (IpProtocol::Icmp, IpPair::V4 { .. }) | (IpProtocol::Icmpv6, IpPair::V6 { .. }) => {
+                Ok(self.icmp.action.clone())
+            }
+            (other, _) => {
                 debug!(
                     "Encountered packet with unknown IP protocol {}. Performing {} action",
                     other, self.ip_unknown
@@ -665,36 +671,15 @@ impl Censor {
         // Do what we are supposed to for arp
         Ok(self.arp.action.clone())
     }
-    /// Processes an ICMP packet based on its metadata nad our internal state
-    ///
-    /// # Parameters
-    /// * `data` - Raw payload of an IP packet
-    fn process_icmp<T: AsRef<[u8]>>(
-        &mut self,
-        ips: IpPair,
-        _direction: Direction,
-        data: T,
-    ) -> Result<Action, SmoltcpError> {
-        match ips {
-            IpPair::V4 { .. } => {
-                let _icmp_packet = Icmpv4Packet::new_checked(data)?;
-            }
-            IpPair::V6 { .. } => {
-                let _icmp_packet = Icmpv6Packet::new_checked(data)?;
-            }
-        }
-        Ok(self.icmp.action.clone())
-    }
     /// Processes the transport-layer  packet based on its metadata and our internal state
     ///
     /// # Parameters
-    /// * `src_ip` - Source IP address from the encapsulating IP payload
-    /// * `dst_ip` - Destination IP address from the encapsulating IP payload
-    /// * `data` - Raw transport-layer payload from an ip frame
-    fn process_transport<T: AsRef<[u8]>>(
+    /// * `ips` - Source and destination IP addresses from the encapsulating IP packet
+    /// * `direction` - which direction this packet was processed in
+    /// * `packet` - The parsed TCP/UDP packet
+    fn process_transport(
         &mut self,
         ips: IpPair,
-        _data: T,
         direction: Direction,
         packet: Packet,
     ) -> Result<Action, SmoltcpError> {
