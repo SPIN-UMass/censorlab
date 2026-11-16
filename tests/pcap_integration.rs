@@ -570,6 +570,83 @@ action = "Drop"
 }
 
 // ==========================================================================
+// Test 8a''': Python subnet helpers (rust.subnet / rust.ip_in)
+// ==========================================================================
+
+#[test]
+fn test_python_subnet_helpers() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: dst in 198.51.100.0/24 (precompiled subnet) -> dropped
+        .add_frame(&tcp_frame(client, [198, 51, 100, 9], 50000, 80, TCP_SYN, 100, 0, &[]))
+        // frame 1: dst outside both subnets -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 101, 9], 50001, 80, TCP_SYN, 200, 0, &[]))
+        // frame 2: dst in 203.0.113.0/28 (ip_in) -> dropped
+        .add_frame(&tcp_frame(client, [203, 0, 113, 15], 50002, 80, TCP_SYN, 300, 0, &[]))
+        // frame 3: dst just past the /28 -> passes
+        .add_frame(&tcp_frame(client, [203, 0, 113, 16], 50003, 80, TCP_SYN, 400, 0, &[]))
+        .write_to(&pcap_path);
+
+    write_temp_script(
+        &tmp,
+        "censor.py",
+        r#"from rust import subnet, ip_in
+
+BLOCKED = subnet("198.51.100.0/24")
+
+# Invalid subnets raise ValueError instead of matching nothing
+for bad in ["10.0.0.1/8", "10.0.0.0/33", "nonsense"]:
+    try:
+        subnet(bad)
+        raise Exception("accepted " + bad)
+    except ValueError:
+        pass
+try:
+    BLOCKED.contains("not-an-ip")
+    raise Exception("accepted bad address")
+except ValueError:
+    pass
+assert not BLOCKED.contains("::1")
+assert subnet("2001:db8::/32").contains("2001:db8::1")
+assert str(BLOCKED) == "198.51.100.0/24"
+
+def process(packet):
+    if BLOCKED.contains(packet.ip.dst):
+        return "drop"
+    if ip_in(packet.ip.dst, "203.0.113.0/28"):
+        return "drop"
+"#,
+    );
+    let config_str = r#"
+[execution]
+mode = "Python"
+script = "censor.py"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains("Drop"))
+        .map(|l| l.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0), frame_idx(2)],
+        "unexpected drops: {:?}\nstdout: {}\nstderr: {}",
+        result.action_lines,
+        result.stdout,
+        result.stderr
+    );
+}
+
+// ==========================================================================
 // Test 8a'': Invalid CIDR in config is rejected at load time
 // ==========================================================================
 
