@@ -10,7 +10,6 @@ bitvec = "1.0"
 byteorder = "1.4"
 clap = { version = "4", features = ["cargo", "derive"] }
 coz = "0.1"
-dns-parser = "0.8.0"
 # epoll = {version = "4.3" }
 fnv = "1.0"
 if-addrs = "0.15"

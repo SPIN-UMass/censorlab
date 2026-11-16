@@ -186,6 +186,12 @@ pub fn udp_frame(
 ///
 /// Constructs a minimal DNS query (QR=0, OPCODE=0, 1 question, type A, class IN).
 pub fn dns_query(domain: &str) -> Vec<u8> {
+    dns_query_typed(domain, 1, false)
+}
+
+/// Build a DNS query payload with an arbitrary QTYPE (class IN), optionally
+/// carrying an EDNS(0) OPT pseudo-RR in the additional section, as browsers do.
+pub fn dns_query_typed(domain: &str, qtype: u16, edns: bool) -> Vec<u8> {
     let mut buf = Vec::new();
 
     // Header (12 bytes)
@@ -194,7 +200,7 @@ pub fn dns_query(domain: &str) -> Vec<u8> {
     buf.extend_from_slice(&[0x00, 0x01]); // QDCOUNT = 1
     buf.extend_from_slice(&[0x00, 0x00]); // ANCOUNT
     buf.extend_from_slice(&[0x00, 0x00]); // NSCOUNT
-    buf.extend_from_slice(&[0x00, 0x00]); // ARCOUNT
+    buf.extend_from_slice(&[0x00, u8::from(edns)]); // ARCOUNT
 
     // QNAME
     for label in domain.split('.') {
@@ -203,9 +209,19 @@ pub fn dns_query(domain: &str) -> Vec<u8> {
     }
     buf.push(0x00); // root label
 
-    // QTYPE = A (1), QCLASS = IN (1)
+    // QTYPE, QCLASS = IN (1)
+    buf.extend_from_slice(&qtype.to_be_bytes());
     buf.extend_from_slice(&[0x00, 0x01]);
-    buf.extend_from_slice(&[0x00, 0x01]);
+
+    if edns {
+        // OPT RR: root owner, TYPE=41, CLASS=UDP size 1232, TTL=0 (ext-rcode,
+        // version, flags), RDLENGTH=0
+        buf.push(0x00);
+        buf.extend_from_slice(&41u16.to_be_bytes());
+        buf.extend_from_slice(&1232u16.to_be_bytes());
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        buf.extend_from_slice(&[0x00, 0x00]);
+    }
 
     buf
 }
