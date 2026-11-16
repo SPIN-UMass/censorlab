@@ -763,9 +763,11 @@ pub mod rust_packet {
         }
     }
     #[pyfunction]
-    fn regex(s: String, _vm: &VirtualMachine) -> Regex {
-        let inner = RustRegex::new(&s).unwrap();
-        Regex { inner }
+    fn regex(s: String, vm: &VirtualMachine) -> PyResult<Regex> {
+        // An invalid pattern is the script's fault: raise, don't panic the process
+        let inner = RustRegex::new(&s)
+            .map_err(|err| vm.new_value_error(format!("invalid regex {s:?}: {err}")))?;
+        Ok(Regex { inner })
     }
 
     #[pyattr]

@@ -275,6 +275,33 @@ fn action_from_python(
     Action::None
 }
 
+/// Build the RustPython interpreter that censor scripts run in, with the
+/// CensorLab native modules (`rust`, `dns`, `tls`, `quic`) registered.
+pub(crate) fn new_python_interpreter(hash_seed: u32) -> vm::Interpreter {
+    // Initialize interpreter settings
+    let mut settings: Settings = Default::default();
+    //settings.isolated = true;
+    // Don't have the python subprograms implement sigint
+    settings.install_signal_handlers = false;
+    settings.hash_seed = Some(hash_seed);
+    // Want to make sure nothing is passed
+    settings.argv = Vec::new();
+    // settings.stdio_unbuffered = true;
+    // -OO optimization
+    settings.optimize = 2;
+    // Initialize the interpreter
+    vm::Interpreter::with_init(settings, |vm| {
+        // Import the native rust module used to define the packet interface
+        vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
+        // Import the native rust module used for dns parsing
+        vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
+        // Import the native rust module used for TLS ClientHello parsing
+        vm.add_native_module("tls".to_owned(), Box::new(rust_tls::make_module));
+        // Import the native rust module used for QUIC Initial parsing
+        vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
+    })
+}
+
 impl TransportState {
     pub fn new(
         _model_config: HashMap<String, crate::config::model::Model>,
@@ -282,28 +309,7 @@ impl TransportState {
         execution_config: crate::config::execution::Config,
         model_sender: mpsc::SyncSender<ModelThreadMessage>,
     ) -> Result<Self, TransportStateInitError> {
-        // Initialize interpreter settings
-        let mut settings: Settings = Default::default();
-        //settings.isolated = true;
-        // Don't have the python subprograms implement sigint
-        settings.install_signal_handlers = false;
-        settings.hash_seed = Some(execution_config.hash_seed);
-        // Want to make sure nothing is passed
-        settings.argv = Vec::new();
-        // settings.stdio_unbuffered = true;
-        // -OO optimization
-        settings.optimize = 2;
-        // Initialize the interpreter
-        let vm = vm::Interpreter::with_init(settings, |vm| {
-            // Import the native rust module used to define the packet interface
-            vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
-            // Import the native rust module used for dns parsing
-            vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
-            // Import the native rust module used for TLS ClientHello parsing
-            vm.add_native_module("tls".to_owned(), Box::new(rust_tls::make_module));
-            // Import the native rust module used for QUIC Initial parsing
-            vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
-        });
+        let vm = new_python_interpreter(execution_config.hash_seed);
         // Only compile the script as Python if we're in Python mode
         let python_script = match execution_config.mode {
             ExecutionMode::Python => execution_config.script.as_ref(),
@@ -799,6 +805,39 @@ fn fill_udp(
 mod tests {
     use super::*;
     use smoltcp::wire::{EthernetAddress, Ipv4Address, Ipv6Address, TcpSeqNumber};
+
+    // --- Python environment tests ---
+
+    /// Run `source` in a fresh censor-script interpreter and return the
+    /// value of the global `result` (which the source must set to a bool).
+    fn run_python_bool(source: &str) -> bool {
+        let interp = new_python_interpreter(1337);
+        interp.enter(|vm| {
+            let scope = vm.new_scope_with_builtins();
+            if let Err(err) = vm.run_code_string(scope.clone(), source, "<test>".to_owned()) {
+                vm.print_exception(err);
+                panic!("test script raised");
+            }
+            let result = scope.globals.get_item("result", vm).expect("result not set");
+            result.try_to_bool(vm).expect("result not a bool")
+        })
+    }
+
+    #[test]
+    fn python_invalid_regex_raises_value_error() {
+        assert!(run_python_bool(
+            "from rust import regex\n\
+             try:\n    regex('(')\n    result = False\n\
+             except ValueError:\n    result = True\n"
+        ));
+    }
+
+    #[test]
+    fn python_valid_regex_matches() {
+        assert!(run_python_bool(
+            "from rust import regex\nresult = regex('^ab+c').is_match(b'abbbc')\n"
+        ));
+    }
 
     // --- ConnectionKey tests ---
 
