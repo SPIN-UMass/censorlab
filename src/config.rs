@@ -1,4 +1,5 @@
 use crate::censor::{Action, PortVec};
+use crate::subnet::IpNet;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -10,7 +11,9 @@ use thiserror::Error;
 /// Censorlab config
 #[derive(Default, Deserialize)]
 pub struct Config {
-    /// Execution environment
+    /// Execution environment (defaults to Python mode with no script, so a
+    /// config may consist of allow/blocklists only)
+    #[serde(default)]
     pub execution: execution::Config,
     /// Behaviors for ethernet layer
     #[serde(default)]
@@ -30,6 +33,9 @@ pub struct Config {
     /// Behaviors for UDP layer
     #[serde(default)]
     pub udp: udp::Config,
+    /// Connection/host state tracking limits
+    #[serde(default)]
+    pub conntrack: conntrack::Config,
     /// Model store
     #[serde(default)]
     pub models: HashMap<String, model::Model>,
@@ -68,7 +74,7 @@ impl Config {
     }
     /// Validate config invariants that can't be enforced at the type level.
     fn validate(&self) -> Result<(), ConfigLoadError> {
-        // Reset is only valid at the transport layer (TCP); reject it for ethernet/ARP/IP/ICMP
+        // Reset tears down a TCP connection; reject it where no TCP traffic can match
         if self.ethernet.unknown.is_reset() {
             return Err(ConfigLoadError::Validation(
                 "\"Reset\" is not a valid action for ethernet.unknown (only valid for TCP)".into(),
@@ -94,6 +100,20 @@ impl Config {
                 "\"Reset\" is not a valid action for ICMP (only valid for TCP)".into(),
             ));
         }
+        // UDP lists only ever match UDP traffic, so a Reset there could never send a RST.
+        // (IP lists may Reset: TCP traffic gets a RST and anything else is dropped.)
+        for (name, action) in [
+            ("udp.port_allowlist", &self.udp.port_allowlist.action),
+            ("udp.port_blocklist", &self.udp.port_blocklist.action),
+            ("udp.ip_port_allowlist", &self.udp.ip_port_allowlist.action),
+            ("udp.ip_port_blocklist", &self.udp.ip_port_blocklist.action),
+        ] {
+            if action.is_reset() {
+                return Err(ConfigLoadError::Validation(format!(
+                    "\"Reset\" is not a valid action for {name} (only valid for TCP)"
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -102,7 +122,8 @@ impl Config {
 /// Used for both allowlist and blocklist
 #[derive(Debug, Default, Deserialize)]
 pub struct List<T> {
-    /// List of values to allow/block
+    /// List of values to allow/block (empty if omitted)
+    #[serde(default)]
     pub list: T,
     /// Action to taken if a value is/isn't in the list
     #[serde(default)]
@@ -129,6 +150,16 @@ where
         List {
             list: self.list.clone().into_iter().filter_map(f).collect(),
             action: self.action.clone(),
+        }
+    }
+    /// Collect the list into an arbitrary store (e.g. a subnet range set)
+    pub fn collect<C>(self) -> List<C>
+    where
+        C: FromIterator<T>,
+    {
+        List {
+            list: self.list.into_iter().collect(),
+            action: self.action,
         }
     }
     pub fn set(self) -> List<HashSet<T>>
@@ -160,10 +191,10 @@ where
 /// Config related to the execution environment
 pub mod execution {
     use super::Deserialize;
-    use crate::transport::ExecutionMode;
+    use crate::transport::{ExecutionMode, ScriptErrorPolicy};
     use std::path::PathBuf;
 
-    #[derive(Default, Deserialize)]
+    #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     /// Config related to the execution environment
     pub struct Config {
@@ -183,6 +214,25 @@ pub mod execution {
         /// CensorLang settings and limits (`[execution.censorlang]`)
         #[serde(default)]
         pub censorlang: crate::program::config::Config,
+        /// What to do with a packet when the Python censor script raises on it
+        /// (default: Allow, i.e. fail open). Failures are always logged.
+        #[serde(default)]
+        pub on_script_error: ScriptErrorPolicy,
+    }
+
+    // Hand-written so Config::default() (used when no config file is given, or
+    // when [execution] is omitted) agrees with the serde field defaults below.
+    impl Default for Config {
+        fn default() -> Self {
+            Self {
+                mode: ExecutionMode::default(),
+                script: None,
+                hash_seed: default_hash_seed(),
+                reset_repeat: default_reset_repeat(),
+                censorlang: Default::default(),
+                on_script_error: ScriptErrorPolicy::default(),
+            }
+        }
     }
 
     fn default_hash_seed() -> u32 {
@@ -245,17 +295,21 @@ pub mod arp {
 /// Config related to IP  handling
 pub mod ip {
     use super::{Action, Deserialize, List};
-    use std::net::IpAddr;
+    use crate::subnet::IpNet;
 
     #[derive(Default, Deserialize)]
     /// Config related to IP handling
+    ///
+    /// A `Reset` action here sends a RST for the matching packet's TCP connection, and
+    /// drops any matching packet that is not well-formed TCP (so `unknown`, which never
+    /// sees TCP, treats `Reset` as `Drop`).
     pub struct Config {
-        /// Allowlist of IP addresses
+        /// Allowlist of IP addresses and/or CIDR subnets
         #[serde(default)]
-        pub allowlist: List<Vec<IpAddr>>,
-        /// Blocklist of IP addresses
+        pub allowlist: List<Vec<IpNet>>,
+        /// Blocklist of IP addresses and/or CIDR subnets
         #[serde(default)]
-        pub blocklist: List<Vec<IpAddr>>,
+        pub blocklist: List<Vec<IpNet>>,
         /// What to do if we run into an unknown next-protocol-header field
         #[serde(default)]
         pub unknown: Action,
@@ -276,7 +330,7 @@ pub mod icmp {
     }
 }
 
-/// An IP address + port pair that deserializes from "ip:port" strings.
+/// A concrete IP address + port pair (the lookup key for ip:port lists).
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct IpPort(pub std::net::IpAddr, pub u16);
 
@@ -286,39 +340,92 @@ impl std::fmt::Display for IpPort {
     }
 }
 
-impl<'de> Deserialize<'de> for IpPort {
+/// A subnet + port pair as written in config ip:port lists.
+///
+/// Grammar (regular; recognized in full before use):
+///
+/// ```text
+/// pair := v4net ":" port | "[" v6net "]" ":" port
+/// port := "0" | [1-9] [0-9]*            (at most 65535)
+/// ```
+///
+/// where `v4net`/`v6net` follow [`IpNet`]'s syntax (`addr` or `addr/prefix`).
+/// IPv6 must be bracketed and IPv4 must not, so the port separator is unambiguous.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct IpNetPort(pub IpNet, pub u16);
+
+impl IpNetPort {
+    /// Split into (subnet, port)
+    pub fn into_pair(self) -> (IpNet, u16) {
+        (self.0, self.1)
+    }
+}
+
+impl std::fmt::Display for IpNetPort {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self.0 {
+            IpNet::V4(_) => write!(f, "{}:{}", self.0, self.1),
+            IpNet::V6(_) => write!(f, "[{}]:{}", self.0, self.1),
+        }
+    }
+}
+
+/// Parse a strictly-formatted decimal port: "0" or [1-9][0-9]* with value <= 65535
+fn parse_port(s: &str) -> Option<u16> {
+    let well_formed = match s.as_bytes() {
+        [b'0'] => true,
+        [b'1'..=b'9', rest @ ..] => rest.len() <= 4 && rest.iter().all(u8::is_ascii_digit),
+        _ => false,
+    };
+    if well_formed {
+        s.parse().ok()
+    } else {
+        None
+    }
+}
+
+impl std::str::FromStr for IpNetPort {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (net_str, port_str, want_v6) = if let Some(rest) = s.strip_prefix('[') {
+            let (net, after) = rest
+                .split_once(']')
+                .ok_or_else(|| format!("invalid ip:port pair (missing ']'): {s}"))?;
+            let port = after
+                .strip_prefix(':')
+                .ok_or_else(|| format!("invalid ip:port pair (expected ':' after ']'): {s}"))?;
+            (net, port, true)
+        } else {
+            let (net, port) = s
+                .split_once(':')
+                .ok_or_else(|| format!("invalid ip:port pair (missing ':'): {s}"))?;
+            (net, port, false)
+        };
+        let net: IpNet = net_str.parse().map_err(|e| format!("{e}"))?;
+        match (net, want_v6) {
+            (IpNet::V4(_), false) | (IpNet::V6(_), true) => {}
+            (IpNet::V4(_), true) => return Err(format!("IPv4 address must not be bracketed: {s}")),
+            (IpNet::V6(_), false) => return Err(format!("IPv6 address must be bracketed: {s}")),
+        }
+        let port = parse_port(port_str)
+            .ok_or_else(|| format!("invalid port (expected decimal 0-65535) in ip:port pair: {s}"))?;
+        Ok(IpNetPort(net, port))
+    }
+}
+
+impl<'de> Deserialize<'de> for IpNetPort {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        // Support both "ip:port" and "[ipv6]:port"
-        let (ip_str, port_str) = if s.starts_with('[') {
-            // IPv6: "[::1]:80"
-            let bracket_end = s.find(']').ok_or_else(|| {
-                serde::de::Error::custom(format!("invalid ip:port pair (missing ']'): {s}"))
-            })?;
-            let ip_part = &s[1..bracket_end];
-            let port_part = s.get(bracket_end + 2..).ok_or_else(|| {
-                serde::de::Error::custom(format!("invalid ip:port pair (missing port after ']:'): {s}"))
-            })?;
-            (ip_part, port_part)
-        } else {
-            // IPv4: "1.2.3.4:80"
-            let colon = s.rfind(':').ok_or_else(|| {
-                serde::de::Error::custom(format!("invalid ip:port pair (missing ':'): {s}"))
-            })?;
-            (&s[..colon], &s[colon + 1..])
-        };
-        let ip: std::net::IpAddr = ip_str.parse().map_err(serde::de::Error::custom)?;
-        let port: u16 = port_str.parse().map_err(serde::de::Error::custom)?;
-        Ok(IpPort(ip, port))
+        s.parse().map_err(serde::de::Error::custom)
     }
 }
 
 /// Config related to TCP  handling
 pub mod tcp {
-    use super::{IpPort, List};
+    use super::{IpNetPort, List};
     use serde::Deserialize;
 
     #[derive(Default, Deserialize)]
@@ -330,17 +437,18 @@ pub mod tcp {
         #[serde(default)]
         /// Blocklist of ports
         pub port_blocklist: List<Vec<u16>>,
+        #[serde(default)]
         /// Allowlist of ip-port pairs
-        pub ip_port_allowlist: List<Vec<IpPort>>,
+        pub ip_port_allowlist: List<Vec<IpNetPort>>,
         #[serde(default)]
         /// Blocklist of ip-port pairs
-        pub ip_port_blocklist: List<Vec<IpPort>>,
+        pub ip_port_blocklist: List<Vec<IpNetPort>>,
     }
 }
 
 /// Config related to UDP  handling
 pub mod udp {
-    use super::{IpPort, List};
+    use super::{IpNetPort, List};
     use serde::Deserialize;
 
     #[derive(Default, Deserialize)]
@@ -352,11 +460,56 @@ pub mod udp {
         #[serde(default)]
         /// Blocklist of ports
         pub port_blocklist: List<Vec<u16>>,
+        #[serde(default)]
         /// Allowlist of ip-port pairs
-        pub ip_port_allowlist: List<Vec<IpPort>>,
+        pub ip_port_allowlist: List<Vec<IpNetPort>>,
         #[serde(default)]
         /// Blocklist of ip-port pairs
-        pub ip_port_blocklist: List<Vec<IpPort>>,
+        pub ip_port_blocklist: List<Vec<IpNetPort>>,
+    }
+}
+
+/// Config related to connection and host state tracking
+///
+/// All timeouts are in seconds of packet time (capture timestamps in PCAP
+/// mode, a monotonic clock in live modes). Zero is rejected for every value.
+pub mod conntrack {
+    use serde::Deserialize;
+    use std::num::{NonZeroU64, NonZeroUsize};
+
+    #[derive(Clone, Debug, Deserialize)]
+    #[serde(default, deny_unknown_fields)]
+    /// Config related to connection and host state tracking
+    pub struct Config {
+        /// Forget an open TCP connection after this many idle seconds (default: 3600)
+        pub tcp_idle_timeout: NonZeroU64,
+        /// Forget a TCP connection this many idle seconds after it was closed
+        /// by RST or FIN in both directions (default: 60)
+        pub tcp_closed_timeout: NonZeroU64,
+        /// Forget a UDP flow after this many idle seconds (default: 120)
+        pub udp_idle_timeout: NonZeroU64,
+        /// Maximum number of tracked TCP+UDP connections. When exceeded, the
+        /// connection closest to expiring is evicted (default: 65536)
+        pub max_connections: NonZeroUsize,
+        /// Maximum number of hosts with per-host state (counters, registers,
+        /// `host.state`). When exceeded, the least recently seen host is
+        /// evicted (default: 65536)
+        pub max_hosts: NonZeroUsize,
+        /// Forget a host's state after this many seconds without traffic
+        /// from or to it (default: unset, i.e. only `max_hosts` applies)
+        pub host_idle_timeout: Option<NonZeroU64>,
+    }
+    impl Default for Config {
+        fn default() -> Self {
+            Self {
+                tcp_idle_timeout: NonZeroU64::new(3600).unwrap(),
+                tcp_closed_timeout: NonZeroU64::new(60).unwrap(),
+                udp_idle_timeout: NonZeroU64::new(120).unwrap(),
+                max_connections: NonZeroUsize::new(65536).unwrap(),
+                max_hosts: NonZeroUsize::new(65536).unwrap(),
+                host_idle_timeout: None,
+            }
+        }
     }
 }
 
@@ -502,6 +655,66 @@ action = "Reset"
     }
 
     #[test]
+    fn tcp_udp_sections_without_ip_port_allowlist() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[tcp.port_blocklist]
+list = [80]
+action = "Drop"
+
+[udp.port_blocklist]
+list = [53]
+action = "Drop"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.tcp.ip_port_allowlist.list.is_empty());
+        assert_eq!(config.tcp.ip_port_allowlist.action, Action::None);
+        assert!(config.udp.ip_port_allowlist.list.is_empty());
+        assert_eq!(config.udp.ip_port_allowlist.action, Action::None);
+    }
+
+    #[test]
+    fn list_block_without_list_key_defaults_to_empty() {
+        let toml_str = r#"
+[ip.allowlist]
+action = "Drop"
+
+[tcp.port_blocklist]
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.ip.allowlist.list.is_empty());
+        assert_eq!(config.ip.allowlist.action, Action::Drop);
+        assert!(config.tcp.port_blocklist.list.is_empty());
+    }
+
+    #[test]
+    fn config_without_execution_section_uses_execution_defaults() {
+        let toml_str = r#"
+[ip.blocklist]
+list = ["192.168.1.1"]
+action = "Drop"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(matches!(config.execution.mode, crate::transport::ExecutionMode::Python));
+        assert!(config.execution.script.is_none());
+        assert_eq!(config.execution.hash_seed, 1337);
+        assert_eq!(config.execution.reset_repeat, 5);
+    }
+
+    #[test]
+    fn default_config_matches_empty_execution_section() {
+        // Config::default() is used when no -c is given; it must agree with
+        // what an empty [execution] table deserializes to.
+        let parsed: Config = toml::from_str("[execution]\n").unwrap();
+        let default = Config::default();
+        assert_eq!(default.execution.hash_seed, parsed.execution.hash_seed);
+        assert_eq!(default.execution.reset_repeat, parsed.execution.reset_repeat);
+    }
+
+    #[test]
     fn list_map_operation() {
         let list: List<Vec<u16>> = List {
             list: vec![1, 2, 3],
@@ -532,10 +745,10 @@ action = "Reset"
             action: Action::Drop,
         };
         let bv = list.bit_vec();
-        assert_eq!(*bv.list.get(80).unwrap(), true);
-        assert_eq!(*bv.list.get(443).unwrap(), true);
-        assert_eq!(*bv.list.get(8080).unwrap(), true);
-        assert_eq!(*bv.list.get(22).unwrap(), false);
+        assert!(*bv.list.get(80).unwrap());
+        assert!(*bv.list.get(443).unwrap());
+        assert!(*bv.list.get(8080).unwrap());
+        assert!(!*bv.list.get(22).unwrap());
         assert_eq!(bv.action, Action::Drop);
     }
 
@@ -587,13 +800,58 @@ action = "Reset"
     }
 
     #[test]
+    fn validate_rejects_reset_on_every_udp_list() {
+        for list in ["port_allowlist", "port_blocklist", "ip_port_allowlist", "ip_port_blocklist"] {
+            let toml_str = format!(
+                r#"
+[execution]
+mode = "Python"
+
+[udp]
+ip_port_allowlist = {{ list = [] }}
+
+[udp.{list}]
+list = []
+action = "Reset"
+"#
+            )
+            .replace("ip_port_allowlist = { list = [] }\n\n[udp.ip_port_allowlist]", "[udp.ip_port_allowlist]");
+            let config: Config = toml::from_str(&toml_str).unwrap();
+            let err = config.validate().expect_err(list).to_string();
+            assert!(err.contains(&format!("udp.{list}")), "{list}: {err}");
+        }
+    }
+
+    #[test]
+    fn validate_allows_reset_on_ip_lists() {
+        // TCP traffic matching an IP rule gets a real RST; anything else is dropped.
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[ip]
+unknown = "Reset"
+
+[ip.blocklist]
+list = ["192.0.2.1"]
+action = "Reset"
+
+[ip.allowlist]
+list = ["192.0.2.2"]
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
     fn ip_port_deserialize_ipv4() {
         #[derive(Deserialize)]
         struct W {
-            pair: super::IpPort,
+            pair: super::IpNetPort,
         }
         let w: W = toml::from_str("pair = \"192.168.1.1:80\"").unwrap();
-        assert_eq!(w.pair.0, std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)));
+        assert_eq!(w.pair.0, IpNet::from(std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1))));
         assert_eq!(w.pair.1, 80);
     }
 
@@ -601,21 +859,52 @@ action = "Reset"
     fn ip_port_deserialize_ipv6() {
         #[derive(Deserialize)]
         struct W {
-            pair: super::IpPort,
+            pair: super::IpNetPort,
         }
         let w: W = toml::from_str("pair = \"[::1]:443\"").unwrap();
-        assert_eq!(w.pair.0, std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST));
+        assert_eq!(w.pair.0, IpNet::from(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)));
         assert_eq!(w.pair.1, 443);
     }
 
     #[test]
     fn ip_port_deserialize_invalid() {
         #[derive(Deserialize)]
+        #[allow(dead_code)] // only checks that deserialization fails
         struct W {
-            pair: super::IpPort,
+            #[allow(dead_code)]
+            pair: super::IpNetPort,
         }
         assert!(toml::from_str::<W>("pair = \"not-an-ip\"").is_err());
         assert!(toml::from_str::<W>("pair = \"192.168.1.1\"").is_err()); // missing port
+    }
+
+    #[test]
+    fn conntrack_defaults() {
+        let config: Config = toml::from_str("[execution]\n").unwrap();
+        let ct = config.conntrack;
+        assert_eq!(ct.tcp_idle_timeout.get(), 3600);
+        assert_eq!(ct.tcp_closed_timeout.get(), 60);
+        assert_eq!(ct.udp_idle_timeout.get(), 120);
+        assert_eq!(ct.max_connections.get(), 65536);
+        assert_eq!(ct.max_hosts.get(), 65536);
+        assert!(ct.host_idle_timeout.is_none());
+    }
+
+    #[test]
+    fn conntrack_overrides_and_rejects_invalid() {
+        let config: Config = toml::from_str(
+            "[execution]\n[conntrack]\nudp_idle_timeout = 30\nmax_hosts = 10\nhost_idle_timeout = 600\n",
+        )
+        .unwrap();
+        assert_eq!(config.conntrack.udp_idle_timeout.get(), 30);
+        assert_eq!(config.conntrack.max_hosts.get(), 10);
+        assert_eq!(config.conntrack.host_idle_timeout.map(|t| t.get()), Some(600));
+        // Defaults still apply to unspecified keys
+        assert_eq!(config.conntrack.tcp_idle_timeout.get(), 3600);
+        // Zero, negative and unknown keys are rejected
+        assert!(toml::from_str::<Config>("[execution]\n[conntrack]\nmax_connections = 0\n").is_err());
+        assert!(toml::from_str::<Config>("[execution]\n[conntrack]\ntcp_idle_timeout = -1\n").is_err());
+        assert!(toml::from_str::<Config>("[execution]\n[conntrack]\nmax_conections = 5\n").is_err());
     }
 
     #[test]
@@ -631,5 +920,78 @@ ip_port_allowlist = { list = ["10.0.0.1:80", "10.0.0.2:443"] }
         assert_eq!(config.tcp.ip_port_allowlist.list.len(), 2);
         assert_eq!(config.tcp.ip_port_allowlist.list[0].1, 80);
         assert_eq!(config.tcp.ip_port_allowlist.list[1].1, 443);
+    }
+
+    #[test]
+    fn deserialize_ip_lists_with_subnets() {
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["10.0.0.0/8", "192.168.1.1", "2001:db8::/32", "::1"]
+action = "Drop"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let list: Vec<String> = config.ip.blocklist.list.iter().map(|n| n.to_string()).collect();
+        assert_eq!(list, ["10.0.0.0/8", "192.168.1.1/32", "2001:db8::/32", "::1/128"]);
+    }
+
+    #[test]
+    fn invalid_cidr_rejected_at_config_load() {
+        for bad in ["10.0.0.1/8", "10.0.0.0/33", "2001:db8::/129", "10.0.0.0/8x", "10.0.0.0/"] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let path = dir.path().join("censor.toml");
+            std::fs::write(
+                &path,
+                format!("[execution]\nmode = \"Python\"\n[ip.blocklist]\nlist = [\"{bad}\"]\n"),
+            )
+            .unwrap();
+            assert!(
+                matches!(Config::load(&path), Err(ConfigLoadError::Parse(_))),
+                "config with {bad:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn ip_port_deserialize_subnets() {
+        #[derive(Deserialize)]
+        struct W {
+            pair: super::IpNetPort,
+        }
+        let w: W = toml::from_str("pair = \"10.0.0.0/8:80\"").unwrap();
+        assert_eq!(w.pair.0.to_string(), "10.0.0.0/8");
+        assert_eq!(w.pair.1, 80);
+        let w: W = toml::from_str("pair = \"[2001:db8::/32]:443\"").unwrap();
+        assert_eq!(w.pair.0.to_string(), "2001:db8::/32");
+        assert_eq!(w.pair.1, 443);
+        let w: W = toml::from_str("pair = \"1.2.3.4:53\"").unwrap();
+        assert_eq!(w.pair.0.to_string(), "1.2.3.4/32");
+    }
+
+    #[test]
+    fn ip_port_deserialize_rejects_malformed() {
+        #[derive(Deserialize)]
+        struct W {
+            #[allow(dead_code)]
+            pair: super::IpNetPort,
+        }
+        for bad in [
+            "10.0.0.1/8:80",       // host bits
+            "10.0.0.0/33:80",      // prefix too long
+            "[2001:db8::/129]:80", // prefix too long
+            "::1:80",              // IPv6 must be bracketed
+            "[::1]x80",            // missing ':' after ']'
+            "[::1]:",              // empty port
+            "1.2.3.4:+80",         // signed port
+            "1.2.3.4:080",         // leading zero
+            "1.2.3.4:65536",       // port out of range
+            "[1.2.3.4]:80",        // IPv4 must not be bracketed
+            "1.2.3.4:80:80",
+            "1.2.3.4",             // missing port
+        ] {
+            assert!(toml::from_str::<W>(&format!("pair = \"{bad}\"")).is_err(), "accepted {bad:?}");
+        }
     }
 }

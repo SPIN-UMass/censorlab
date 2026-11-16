@@ -15,5 +15,6 @@ def process(packet):
     for fp in PROTOCOL_FINGERPRINTS:
         if payload[:len(fp)] == fp:
             return
-    if packet.payload_entropy > 3.0 and packet.payload_avg_popcount > 3.4:
+    # payload_entropy is normalized to 0-1 (bits/byte / 8): 0.375 == 3.0 bits/byte
+    if packet.payload_entropy > 0.375 and packet.payload_avg_popcount > 3.4:
         return "drop"

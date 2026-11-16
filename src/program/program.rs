@@ -3,6 +3,7 @@ use crate::program::config::Config as ProgramEnvConfig;
 use crate::program::env::{EnvFields, RegisterBanks, RegisterWriteError};
 use crate::program::packet::Packet;
 use crate::program::packet::{IpVersionMetadata, TcpFlags, TransportMetadataExtra};
+use crate::subnet::IpNet;
 use fnv::FnvHashSet;
 use lalrpop_util::lalrpop_mod;
 
@@ -69,6 +70,9 @@ pub struct Program {
     pub lines: Vec<Line>,
     #[serde(skip)]
     pub regexes: Vec<BytesRegex>,
+    /// Subnets declared with `subnet "cidr"`, referenced by index from SRC_IN/DST_IN
+    #[serde(skip)]
+    pub subnets: Vec<IpNet>,
 }
 impl Program {
     /// Loads a program for execution: parse, check against the configuration
@@ -99,6 +103,7 @@ impl Program {
         let mut lines = Vec::new();
         let mut line_numbers = Vec::new();
         let mut regexes = Vec::new();
+        let mut subnets = Vec::new();
         for (number, line) in s.lines().enumerate() {
             let number = number + 1;
             let trimmed = line.trim();
@@ -122,19 +127,50 @@ impl Program {
                 }
                 continue;
             }
+            // Parse subnet directives: subnet "cidr" (same strict syntax as the config)
+            if let Some(rest) = trimmed.strip_prefix("subnet ") {
+                let cidr = rest
+                    .trim()
+                    .strip_prefix('"')
+                    .and_then(|r| r.strip_suffix('"'))
+                    .ok_or_else(|| {
+                        format!(
+                            "line {number}: invalid subnet directive, expected subnet \"cidr\", got: {trimmed}"
+                        )
+                    })?;
+                let net: IpNet = cidr
+                    .parse()
+                    .map_err(|e| format!("line {number}: invalid subnet directive: {e}"))?;
+                subnets.push(net);
+                continue;
+            }
             let line = program_parse::LineParser::new()
                 .parse(trimmed)
                 .map_err(|e| format!("line {number}: {e}"))?;
             lines.push(line);
             line_numbers.push(number);
         }
-        Ok((Program { lines, regexes }, line_numbers))
+        // Subnet references must name a declared subnet
+        for (line, number) in lines.iter().zip(&line_numbers) {
+            if let Operation::SubnetIn { index, .. } = line.operation {
+                if index >= subnets.len() {
+                    return Err(format!(
+                        "line {number}: subnet index {index} out of bounds ({} subnet(s) declared): {line}",
+                        subnets.len()
+                    ));
+                }
+            }
+        }
+        Ok((Program { lines, regexes, subnets }, line_numbers))
     }
 }
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for re in &self.regexes {
             writeln!(f, "regex \"{}\"", re.as_str())?;
+        }
+        for net in &self.subnets {
+            writeln!(f, "subnet \"{net}\"")?;
         }
         for line in &self.lines {
             writeln!(f, "{}", line)?;
@@ -147,7 +183,10 @@ impl Program {
         Self::new_with_regexes(lines, vec![])
     }
     pub fn new_with_regexes(lines: Vec<Line>, regexes: Vec<BytesRegex>) -> Self {
-        let mut program = Program { lines, regexes };
+        Self::new_with_tables(lines, regexes, vec![])
+    }
+    pub fn new_with_tables(lines: Vec<Line>, regexes: Vec<BytesRegex>, subnets: Vec<IpNet>) -> Self {
+        let mut program = Program { lines, regexes, subnets };
         program.optimise();
         program
     }
@@ -288,7 +327,8 @@ impl Program {
                 | And { ref out, .. }
                 | Or { ref out, .. }
                 | Xor { ref out, .. }
-                | Regex { ref out, .. } => {
+                | Regex { ref out, .. }
+                | SubnetIn { ref out, .. } => {
                     regs.push(if out.host { None } else { Some(out.index) });
                 }
                 _ => {
@@ -387,7 +427,7 @@ impl Program {
         // including plain `allow`) ends processing of this packet.
         for line in &self.lines {
             if let Some(action) =
-                line.run(packet, registers, fields, field_default_on_error, &self.regexes, model_io, model_sender)?
+                line.run(packet, registers, fields, field_default_on_error, &self.regexes, &self.subnets, model_io, model_sender)?
             {
                 return Ok(action);
             }
@@ -479,7 +519,8 @@ impl Line {
             | And { ref out, .. }
             | Or { ref out, .. }
             | Xor { ref out, .. }
-            | Regex { ref out, .. } => Some(out.clone()),
+            | Regex { ref out, .. }
+            | SubnetIn { ref out, .. } => Some(out.clone()),
             _ => None,
         }
     }
@@ -490,6 +531,7 @@ impl Line {
         fields: &EnvFields,
         field_default_on_error: bool,
         regexes: &[BytesRegex],
+        subnets: &[IpNet],
         model_io: &mut ModelIO,
         model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
     ) -> Result<Option<Action>, LineExecutionError> {
@@ -618,6 +660,18 @@ impl Line {
                     let matched = re.is_match(&packet.payload);
                     registers.set(out, &Value::Bool(matched))?;
                 }
+                SubnetIn { index, endpoint, out } => {
+                    let net = subnets
+                        .get(*index)
+                        .ok_or(LineExecutionError::SubnetIndex(*index))?;
+                    let addr: std::net::IpAddr = match (&packet.ip.version, endpoint) {
+                        (IpVersionMetadata::V4 { src, .. }, Endpoint::Src) => std::net::Ipv4Addr::from(src.0).into(),
+                        (IpVersionMetadata::V4 { dst, .. }, Endpoint::Dst) => std::net::Ipv4Addr::from(dst.0).into(),
+                        (IpVersionMetadata::V6 { src, .. }, Endpoint::Src) => std::net::Ipv6Addr::from(src.0).into(),
+                        (IpVersionMetadata::V6 { dst, .. }, Endpoint::Dst) => std::net::Ipv6Addr::from(dst.0).into(),
+                    };
+                    registers.set(out, &Value::Bool(net.contains(addr)))?;
+                }
                 Return(action) => {
                     return Ok(Some(*action));
                 }
@@ -691,6 +745,8 @@ pub enum LineExecutionError {
     RegisterWrite(#[from] RegisterWriteError),
     #[error("Regex index {0} out of bounds")]
     RegexIndex(usize),
+    #[error("Subnet index {0} out of bounds")]
+    SubnetIndex(usize),
     #[error("Failed to send request to model thread")]
     ModelSendError,
     #[error("Failed to receive response from model thread")]
@@ -1786,6 +1842,22 @@ impl MathOperatorNumeric {
         }
     }
 }
+/// Which packet address a SubnetIn operation tests
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Endpoint {
+    Src,
+    Dst,
+}
+impl fmt::Display for Endpoint {
+    /// The CensorLang opcode for this endpoint
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Endpoint::Src => write!(f, "SRC_IN"),
+            Endpoint::Dst => write!(f, "DST_IN"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Operation {
     Copy {
@@ -1834,6 +1906,12 @@ pub enum Operation {
     },
     Regex {
         index: usize,
+        out: Register,
+    },
+    /// Whether the packet's source/destination address is in declared subnet `index`
+    SubnetIn {
+        index: usize,
+        endpoint: Endpoint,
         out: Register,
     },
     Return(Action),
@@ -1923,6 +2001,7 @@ impl fmt::Display for Operation {
                 write!(f, "{name} {lhs}, {rhs} -> {out}")
             }
             Regex { index, out } => write!(f, "REGEX {index} -> {out}"),
+            SubnetIn { index, endpoint, out } => write!(f, "{endpoint} {index} -> {out}"),
             Return(action) => write!(f, "RETURN {action}"),
             Noop => write!(f, "NOOP"),
             Model { ref name } => write!(f, "MODEL {name}"),
@@ -2626,6 +2705,7 @@ mod tests {
                 },
             ],
             regexes: vec![],
+            subnets: vec![],
         };
         prog.optimise();
         assert_eq!(prog.lines.len(), 0);
@@ -2716,7 +2796,6 @@ mod tests {
         let fields = default_env_fields();
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
-        drop(banks);
         let val = regs.get(&Register { ty: RegisterType::Float, index: 0, host: false }).unwrap();
         assert!(matches!(val, Value::Float(f) if (f - 3.5).abs() < f64::EPSILON));
     }
@@ -2805,6 +2884,69 @@ mod tests {
     }
 
     // =========================================================================
+    // Group 8b: subnet membership (SRC_IN / DST_IN)
+    // =========================================================================
+
+    fn run_source(source: &str) -> Action {
+        let prog: Program = source.parse().unwrap();
+        // make_tcp_packet: 10.0.0.1 -> 10.0.0.2
+        let pkt = make_tcp_packet(b"data");
+        let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
+        let fields = default_env_fields();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap()
+    }
+
+    #[test]
+    fn program_parse_subnet_directive() {
+        let source = "subnet \"10.0.0.0/8\"\nsubnet \"2001:db8::/32\"\nsubnet \"1.2.3.4\"\nSRC_IN 2 -> reg:b.0\nDST_IN 0 -> reg:b.1";
+        let prog: Program = source.parse().unwrap();
+        let nets: Vec<String> = prog.subnets.iter().map(|n| n.to_string()).collect();
+        assert_eq!(nets, ["10.0.0.0/8", "2001:db8::/32", "1.2.3.4/32"]);
+        // Display round-trips
+        let reparsed: Program = prog.to_string().parse().unwrap();
+        assert_eq!(reparsed.to_string(), prog.to_string());
+        assert!(prog.to_string().contains("SRC_IN 2->reg:b.0"), "{prog}");
+    }
+
+    #[test]
+    fn program_subnet_src_and_dst() {
+        // 10.0.0.0/31 holds the source (10.0.0.1) but not the destination (10.0.0.2)
+        let source = "subnet \"10.0.0.0/31\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\nSRC_IN 0 -> reg:b.1\nif reg:b.1 == True: RETURN reset";
+        assert_eq!(run_source(source), Action::ResetAll);
+        let source = "subnet \"10.0.0.2\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\nSRC_IN 0 -> reg:b.1\nif reg:b.1 == True: RETURN reset";
+        assert_eq!(run_source(source), Action::TerminateAll);
+        // Other family never matches
+        let source = "subnet \"::/0\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\nSRC_IN 0 -> reg:b.1\nif reg:b.1 == True: RETURN reset";
+        assert_eq!(run_source(source), Action::Allow);
+        // /0 matches everything of its family
+        let source = "subnet \"0.0.0.0/0\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate";
+        assert_eq!(run_source(source), Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_subnet_invalid_rejected_at_parse() {
+        for bad in [
+            "subnet \"10.0.0.1/8\"",
+            "subnet \"10.0.0.0/33\"",
+            "subnet \"2001:db8::/129\"",
+            "subnet 10.0.0.0/8",
+            "subnet \"10.0.0.0/8\" extra",
+            "subnet \"\"",
+        ] {
+            assert!(bad.parse::<Program>().is_err(), "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn program_subnet_index_checked_at_parse() {
+        assert!("SRC_IN 0 -> reg:b.0".parse::<Program>().is_err());
+        assert!("subnet \"10.0.0.0/8\"\nDST_IN 1 -> reg:b.0".parse::<Program>().is_err());
+        assert!("subnet \"10.0.0.0/8\"\nif reg:b.1 == True: DST_IN 0 -> reg:b.0".parse::<Program>().is_ok());
+    }
+
+    // =========================================================================
     // Port field tests
     // =========================================================================
 
@@ -2884,6 +3026,24 @@ mod tests {
         let field = field::Field::PayloadAveragePopcount;
         let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
         assert!(matches!(result, Value::Float(f) if f == 4.0));
+    }
+
+    #[test]
+    fn empty_payload_features_are_zero_not_nan() {
+        // Entropy, popcount and printable fraction must all be 0.0 for an
+        // empty payload; NaN would silently poison comparisons and model inputs.
+        let pkt = make_tcp_packet(&[]);
+        for field in [
+            field::Field::PayloadEntropy,
+            field::Field::PayloadAveragePopcount,
+            field::Field::PayloadPrintableFraction,
+        ] {
+            let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+            assert!(
+                matches!(result, Value::Float(f) if f == 0.0),
+                "{field:?} on empty payload gave {result:?}"
+            );
+        }
     }
 
     #[test]
@@ -2976,7 +3136,6 @@ mod tests {
         let fields = EnvFields { host_num_packets: 42, ..Default::default() };
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         let _ = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
-        drop(banks);
         assert!(matches!(
             regs.get(&Register { ty: RegisterType::Int, index: 0, host: false }),
             Some(Value::Int(42))
@@ -3114,7 +3273,6 @@ mod tests {
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
-        drop(banks);
         // Verify host register was written
         let hreg = Register { ty: RegisterType::Bool, index: 0, host: false };
         let val = host_regs.get(&hreg).unwrap();

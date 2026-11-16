@@ -76,6 +76,8 @@
               pkgs.snort
               self.packages.${system}.opengfw
               pkgs.tcpdump
+              pkgs.wireshark-cli # editcap: pcapng -> pcap when ingesting ISCXVPN2016
+              pkgs.unzip
               pkgs.curl
               pkgs.dnsutils
               pkgs.iptables
@@ -87,11 +89,13 @@
             ];
           };
           devShells.website = import ./website/devshell.nix { inherit pkgs; };
-          # Censorlab package
+          # Test and lint checks (run by .github/workflows/rust.yml)
           # Build-artifact-free test/lint runs: `nix build .#checks.<system>.tests`
           checks =
             let
-              # Integration tests load demo configs, so include demos/ and tests/
+              # Integration tests load demo configs, so include demos/ and tests/,
+              # plus the experiments' censor scripts/configs/models (tests check
+              # they load in the sandboxed interpreter)
               testSrc = pkgs.lib.fileset.toSource {
                 root = ./.;
                 fileset = pkgs.lib.fileset.unions [
@@ -99,6 +103,10 @@
                   (pkgs.lib.fileset.fileFilter (f: f.hasExt "lalrpop") ./src)
                   ./tests
                   ./demos
+                  (pkgs.lib.fileset.fileFilter
+                    (f: builtins.elem f.name [ "censor.py" "censor.toml" "model.onnx" ])
+                    ./experiments)
+                  ./experiments/07_benchmarks/censors
                   # Shipped CensorLang programs are checked by tests/censorlang_programs.rs
                   (pkgs.lib.fileset.fileFilter (f: f.name == "censor.cl" || f.name == "censor_lang.toml") ./experiments)
                 ];
@@ -111,7 +119,7 @@
             {
               tests = craneLib.cargoTest checkArgs;
               tests-wire = craneLib.cargoTest (checkArgs // { cargoTestExtraArgs = "--features wire"; });
-              clippy = craneLib.cargoClippy (checkArgs // { cargoClippyExtraArgs = "--all-targets --all-features"; });
+              clippy = craneLib.cargoClippy (checkArgs // { cargoClippyExtraArgs = "--all-targets --all-features -- --deny warnings"; });
             };
           packages = rec {
             default = censorlab;
@@ -143,6 +151,9 @@
               config = {
                 Cmd = [ "/bin/bash" ];
                 Env = [ "PATH=/bin" "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
+                # Lets experiments/10_nfq_end_to_end/scripts/run.sh detect a
+                # loaded image whose censorlab is stale w.r.t. the checkout.
+                Labels = { "censorlab.package" = "${censorlab}"; };
               };
             };
             # Image with real circumvention tools (Shadowsocks, obfs4/lyrebird, Snowflake)
@@ -170,7 +181,8 @@
               };
               # Dependencies
               inherit cargoArtifacts;
-              # Integration tests reference demo scripts not in the clean source
+              # Tests run in checks.<system>.{tests,tests-wire} instead: the integration
+              # tests need demos/ and tests/, which this clean source excludes
               doCheck = false;
             });
           } // (if builtins.pathExists ./vm/packages.nix

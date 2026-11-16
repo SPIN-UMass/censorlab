@@ -4,7 +4,7 @@ use crate::program::program::{
         ip::V6Field as Ipv6Field, tcp::Field as TcpField, tcp::Flag as TcpFlag,
         udp::Field as UdpField, Field,
     },
-    Action, ComparisonOperator, Condition, Input, Line, LogicOperator, ModelSlot, Operation,
+    Action, ComparisonOperator, Condition, Endpoint, Input, Line, LogicOperator, ModelSlot, Operation,
     Operator, Register, RegisterType,
 };
 use std::str::FromStr;
@@ -177,6 +177,8 @@ Operation: Operation = {
   "OR"     <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Or{ lhs, rhs, out},
   "XOR"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Xor{lhs, rhs, out},
   "REGEX"  <index: Usize> "->" <out: Register> => Operation::Regex{index, out},
+  "SRC_IN" <index: Usize> "->" <out: Register> => Operation::SubnetIn{index, endpoint: Endpoint::Src, out},
+  "DST_IN" <index: Usize> "->" <out: Register> => Operation::SubnetIn{index, endpoint: Endpoint::Dst, out},
   "RETURN" <action: Action> => Operation::Return(action),
   "NOOP" => Operation::Noop,
   <name: ModelCall> => Operation::Model{name},

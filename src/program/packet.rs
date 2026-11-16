@@ -42,32 +42,28 @@ impl Packet {
         data: &[u8],
         ethertype: EthernetProtocol,
     ) -> Result<Packet, ParsePacketError> {
-        // Dependent parsing on the payload
-        // Extract IP metadata before parsing the next layer
-        let (ip_metadata, payload) = {
-            use EthernetProtocol::*;
-            match ethertype {
-                Ipv4 => {
-                    let ipv4_packet =
-                        Ipv4Packet::new_checked(data).map_err(ParsePacketError::IPv4)?;
-                    let metadata = IpMetadata::from(&ipv4_packet);
-                    (metadata, ipv4_packet.payload())
-                }
-                Ipv6 => {
-                    let ipv6_packet =
-                        Ipv6Packet::new_checked(data).map_err(ParsePacketError::IPv6)?;
-                    let metadata = IpMetadata::from(&ipv6_packet);
-                    (metadata, ipv6_packet.payload())
-                }
-                unknown => {
-                    return Err(ParsePacketError::UnknownInternet(unknown));
-                }
-            }
-        };
+        let ip_layer = IpLayer::parse(data, ethertype)?;
+        Packet::from_ip_layer(timestamp, &ip_layer)
+    }
+    /// Parse the transport layer of an already-recognized IP packet.
+    ///
+    /// Fails for anything other than a TCP/UDP packet whose transport header is present
+    /// and well-formed.
+    pub fn from_ip_layer(
+        timestamp: Option<f64>,
+        ip_layer: &IpLayer,
+    ) -> Result<Packet, ParsePacketError> {
+        let ip_metadata = ip_layer.metadata.clone();
+        let payload = ip_layer.payload;
+        if matches!(ip_layer.protocol, IpProtocol::Tcp | IpProtocol::Udp)
+            && !ip_layer.has_upper_header
+        {
+            return Err(ParsePacketError::NonFirstFragment);
+        }
         // Extract transport-layer metadata
         let (transport_metadata, payload) = {
             use IpProtocol::*;
-            match ip_metadata.next_header {
+            match ip_layer.protocol {
                 Tcp => {
                     let tcp_packet =
                         TcpPacket::new_checked(payload).map_err(ParsePacketError::Tcp)?;
@@ -105,19 +101,130 @@ impl Packet {
     pub fn payload_entropy(&self) -> f64 {
         shannon_entropy(&self.payload)
     }
+    /// Average number of set bits per payload byte; 0.0 for an empty payload
+    /// (like the entropy), never NaN.
     pub fn payload_average_popcount(&self) -> f64 {
-        let mut ones: u32 = 0;
-        let len: u32 = self.payload.len().try_into().unwrap();
-        for byte in &self.payload {
-            ones += byte.count_ones();
+        if self.payload.is_empty() {
+            return 0.0;
         }
-        f64::from(ones) / f64::from(len)
+        let ones: u64 = self.payload.iter().map(|b| u64::from(b.count_ones())).sum();
+        ones as f64 / self.payload.len() as f64
     }
     /// Fraction of payload bytes that are printable ASCII (0x20..=0x7e);
-    /// Wu et al.'s Ex3 exemption.  NaN for an empty payload, like the popcount.
+    /// Wu et al.'s Ex3 exemption.  0.0 for an empty payload, never NaN.
     pub fn payload_printable_fraction(&self) -> f64 {
+        if self.payload.is_empty() {
+            return 0.0;
+        }
         let printable = self.payload.iter().filter(|b| (0x20..=0x7e).contains(*b)).count();
         printable as f64 / self.payload.len() as f64
+    }
+}
+
+/// The internet layer of a packet, fully recognized down to the upper-layer protocol.
+///
+/// For IPv6, the extension-header chain (hop-by-hop, routing, destination options,
+/// fragment, AH) is walked so that `protocol` is the real upper-layer protocol and
+/// `payload` starts at its header.
+#[derive(Clone, Debug)]
+pub struct IpLayer<'a> {
+    /// Fixed-header metadata. `next_header` holds the upper-layer protocol.
+    pub metadata: IpMetadata,
+    /// Upper-layer protocol (after any IPv6 extension headers)
+    pub protocol: IpProtocol,
+    /// Upper-layer payload
+    pub payload: &'a [u8],
+    /// Whether `payload` begins with the upper-layer header. False for non-first
+    /// fragments, whose payload is a slice from the middle of the upper-layer packet.
+    pub has_upper_header: bool,
+}
+impl<'a> IpLayer<'a> {
+    /// Recognize an IPv4/IPv6 packet (without link-layer header).
+    pub fn parse(data: &'a [u8], ethertype: EthernetProtocol) -> Result<Self, ParsePacketError> {
+        match ethertype {
+            EthernetProtocol::Ipv4 => {
+                let ipv4_packet = Ipv4Packet::new_checked(data).map_err(ParsePacketError::IPv4)?;
+                Ok(Self::from_ipv4(&ipv4_packet))
+            }
+            EthernetProtocol::Ipv6 => {
+                let ipv6_packet = Ipv6Packet::new_checked(data).map_err(ParsePacketError::IPv6)?;
+                Self::from_ipv6(&ipv6_packet)
+            }
+            unknown => Err(ParsePacketError::UnknownInternet(unknown)),
+        }
+    }
+    /// Recognize the upper layer of a checked IPv4 packet.
+    pub fn from_ipv4(ipv4_packet: &Ipv4Packet<&'a [u8]>) -> Self {
+        IpLayer {
+            metadata: IpMetadata::from(ipv4_packet),
+            protocol: ipv4_packet.next_header(),
+            payload: ipv4_packet.payload(),
+            has_upper_header: ipv4_packet.frag_offset() == 0,
+        }
+    }
+    /// Recognize the upper layer of a checked IPv6 packet by walking its extension headers.
+    pub fn from_ipv6(ipv6_packet: &Ipv6Packet<&'a [u8]>) -> Result<Self, ParsePacketError> {
+        let mut metadata = IpMetadata::from(ipv6_packet);
+        let (protocol, payload, has_upper_header) =
+            walk_ipv6_extension_headers(ipv6_packet.next_header(), ipv6_packet.payload())?;
+        metadata.next_header = protocol;
+        Ok(IpLayer {
+            metadata,
+            protocol,
+            payload,
+            has_upper_header,
+        })
+    }
+}
+
+/// Walk an IPv6 extension-header chain starting at `next` with `data` being the payload
+/// of the fixed header.
+///
+/// Returns the upper-layer protocol, its payload, and whether that payload begins with
+/// the upper-layer header (false for non-first fragments: per RFC 8200 everything after
+/// the Fragment header is fragmentable, so it is absent from those fragments).
+/// Every header consumes at least 8 bytes, so the walk is bounded by the packet length.
+fn walk_ipv6_extension_headers(
+    mut next: IpProtocol,
+    mut data: &[u8],
+) -> Result<(IpProtocol, &[u8], bool), ParsePacketError> {
+    use smoltcp::wire::{Error as WireError, Ipv6ExtHeader};
+    loop {
+        let len = match next {
+            // Length in 8-octet units, not including the first 8 octets (RFC 8200 4.3-4.6)
+            IpProtocol::HopByHop | IpProtocol::Ipv6Route | IpProtocol::Ipv6Opts => {
+                let header =
+                    Ipv6ExtHeader::new_checked(data).map_err(ParsePacketError::Ipv6ExtHeader)?;
+                next = header.next_header();
+                8 + usize::from(header.header_len()) * 8
+            }
+            // Fixed 8 bytes (RFC 8200 4.5)
+            IpProtocol::Ipv6Frag => {
+                if data.len() < 8 {
+                    return Err(ParsePacketError::Ipv6ExtHeader(WireError));
+                }
+                let frag_next = IpProtocol::from(data[0]);
+                let frag_offset = u16::from_be_bytes([data[2], data[3]]) >> 3;
+                if frag_offset != 0 {
+                    return Ok((frag_next, &data[8..], false));
+                }
+                // First fragment: the rest of the chain and the upper-layer header follow
+                next = frag_next;
+                8
+            }
+            // Length in 4-octet units, minus 2 (RFC 4302 2.2)
+            IpProtocol::IpSecAh => {
+                if data.len() < 8 {
+                    return Err(ParsePacketError::Ipv6ExtHeader(WireError));
+                }
+                next = IpProtocol::from(data[0]);
+                (usize::from(data[1]) + 2) * 4
+            }
+            upper => return Ok((upper, data, true)),
+        };
+        data = data
+            .get(len..)
+            .ok_or(ParsePacketError::Ipv6ExtHeader(WireError))?;
     }
 }
 
@@ -401,6 +508,10 @@ pub enum ParsePacketError {
     Udp(smoltcp::wire::Error),
     #[error("Unknown transport layer: {0}")]
     UnknownTransport(IpProtocol),
+    #[error("Malformed IPv6 extension header chain: {0}")]
+    Ipv6ExtHeader(smoltcp::wire::Error),
+    #[error("Non-first fragment carries no transport header")]
+    NonFirstFragment,
 }
 
 /// Shannon entropy of a bytestream
@@ -439,8 +550,10 @@ pub mod rust_packet {
         VirtualMachine,
     };
     use tracing;
-    
+
+    use crate::subnet::IpNet;
     use std::io;
+    use std::net::IpAddr;
     use std::sync::mpsc;
 
     #[pyattr]
@@ -486,7 +599,7 @@ pub mod rust_packet {
                 Some(TcpPacket {
                     src: self.0.transport.src,
                     dst: self.0.transport.dst,
-                    data: metadata.clone(),
+                    data: *metadata,
                 })
             } else {
                 None
@@ -498,7 +611,7 @@ pub mod rust_packet {
                 Some(UdpPacket {
                     src: self.0.transport.src,
                     dst: self.0.transport.dst,
-                    data: metadata.clone(),
+                    data: *metadata,
                 })
             } else {
                 None
@@ -691,7 +804,7 @@ pub mod rust_packet {
         }
         #[pygetset]
         fn flags(&self) -> TcpFlags {
-            TcpFlags(self.data.flags.clone())
+            TcpFlags(self.data.flags)
         }
     }
     #[pyattr]
@@ -770,9 +883,11 @@ pub mod rust_packet {
         }
     }
     #[pyfunction]
-    fn regex(s: String, _vm: &VirtualMachine) -> Regex {
-        let inner = RustRegex::new(&s).unwrap();
-        Regex { inner }
+    fn regex(s: String, vm: &VirtualMachine) -> PyResult<Regex> {
+        // An invalid pattern is the script's fault: raise, don't panic the process
+        let inner = RustRegex::new(&s)
+            .map_err(|err| vm.new_value_error(format!("invalid regex {s:?}: {err}")))?;
+        Ok(Regex { inner })
     }
 
     #[pyattr]
@@ -794,17 +909,10 @@ pub mod rust_packet {
     #[derive(Debug, PyPayload)]
     pub struct Model {
         sender: mpsc::SyncSender<ModelThreadMessage>,
-        return_recv: mpsc::Receiver<Result<Vec<f64>, ModelThreadError>>,
-        return_sender: mpsc::SyncSender<Result<Vec<f64>, ModelThreadError>>,
     }
     impl Model {
         pub fn new(sender: mpsc::SyncSender<ModelThreadMessage>) -> Self {
-            let (return_sender, return_recv) = mpsc::sync_channel(1);
-            Self {
-                sender,
-                return_recv,
-                return_sender,
-            }
+            Self { sender }
         }
     }
     #[pyclass]
@@ -816,8 +924,10 @@ pub mod rust_packet {
             data: Vec<f32>,
             vm: &VirtualMachine,
         ) -> PyResult<PyListRef> {
-            // Clone the return channel
-            let response_channel = self.return_sender.clone();
+            // A fresh reply channel per request: we hold no sender for it, so
+            // if the model thread dies, recv() sees the disconnect and errors
+            // instead of blocking forever
+            let (response_channel, return_recv) = mpsc::sync_channel::<Result<Vec<f64>, ModelThreadError>>(1);
             // Send the data over the channel, along with a return address
             self.sender
                 .send(ModelThreadMessage::Request {
@@ -827,8 +937,7 @@ pub mod rust_packet {
                 })
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
             // Receive a new value
-            let out = self
-                .return_recv
+            let out = return_recv
                 .recv()
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
@@ -868,6 +977,49 @@ pub mod rust_packet {
         #[pygetset]
         fn state(&self) -> PyObjectRef {
             self.state.clone()
+        }
+    }
+
+    fn parse_subnet(cidr: &str, vm: &VirtualMachine) -> PyResult<IpNet> {
+        cidr.parse().map_err(|e| vm.new_value_error(format!("{e}")))
+    }
+    fn parse_addr(addr: &str, vm: &VirtualMachine) -> PyResult<IpAddr> {
+        addr.parse()
+            .map_err(|_| vm.new_value_error(format!("invalid IP address {addr:?}")))
+    }
+
+    /// Compile a CIDR subnet (e.g. "10.0.0.0/8", "2001:db8::/32", or a bare address).
+    /// Raises ValueError on malformed input or host bits set.
+    #[pyfunction]
+    fn subnet(cidr: String, vm: &VirtualMachine) -> PyResult<Subnet> {
+        parse_subnet(&cidr, vm).map(|inner| Subnet { inner })
+    }
+
+    /// Whether `addr` lies in the CIDR subnet `cidr`. Parses `cidr` on every call;
+    /// prefer a module-level `subnet(...)` object in per-packet code.
+    #[pyfunction]
+    fn ip_in(addr: String, cidr: String, vm: &VirtualMachine) -> PyResult<bool> {
+        let net = parse_subnet(&cidr, vm)?;
+        Ok(net.contains(parse_addr(&addr, vm)?))
+    }
+
+    #[pyattr]
+    #[pyclass(module = "rust", name = "Subnet")]
+    #[derive(Debug, PyPayload)]
+    struct Subnet {
+        inner: IpNet,
+    }
+    #[pyclass]
+    impl Subnet {
+        /// Whether `addr` (an address string such as packet.ip.src) is in this subnet.
+        /// Addresses of the other IP family never match. Raises ValueError on a malformed address.
+        #[pymethod]
+        fn contains(&self, addr: String, vm: &VirtualMachine) -> PyResult<bool> {
+            Ok(self.inner.contains(parse_addr(&addr, vm)?))
+        }
+        #[pymethod]
+        fn __str__(&self) -> String {
+            self.inner.to_string()
         }
     }
 
@@ -945,7 +1097,7 @@ pub mod rust_dns {
                 .into_iter()
                 .map(ResourceRecord::from)
                 .collect(),
-            opt: dns.opt.map(|o| Record::from(o)),
+            opt: dns.opt.map(Record::from),
         })
     }
     #[pyattr]
@@ -1937,5 +2089,105 @@ mod tests {
         };
         assert_eq!(md.seq_number(), u32::MAX);
         assert_eq!(md.ack_number(), 1u32 << 31);
+    }
+
+    // ---- IP layer recognition (IPv6 extension headers, fragments) ----
+
+    const V6_SRC: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+    const V6_DST: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+
+    /// Insert `ext` (a chain of extension headers whose first next-header byte must be
+    /// patched in by the caller) between the IPv6 fixed header and its payload.
+    fn insert_ipv6_ext(mut raw: Vec<u8>, first_ext: u8, ext: &[u8]) -> Vec<u8> {
+        raw[6] = first_ext;
+        let payload_len = u16::from_be_bytes([raw[4], raw[5]]) as usize + ext.len();
+        raw[4] = (payload_len >> 8) as u8;
+        raw[5] = payload_len as u8;
+        raw.splice(40..40, ext.iter().copied());
+        raw
+    }
+
+    #[test]
+    fn parse_ipv6_tcp_behind_extension_headers() {
+        let raw = build_ipv6_tcp_packet(V6_SRC, V6_DST, 50000, 443, b"hi");
+        // Hop-by-hop (8 bytes, PadN) -> Destination options (16 bytes) -> Routing (8) -> TCP
+        let mut ext = vec![60, 0, 1, 4, 0, 0, 0, 0];
+        ext.extend_from_slice(&[43, 1, 1, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        ext.extend_from_slice(&[6, 0, 0, 0, 0, 0, 0, 0]);
+        let raw = insert_ipv6_ext(raw, 0, &ext);
+        let packet = Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv6).unwrap();
+        assert_eq!(packet.ip.next_header, IpProtocol::Tcp);
+        assert_eq!(packet.transport.src, 50000);
+        assert_eq!(packet.transport.dst, 443);
+        assert_eq!(packet.payload, b"hi");
+    }
+
+    #[test]
+    fn parse_ipv6_first_fragment_reaches_tcp() {
+        let raw = build_ipv6_tcp_packet(V6_SRC, V6_DST, 50000, 443, b"hi");
+        // Fragment header: next=TCP, offset 0, M=1
+        let raw = insert_ipv6_ext(raw, 44, &[6, 0, 0, 1, 0, 0, 0, 7]);
+        let layer = IpLayer::parse(&raw, EthernetProtocol::Ipv6).unwrap();
+        assert_eq!(layer.protocol, IpProtocol::Tcp);
+        assert!(layer.has_upper_header);
+        let packet = Packet::from_ip_layer(None, &layer).unwrap();
+        assert_eq!(packet.transport.dst, 443);
+    }
+
+    #[test]
+    fn parse_ipv6_non_first_fragment_has_no_upper_header() {
+        let raw = build_ipv6_tcp_packet(V6_SRC, V6_DST, 50000, 443, b"hi");
+        // Fragment header: next=TCP, offset 1 (8 bytes)
+        let raw = insert_ipv6_ext(raw, 44, &[6, 0, 0, 8, 0, 0, 0, 7]);
+        let layer = IpLayer::parse(&raw, EthernetProtocol::Ipv6).unwrap();
+        assert_eq!(layer.protocol, IpProtocol::Tcp);
+        assert!(!layer.has_upper_header);
+        assert!(matches!(
+            Packet::from_ip_layer(None, &layer),
+            Err(ParsePacketError::NonFirstFragment)
+        ));
+    }
+
+    #[test]
+    fn parse_ipv6_truncated_extension_header_fails() {
+        let raw = build_ipv6_tcp_packet(V6_SRC, V6_DST, 50000, 443, b"");
+        // Hop-by-hop claims 8 * (1 + 200) bytes, far beyond the packet
+        let raw = insert_ipv6_ext(raw, 0, &[6, 200, 1, 4, 0, 0, 0, 0]);
+        assert!(matches!(
+            IpLayer::parse(&raw, EthernetProtocol::Ipv6),
+            Err(ParsePacketError::Ipv6ExtHeader(_))
+        ));
+    }
+
+    #[test]
+    fn parse_ipv6_icmpv6() {
+        let mut raw = build_ipv6_tcp_packet(V6_SRC, V6_DST, 0, 0, b"");
+        raw[6] = 58; // ICMPv6
+        let layer = IpLayer::parse(&raw, EthernetProtocol::Ipv6).unwrap();
+        assert_eq!(layer.protocol, IpProtocol::Icmpv6);
+        assert!(matches!(
+            Packet::from_ip_layer(None, &layer),
+            Err(ParsePacketError::UnknownTransport(IpProtocol::Icmpv6))
+        ));
+    }
+
+    #[test]
+    fn parse_ipv4_non_first_fragment_has_no_upper_header() {
+        let mut raw = build_ipv4_tcp_packet([10, 0, 0, 1], [10, 0, 0, 2], 50000, 443, b"hi");
+        // fragment offset = 1 (8 bytes)
+        raw[6] = 0;
+        raw[7] = 1;
+        raw[10] = 0;
+        raw[11] = 0;
+        let ck = ipv4_checksum(&raw[..20]);
+        raw[10] = (ck >> 8) as u8;
+        raw[11] = ck as u8;
+        let layer = IpLayer::parse(&raw, EthernetProtocol::Ipv4).unwrap();
+        assert_eq!(layer.protocol, IpProtocol::Tcp);
+        assert!(!layer.has_upper_header);
+        assert!(matches!(
+            Packet::from_ts_bytes(None, &raw, EthernetProtocol::Ipv4),
+            Err(ParsePacketError::NonFirstFragment)
+        ));
     }
 }

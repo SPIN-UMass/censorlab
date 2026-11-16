@@ -103,7 +103,7 @@ tool_internal_us() {
     local tool="$1" log="$2" workdir="$3"
     case "$tool" in
         PyCL|CensorLang)
-            grep -oP '\(\K\d+(?=us including I/O\))' "$log" | head -1 ;;
+            grep -oP '\(\K\d+(?=us including I/O\))' "$log" | head -1 || true ;;
         Scapy)
             # scapy_*.py writes seconds to <scenario>/results/scapy_timing.txt
             local tf="$SC_DIR/results/scapy_timing.txt"
@@ -152,12 +152,14 @@ measure_run() {
 
     tool_argv "$tool" "$pcap" "$workdir" || return 1
 
+    # `|| rc=$?` keeps a failing tool from tripping the caller's `set -e`
+    # before the run is recorded and its log preserved.
     t0=$EPOCHREALTIME
+    rc=0
     (
         cd "$workdir" &&
         "$TIME_BIN" -f '%U %S %M' -o "$timefile" -- "${ARGV[@]}" >"$log" 2>&1
-    )
-    rc=$?
+    ) || rc=$?
     t1=$EPOCHREALTIME
 
     wall_us=$(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%d", (b - a) * 1000000 }')
@@ -191,7 +193,13 @@ measure_run() {
 # Zeek (##! too), Suricata/Snort rules, and YAML (OpenGFW).
 # ---------------------------------------------------------------------------
 count_loc() {
-    grep -cve '^\s*$' -e '^\s*#' "$1" 2>/dev/null || echo 0
+    # grep -c already prints 0 on no match (exiting 1); only a missing file
+    # yields no output.
+    if [ -f "$1" ]; then
+        grep -cve '^\s*$' -e '^\s*#' "$1" || true
+    else
+        echo 0
+    fi
 }
 
 # ---------------------------------------------------------------------------

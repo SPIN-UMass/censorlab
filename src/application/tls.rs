@@ -449,7 +449,7 @@ mod tests {
         let mut msg = build_client_hello_message(Some(sni), None);
         let pad = 1500;
         msg.extend_from_slice(&[0x00, 0x15, (pad >> 8) as u8, (pad & 0xff) as u8]);
-        msg.extend(std::iter::repeat(0u8).take(pad));
+        msg.extend(std::iter::repeat_n(0u8, pad));
         // Fix up the handshake length and extensions length
         let hs_len = msg.len() - 4;
         msg[1..4].copy_from_slice(&(hs_len as u32).to_be_bytes()[1..]);

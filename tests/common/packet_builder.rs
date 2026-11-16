@@ -1,10 +1,10 @@
-/// Builds raw Ethernet frames wrapping IPv4 + TCP/UDP packets.
-///
-/// The Ethernet header is 14 bytes:
-///   dst_mac(6) + src_mac(6) + ethertype(2)
-///
-/// Reuses the same IP/TCP/UDP construction patterns from `src/program/packet.rs`
-/// unit tests, with the addition of the Ethernet framing.
+//! Builds raw Ethernet frames wrapping IPv4 + TCP/UDP packets.
+//!
+//! The Ethernet header is 14 bytes:
+//!   dst_mac(6) + src_mac(6) + ethertype(2)
+//!
+//! Reuses the same IP/TCP/UDP construction patterns from `src/program/packet.rs`
+//! unit tests, with the addition of the Ethernet framing.
 
 const SRC_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01];
 const DST_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x02];
@@ -103,7 +103,11 @@ fn build_ipv4_tcp_raw(
 }
 
 /// TCP flag constants
+#[allow(dead_code)]
+pub const TCP_FIN: u8 = 0x01;
 pub const TCP_SYN: u8 = 0x02;
+#[allow(dead_code)]
+pub const TCP_RST: u8 = 0x04;
 pub const TCP_ACK: u8 = 0x10;
 pub const TCP_PSH_ACK: u8 = 0x18;
 
@@ -269,7 +273,7 @@ fn tls_client_hello_message(sni: &str, padding: usize) -> Vec<u8> {
         extensions.extend_from_slice(&[0x00, 0x15]);
         extensions.push(((padding >> 8) & 0xff) as u8);
         extensions.push((padding & 0xff) as u8);
-        extensions.extend(std::iter::repeat(0u8).take(padding));
+        extensions.extend(std::iter::repeat_n(0u8, padding));
     }
 
     let ch_body_len = 2 + 32 + 1 + 2 + 2 + 1 + 1 + 2 + extensions.len();
@@ -354,6 +358,65 @@ pub fn quic_initial_packet(sni: &str) -> Vec<u8> {
     buf.extend_from_slice(&payload);
 
     buf
+}
+
+// ---------------------------------------------------------------------------
+// Arbitrary IP payloads (ICMP, unknown protocols, IPv6 extension headers)
+// ---------------------------------------------------------------------------
+
+/// Build an Ethernet frame containing an IPv4 packet with an arbitrary protocol
+/// number and raw (already-encoded) payload.
+pub fn ipv4_raw_frame(src_ip: [u8; 4], dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> Vec<u8> {
+    let total_len = 20 + payload.len();
+    let mut buf = vec![0u8; total_len];
+    buf[0] = 0x45;
+    buf[2] = (total_len >> 8) as u8;
+    buf[3] = total_len as u8;
+    buf[8] = 64;
+    buf[9] = protocol;
+    buf[12..16].copy_from_slice(&src_ip);
+    buf[16..20].copy_from_slice(&dst_ip);
+    let ck = ipv4_checksum(&buf[..20]);
+    buf[10] = (ck >> 8) as u8;
+    buf[11] = ck as u8;
+    buf[20..].copy_from_slice(payload);
+    ethernet_wrap(0x0800, &buf)
+}
+
+/// Build an Ethernet frame containing an IPv6 packet whose fixed header has the
+/// given next-header value, followed by `payload` verbatim (which may begin with
+/// extension headers).
+pub fn ipv6_raw_frame(src_ip: [u8; 16], dst_ip: [u8; 16], next_header: u8, payload: &[u8]) -> Vec<u8> {
+    let mut buf = vec![0u8; 40 + payload.len()];
+    buf[0] = 0x60;
+    buf[4] = (payload.len() >> 8) as u8;
+    buf[5] = payload.len() as u8;
+    buf[6] = next_header;
+    buf[7] = 64;
+    buf[8..24].copy_from_slice(&src_ip);
+    buf[24..40].copy_from_slice(&dst_ip);
+    buf[40..].copy_from_slice(payload);
+    ethernet_wrap(0x86DD, &buf)
+}
+
+/// A minimal ICMP/ICMPv6 echo request (type 8 or 128, code 0, no data).
+/// The checksum is left zero; CensorLab does not verify it.
+pub fn icmp_echo(icmp_type: u8) -> Vec<u8> {
+    vec![icmp_type, 0, 0, 0, 0, 1, 0, 1]
+}
+
+/// A raw 20-byte TCP header (no checksum), for embedding with [`ipv6_raw_frame`].
+pub fn raw_tcp_header(src_port: u16, dst_port: u16, flags: u8, seq: u32, ack: u32) -> Vec<u8> {
+    let mut tcp = vec![0u8; 20];
+    tcp[0..2].copy_from_slice(&src_port.to_be_bytes());
+    tcp[2..4].copy_from_slice(&dst_port.to_be_bytes());
+    tcp[4..8].copy_from_slice(&seq.to_be_bytes());
+    tcp[8..12].copy_from_slice(&ack.to_be_bytes());
+    tcp[12] = 5 << 4;
+    tcp[13] = flags;
+    tcp[14] = 0xFF;
+    tcp[15] = 0xFF;
+    tcp
 }
 
 /// Overwrite the IPv4 TTL of an Ethernet-framed IPv4 packet and fix the
