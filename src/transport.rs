@@ -1,4 +1,4 @@
-use crate::application::tls::ClientHelloAssembler;
+use crate::application::tls_stream::ClientHelloTracker;
 use crate::censor::{Action, Direction, IpPair};
 use crate::config::conntrack::Config as ConntrackConfig;
 use crate::expiring_map::ExpiringMap;
@@ -167,8 +167,8 @@ pub struct TransportState {
 pub struct ConnectionInfo {
     env: ExecutionEnvironment,
     is_first: bool,
-    /// Reassembles the client's TLS ClientHello across segments
-    client_hello: ClientHelloAssembler,
+    /// Reassembles the client's TLS ClientHello (see application::tls_stream)
+    tls_hello: ClientHelloTracker,
     /// Only meaningful for TCP
     tcp: TcpLifecycle,
     /// The connection's client: the sender of the first packet seen on it
@@ -709,29 +709,20 @@ impl TransportState {
                 is_first: true,
                 tcp: TcpLifecycle::default(),
                 client_ip: ips.src(),
-                client_hello: ClientHelloAssembler::new(),
+                tls_hello: ClientHelloTracker::new(),
             };
             // The real deadline is set once the packet has been processed
             self.connections.insert(key.clone(), info, now);
         }
-        // Track the client's ClientHello across segments so programs see it once
-        // complete. The assembler lives in ConnectionInfo, so it is reset along
-        // with the rest of the connection state on 5-tuple reuse or expiry.
-        if let TransportMetadataExtra::Tcp(tcp) = packet.transport.extra {
-            let client_hello = &mut self
-                .connections
-                .get_mut(&key)
-                .expect("connection was inserted above")
-                .client_hello;
-            client_hello.observe(
-                (ips.src(), packet.transport.src),
-                tcp.seq_number(),
-                tcp.flags.syn,
-                tcp.flags.ack,
-                &packet.payload,
-            );
-            packet.tls_client_hello = client_hello.client_hello().cloned();
-        }
+        // Track the TLS ClientHello across segments; the result rides on the packet.
+        // The tracker lives in ConnectionInfo, so it is reset along with the rest of
+        // the connection state on 5-tuple reuse or expiry.
+        let tls_hello = &mut self
+            .connections
+            .get_mut(&key)
+            .expect("connection was inserted above")
+            .tls_hello;
+        packet.tls = tls_hello.observe_packet(&packet);
         // Copy of is_first for the execution
         let is_first_cl = self.connections.get(&key).is_some_and(|c| c.is_first);
 

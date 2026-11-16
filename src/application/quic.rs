@@ -181,7 +181,7 @@ pub struct QuicInitialInfo {
 impl QuicInitialInfo {
     /// Convenience: get the SNI from the ClientHello, if present.
     pub fn sni(&self) -> Option<&str> {
-        self.client_hello.as_ref().and_then(|ch| ch.sni.as_deref())
+        self.client_hello.as_ref().and_then(|ch| ch.sni_str())
     }
 }
 
@@ -825,7 +825,7 @@ mod tests {
         assert_eq!(info.dcid, unhex(RFC_DCID));
         assert!(info.scid.is_empty());
         assert_eq!(info.sni(), Some("example.com"));
-        assert_eq!(info.client_hello.as_ref().unwrap().alpn, vec!["alpn".to_string()]);
+        assert_eq!(info.client_hello.as_ref().unwrap().alpn, vec![b"alpn".to_vec()]);
     }
 
     #[test]

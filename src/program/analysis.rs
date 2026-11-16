@@ -215,7 +215,7 @@ impl Acc {
                 self.input(rhs);
                 self.output(out);
             }
-            Regex { out, .. } => {
+            Regex { out, .. } | RegexSni { out, .. } => {
                 self.counts.regex += 1;
                 self.output(out);
             }

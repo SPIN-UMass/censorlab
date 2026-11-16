@@ -22,10 +22,10 @@ pub struct Packet {
     /// Using `Rc<[u8]>` was considered but provides no benefit since Packet is never
     /// cloned in production and the Python VM requires owned bytes.
     pub payload: Vec<u8>,
-    /// The connection's TLS ClientHello, once reassembled from the client's first segments.
-    ///
-    /// Set by connection tracking on the packet that completes it and every packet after.
-    pub tls_client_hello: Option<crate::application::tls::ClientHelloInfo>,
+    /// Connection-level TLS ClientHello reassembly state for this packet,
+    /// filled in by connection tracking (default: idle, no hello).  The
+    /// ClientHello is set on the packet that completes it and every packet after.
+    pub tls: crate::application::tls_stream::TlsHelloObservation,
 }
 impl Packet {
     /// Record the traffic direction relative to the configured client.
@@ -88,7 +88,7 @@ impl Packet {
             direction: 0,
             transport: transport_metadata,
             payload,
-            tls_client_hello: None,
+            tls: Default::default(),
         };
         Ok(packet)
     }
@@ -265,14 +265,14 @@ pub enum IpVersionMetadata {
     },
 }
 impl IpMetadata {
-    fn src(&self) -> IpAddress {
+    pub(crate) fn src(&self) -> IpAddress {
         use IpVersionMetadata::*;
         match self.version {
             V4 { src, .. } => src.into(),
             V6 { src, .. } => src.into(),
         }
     }
-    fn dst(&self) -> IpAddress {
+    pub(crate) fn dst(&self) -> IpAddress {
         use IpVersionMetadata::*;
         match self.version {
             V4 { dst, .. } => dst.into(),
@@ -638,10 +638,22 @@ pub mod rust_packet {
             self.0.payload_printable_fraction()
         }
         /// The connection's TLS ClientHello once it has been fully received, even if it was
-        /// split across several TCP segments or TLS records, otherwise None
+        /// split across several TCP segments or TLS records, otherwise None.  Set on the
+        /// packet that completes it and every later packet of the connection.
         #[pygetset]
         fn tls_client_hello(&self) -> Option<super::rust_tls::ClientHelloInfo> {
-            self.0.tls_client_hello.clone().map(Into::into)
+            self.0.tls.hello.as_ref().map(|h| (**h).clone().into())
+        }
+        /// ClientHello reassembly status after this packet: "idle", "pending",
+        /// "complete", "failed" or "ambiguous" (conflicting TCP overlap).
+        #[pygetset]
+        fn tls_hello_state(&self) -> String {
+            self.0.tls.status.name().to_owned()
+        }
+        /// Reason recognition failed (when tls_hello_state == "failed"), else None.
+        #[pygetset]
+        fn tls_hello_error(&self) -> Option<String> {
+            self.0.tls.error.as_ref().map(|e| e.to_string())
         }
         #[pymethod]
         fn __str__(&self) -> String {
@@ -1467,22 +1479,79 @@ pub mod rust_tls {
     }
     #[pyclass]
     impl ClientHelloInfo {
-        /// Server Name Indication, or None
+        /// First server_name host_name entry as raw bytes, or None
         #[pygetset]
         fn sni(&self) -> Option<rustpython_vm::builtins::PyBytes> {
-            self.inner.sni.as_ref().map(|s| rustpython_vm::builtins::PyBytes::from(s.as_bytes().to_vec()))
+            self.inner
+                .sni
+                .as_ref()
+                .map(|s| rustpython_vm::builtins::PyBytes::from(s.clone()))
         }
 
-        /// ALPN protocol names
+        /// Every server_name host_name entry (list of bytes), in order
+        #[pygetset]
+        fn sni_list(&self, vm: &VirtualMachine) -> PyObjectRef {
+            let list: Vec<PyObjectRef> = self
+                .inner
+                .sni_list
+                .iter()
+                .map(|s| vm.ctx.new_bytes(s.clone()).into())
+                .collect();
+            vm.new_pyobj(list)
+        }
+
+        /// True if any host_name entry is not valid UTF-8
+        #[pygetset]
+        fn sni_invalid_utf8(&self) -> bool {
+            self.inner.sni_invalid_utf8
+        }
+
+        /// ALPN protocol names (str; invalid UTF-8 replaced with U+FFFD)
         #[pygetset]
         fn alpn(&self, vm: &VirtualMachine) -> PyObjectRef {
             let list: Vec<PyObjectRef> = self
                 .inner
                 .alpn
                 .iter()
-                .map(|s| vm.new_pyobj(s.clone()))
+                .map(|s| vm.new_pyobj(String::from_utf8_lossy(s).into_owned()))
                 .collect();
             vm.new_pyobj(list)
+        }
+
+        /// True if an extension type occurs more than once
+        #[pygetset]
+        fn duplicate_extensions(&self) -> bool {
+            self.inner.duplicate_extensions
+        }
+
+        /// Types of known extensions (SNI/ALPN/supported_versions) that were malformed
+        #[pygetset]
+        fn malformed_extensions(&self, vm: &VirtualMachine) -> PyObjectRef {
+            let list: Vec<PyObjectRef> = self
+                .inner
+                .malformed_extensions
+                .iter()
+                .map(|t| vm.new_pyobj(*t))
+                .collect();
+            vm.new_pyobj(list)
+        }
+
+        /// Number of TLS records the ClientHello spanned (0 for a bare message)
+        #[pygetset]
+        fn record_count(&self) -> usize {
+            self.inner.record_count
+        }
+
+        /// Number of TCP segments that contributed bytes (0 if not TCP-reassembled)
+        #[pygetset]
+        fn tcp_segments(&self) -> usize {
+            self.inner.tcp_segments
+        }
+
+        /// True if the ClientHello spanned several TLS records or TCP segments
+        #[pygetset]
+        fn reassembled(&self) -> bool {
+            self.inner.reassembled()
         }
 
         /// Legacy TLS version from the ClientHello (e.g. 0x0303)
@@ -1601,7 +1670,11 @@ pub mod rust_quic {
         /// SNI from the TLS ClientHello, if found
         #[pygetset]
         fn sni(&self) -> Option<rustpython_vm::builtins::PyBytes> {
-            self.inner.sni().map(|s| rustpython_vm::builtins::PyBytes::from(s.as_bytes().to_vec()))
+            self.inner
+                .client_hello
+                .as_ref()
+                .and_then(|ch| ch.sni.clone())
+                .map(rustpython_vm::builtins::PyBytes::from)
         }
 
         /// ALPN protocols from the TLS ClientHello, if found
@@ -1611,7 +1684,12 @@ pub mod rust_quic {
                 .inner
                 .client_hello
                 .as_ref()
-                .map(|ch| ch.alpn.iter().map(|s| vm.new_pyobj(s.clone())).collect())
+                .map(|ch| {
+                    ch.alpn
+                        .iter()
+                        .map(|s| vm.new_pyobj(String::from_utf8_lossy(s).into_owned()))
+                        .collect()
+                })
                 .unwrap_or_default();
             vm.new_pyobj(list)
         }
@@ -1903,7 +1981,6 @@ mod tests {
     fn popcount_all_zeros() {
         let p = Packet {
             timestamp: None,
-            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 40,
@@ -1934,6 +2011,7 @@ mod tests {
                 }),
             },
             payload: vec![0x00; 10],
+            tls: Default::default(),
         };
         assert_eq!(p.payload_average_popcount(), 0.0);
     }
@@ -1942,7 +2020,6 @@ mod tests {
     fn popcount_all_ones() {
         let p = Packet {
             timestamp: None,
-            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 40,
@@ -1973,6 +2050,7 @@ mod tests {
                 }),
             },
             payload: vec![0xFF; 10],
+            tls: Default::default(),
         };
         assert_eq!(p.payload_average_popcount(), 8.0);
     }
