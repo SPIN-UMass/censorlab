@@ -670,9 +670,9 @@ pub enum LineExecutionError {
 }
 impl fmt::Display for Line {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // One source line per Line, so a displayed program parses back
         if let Some(ref cond) = self.condition {
-            writeln!(f, "if {cond}:")?;
-            write!(f, "    {}", self.operation)
+            write!(f, "if {cond}: {}", self.operation)
         } else {
             self.operation.fmt(f)
         }
@@ -832,12 +832,22 @@ impl fmt::Display for Input {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Input::*;
         match self {
-            Field(field) => write!(f, "field:{field:?}"),
+            Field(field) => write!(f, "field:{field}"),
             Register(reg) => reg.fmt(f),
             ModelOutput(slot) => write!(f, "model:{}:out:{}", slot.name, slot.index),
-            Float(flt) => flt.fmt(f),
+            Float(flt) => {
+                // Float literals need a fractional part to parse as floats;
+                // Rust's Display for f64 never uses exponent notation.
+                let s = flt.to_string();
+                if s.contains('.') {
+                    f.write_str(&s)
+                } else {
+                    write!(f, "{s}.0")
+                }
+            }
             Int(i) => i.fmt(f),
-            Bool(b) => b.fmt(f),
+            Bool(true) => f.write_str("True"),
+            Bool(false) => f.write_str("False"),
         }
     }
 }
@@ -943,6 +953,65 @@ pub mod field {
             fields.push(Field::PayloadAveragePopcount);
             fields.push(Field::PayloadPrintableFraction);
             fields
+        }
+    }
+    impl Field {
+        /// The field's name in CensorLang source (the inverse of `FieldParser`)
+        pub fn name(&self) -> &'static str {
+            use ip::{V4Field, V6Field};
+            use tcp::Flag;
+            match self {
+                Field::Env(env::Field::NumPackets) => "env.num_packets",
+                Field::Env(env::Field::HostNumConnections) => "host.num_connections",
+                Field::Env(env::Field::HostNumPackets) => "host.num_packets",
+                Field::Env(env::Field::DstHostNumConnections) => "dst_host.num_connections",
+                Field::Env(env::Field::DstHostNumPackets) => "dst_host.num_packets",
+                Field::Timestamp => "timestamp",
+                Field::Ip(ip::Field::HeaderLen) => "ip.header_len",
+                Field::Ip(ip::Field::TotalLen) => "ip.total_len",
+                Field::Ip(ip::Field::HopLimit) => "ip.hop_limit",
+                Field::Ip(ip::Field::V4(V4Field::Dscp)) => "ip4.dscp",
+                Field::Ip(ip::Field::V4(V4Field::Ecn)) => "ip4.ecn",
+                Field::Ip(ip::Field::V4(V4Field::Ident)) => "ip4.ident",
+                Field::Ip(ip::Field::V4(V4Field::DontFrag)) => "ip4.dont_frag",
+                Field::Ip(ip::Field::V4(V4Field::MoreFrags)) => "ip4.more_frags",
+                Field::Ip(ip::Field::V4(V4Field::FragOffset)) => "ip4.frag_offset",
+                Field::Ip(ip::Field::V4(V4Field::Checksum)) => "ip4.checksum",
+                Field::Ip(ip::Field::V6(V6Field::TrafficClass)) => "ip6.traffic_class",
+                Field::Ip(ip::Field::V6(V6Field::FlowLabel)) => "ip6.flow_label",
+                Field::Ip(ip::Field::V6(V6Field::PayloadLen)) => "ip6.payload_len",
+                Field::Tcp(tcp::Field::SrcPort) => "tcp.src",
+                Field::Tcp(tcp::Field::DstPort) => "tcp.dst",
+                Field::Tcp(tcp::Field::Seq) => "tcp.seq",
+                Field::Tcp(tcp::Field::Ack) => "tcp.ack",
+                Field::Tcp(tcp::Field::Flag(Flag::Fin)) => "tcp.flag.fin",
+                Field::Tcp(tcp::Field::Flag(Flag::Syn)) => "tcp.flag.syn",
+                Field::Tcp(tcp::Field::Flag(Flag::Rst)) => "tcp.flag.rst",
+                Field::Tcp(tcp::Field::Flag(Flag::Psh)) => "tcp.flag.psh",
+                Field::Tcp(tcp::Field::Flag(Flag::Ack)) => "tcp.flag.ack",
+                Field::Tcp(tcp::Field::Flag(Flag::Urg)) => "tcp.flag.urg",
+                Field::Tcp(tcp::Field::Flag(Flag::Ece)) => "tcp.flag.ece",
+                Field::Tcp(tcp::Field::Flag(Flag::Cwr)) => "tcp.flag.cwr",
+                Field::Tcp(tcp::Field::Flag(Flag::Ns)) => "tcp.flag.ns",
+                Field::Tcp(tcp::Field::Length) => "tcp.len",
+                Field::Tcp(tcp::Field::HeaderLength) => "tcp.header.len",
+                Field::Tcp(tcp::Field::PayloadLength) => "tcp.payload.len",
+                Field::Tcp(tcp::Field::UrgentAt) => "tcp.urgent_at",
+                Field::Tcp(tcp::Field::WindowLength) => "tcp.window_len",
+                Field::Udp(udp::Field::SrcPort) => "udp.src",
+                Field::Udp(udp::Field::DstPort) => "udp.dst",
+                Field::Udp(udp::Field::Length) => "udp.length",
+                Field::Udp(udp::Field::Checksum) => "udp.checksum",
+                Field::Direction => "direction",
+                Field::PayloadEntropy => "transport.payload.entropy",
+                Field::PayloadAveragePopcount => "transport.payload.avg_popcount",
+                Field::PayloadPrintableFraction => "transport.payload.printable_fraction",
+            }
+        }
+    }
+    impl std::fmt::Display for Field {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str(self.name())
         }
     }
     impl FromStr for Field {
@@ -1801,7 +1870,7 @@ impl fmt::Display for Operation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Operation::*;
         match self {
-            Copy { from, to } => write!(f, "COPY {from}->{to}"),
+            Copy { from, to } => write!(f, "COPY {from} -> {to}"),
             Add { lhs, rhs, out }
             | Sub { lhs, rhs, out }
             | Mul { lhs, rhs, out }
@@ -1821,14 +1890,14 @@ impl fmt::Display for Operation {
                     Xor { .. } => "XOR",
                     _ => unreachable!(),
                 };
-                write!(f, "{name} {lhs},{rhs}->{out}")
+                write!(f, "{name} {lhs}, {rhs} -> {out}")
             }
-            Regex { index, out } => write!(f, "REGEX {index}->{out}"),
+            Regex { index, out } => write!(f, "REGEX {index} -> {out}"),
             Return(action) => write!(f, "RETURN {action}"),
             Noop => write!(f, "NOOP"),
             Model { ref name } => write!(f, "MODEL {name}"),
             CopyToModel { from, name, index } => {
-                write!(f, "COPY {from}->model:{name}:in:{index}")
+                write!(f, "COPY {from} -> model:{name}:in:{index}")
             }
         }
     }
@@ -3109,6 +3178,55 @@ mod tests {
     fn math_float_division_by_zero_is_zero() {
         let v = MathOperator::Numeric(MathOperatorNumeric::Div).call(&Value::Float(1.0), &Value::Float(0.0));
         assert!(matches!(v, Value::Float(f) if f == 0.0));
+    }
+
+    // --- Display is the inverse of parsing ---
+
+    #[test]
+    fn field_display_round_trips() {
+        for f in field::Field::all() {
+            let shown = f.to_string();
+            let parsed: field::Field = shown.parse().unwrap_or_else(|e| panic!("{shown}: {e}"));
+            assert_eq!(parsed, f);
+        }
+    }
+
+    #[test]
+    fn program_display_round_trips() {
+        let src = r#"regex "^(GET |POST )"
+regex "a\"b"
+if field:tcp.payload.len == 0: RETURN allow
+if field:ip4.dont_frag == True: RETURN allow_all
+if reg:b.0 != False: RETURN terminate
+COPY field:transport.payload.entropy -> reg:f.1
+COPY 1.0 -> reg:f.2
+COPY -2.5 -> reg:f.3
+COPY -9223372036854775808 -> reg:i.1
+ADD reg:i.1, 1 -> reg:i.1
+SUB hreg:i.2, field:env.num_packets -> hreg:i.2
+MUL 2, reg:f.1 -> reg:f.1
+DIV field:tcp.payload.len, 2 -> reg:i.3
+MOD reg:i.3, 7 -> reg:i.3
+AND reg:b.0, True -> reg:b.1
+OR reg:b.0, field:tcp.flag.syn -> reg:b.1
+XOR reg:b.0, reg:b.1 -> reg:b.2
+REGEX 1 -> reg:b.0
+COPY reg:f.1 -> model:m:in:3
+MODEL m
+COPY model:m:out:1 -> reg:f.4
+if field:tcp.seq >= 100: RETURN reset
+if reg:f.1 xnor reg:b.2: RETURN reset
+NOOP
+"#;
+        let prog: Program = src.parse().unwrap();
+        let shown = prog.to_string();
+        let reparsed: Program = shown.parse().unwrap_or_else(|e| panic!("{shown}\n{e}"));
+        assert_eq!(reparsed.lines.len(), prog.lines.len());
+        assert_eq!(reparsed.to_string(), shown);
+        // Values survive the round trip exactly
+        assert!(shown.contains("COPY 1.0 -> reg:f.2"), "{shown}");
+        assert!(shown.contains("field:ip4.dont_frag == True"), "{shown}");
+        assert!(shown.contains("DIV field:tcp.payload.len, 2 -> reg:i.3"), "{shown}");
     }
 
     // --- Parser robustness: numeric literals are recognized, never panic ---
