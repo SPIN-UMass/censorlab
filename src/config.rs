@@ -104,7 +104,8 @@ impl Config {
 /// Used for both allowlist and blocklist
 #[derive(Debug, Default, Deserialize)]
 pub struct List<T> {
-    /// List of values to allow/block
+    /// List of values to allow/block (empty if omitted)
+    #[serde(default)]
     pub list: T,
     /// Action to taken if a value is/isn't in the list
     #[serde(default)]
@@ -501,6 +502,21 @@ action = "Drop"
         assert_eq!(config.tcp.ip_port_allowlist.action, Action::None);
         assert!(config.udp.ip_port_allowlist.list.is_empty());
         assert_eq!(config.udp.ip_port_allowlist.action, Action::None);
+    }
+
+    #[test]
+    fn list_block_without_list_key_defaults_to_empty() {
+        let toml_str = r#"
+[ip.allowlist]
+action = "Drop"
+
+[tcp.port_blocklist]
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.ip.allowlist.list.is_empty());
+        assert_eq!(config.ip.allowlist.action, Action::Drop);
+        assert!(config.tcp.port_blocklist.list.is_empty());
     }
 
     #[test]
