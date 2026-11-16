@@ -258,17 +258,22 @@ def real_traffic_macros(rows):
     lines.append("% Experiment 8: real-traffic workloads with background mixes")
     lines.append("% ============================================================")
     lines.append("% Command format: \\Real<Scenario><Mix><Tool><Metric>")
-    lines.append("% Mix ∈ BgZero BgTenK BgNinetyK BgThreeNinetyK; Metrics: WallTime, WallStdev,")
+    lines.append("% Mix ∈ BgZero BgTenK BgNinetyK BgThreeNinetyK (USTC-TFC2016), each optionally")
+    lines.append("%   suffixed Iscx (ISCXVPN2016) or Combined (USTC+ISCX); Metrics: WallTime, WallStdev,")
     lines.append("%   StartupTime, NetTime (s), UsPerPkt, Kpps, Cpu (s), Rss (MB), TPR, TNR,")
     lines.append("%   BgFlagged, BgFlows, Packets")
     lines.append("")
     mix_names = {"bg0": "BgZero", "bg10k": "BgTenK", "bg90k": "BgNinetyK", "bg390k": "BgThreeNinetyK"}
+    background_names = {"ustc": "", "iscx": "Iscx", "combined": "Combined"}
     scenario_macro = {k: v for k, v in EXPERIMENT_SCENARIOS.items()}
     for r in rows:
         if r.get("status") != "measured":
             continue
         scn = scenario_macro.get(r["scenario"], sanitize_cmd(r["scenario"]))
         mix = mix_names.get(r["mix"], sanitize_cmd(r["mix"]))
+        # USTC-only rows keep the original macro names; other backgrounds
+        # (ISCXVPN2016, USTC+ISCX combined) get a suffix on the mix.
+        mix += background_names.get(r.get("background", "ustc"), sanitize_cmd(r.get("background", "")))
         tool = TOOL_NAMES.get(r["tool"], sanitize_cmd(r["tool"]))
         base = f"Real{scn}{mix}{tool}"
 
