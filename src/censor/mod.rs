@@ -31,7 +31,6 @@ use smoltcp::wire::{
     Icmpv6Packet, IpAddress, IpProtocol, Ipv4Address, Ipv4Packet, Ipv6Address, Ipv6Packet,
     TcpSeqNumber,
 };
-use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt;
 use std::io;
@@ -1023,12 +1022,6 @@ impl Rewrite {
             EtherType::Ipv4 | EtherType::Ipv6 => self.apply_ip(eth.payload_mut()),
             _ => false,
         }
-    }
-}
-
-impl Ord for Action {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Less)
     }
 }
 
