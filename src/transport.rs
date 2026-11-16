@@ -31,13 +31,13 @@ use tracing::error;
 /// Connection key is an identifier that will always resolve to the same value for a connection
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ConnectionKey {
-    /// Lower (by sorting) IP addr
+    /// IP addr of the lower (by sorting (IP, port)) endpoint
     addr_low: IpAddress,
-    /// Higher (by sorting) IP addr
+    /// IP addr of the higher (by sorting (IP, port)) endpoint
     addr_high: IpAddress,
-    /// Lower (by sorting IP) port
+    /// Port belonging to `addr_low`
     port_low: u16,
-    /// Higher (by sorting IP) port
+    /// Port belonging to `addr_high`
     port_high: u16,
     /// Protocol
     proto: TransportProtocol,
@@ -48,9 +48,10 @@ impl ConnectionKey {
         // Extract IPs
         let ip_1 = ips.src();
         let ip_2 = ips.dst();
-        // Place values based on sorting IPs
-        // Sort by IP to ensure symmetric keys (port sort alternative benchmarked in TODO.md)
-        let (addr_low, addr_high, port_low, port_high) = if ip_1 <= ip_2 {
+        // Place values based on sorting (IP, port) endpoints so both directions
+        // map to the same key. Sorting by IP alone is ambiguous when both
+        // endpoints share an IP (loopback / same host), so ports break ties.
+        let (addr_low, addr_high, port_low, port_high) = if (ip_1, port_1) <= (ip_2, port_2) {
             (ip_1, ip_2, port_1, port_2)
         } else {
             (ip_2, ip_1, port_2, port_1)
@@ -814,6 +815,19 @@ mod tests {
         };
         let key_fwd = ConnectionKey::new(ips_fwd, 1234, 80, TransportProtocol::Tcp);
         let key_rev = ConnectionKey::new(ips_rev, 80, 1234, TransportProtocol::Tcp);
+        assert_eq!(key_fwd, key_rev);
+    }
+
+    #[test]
+    fn connection_key_symmetric_same_ip() {
+        // Loopback / same-host traffic: both endpoints share an IP, so the
+        // ports must decide the ordering.
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(127, 0, 0, 1),
+            dst: Ipv4Address::new(127, 0, 0, 1),
+        };
+        let key_fwd = ConnectionKey::new(ips.clone(), 50000, 80, TransportProtocol::Tcp);
+        let key_rev = ConnectionKey::new(ips, 80, 50000, TransportProtocol::Tcp);
         assert_eq!(key_fwd, key_rev);
     }
 
