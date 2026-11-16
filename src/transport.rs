@@ -376,12 +376,69 @@ fn action_from_python(
     Action::None
 }
 
-/// Build the RustPython interpreter that censor scripts run in, with the
-/// CensorLab native modules (`rust`, `dns`, `tls`, `quic`) registered.
+/// The only modules a censor script may import: CensorLab's native modules
+const ALLOWED_IMPORTS: &[&str] = &["rust", "dns", "tls", "quic"];
+
+/// Native stdlib modules the interpreter itself imports while initializing
+/// (stdio, importlib, codecs). They are not importable by scripts.
+const INTERPRETER_INIT_MODULES: &[&str] = &[
+    "_typing", "_signal", "_ast", "_io", "_thread", "_warnings", "_weakref", "_imp", "_codecs",
+];
+
+/// `builtins.__import__` replacement: only absolute imports of
+/// [`ALLOWED_IMPORTS`] reach the real import machinery.
+fn sandboxed_import(args: vm::function::FuncArgs, vm: &vm::VirtualMachine) -> vm::PyResult {
+    use rustpython_vm::builtins::PyStr;
+    let name = args.args.first().and_then(|n| n.payload::<PyStr>()).map(|n| n.as_str().to_owned());
+    // __import__(name, globals=None, locals=None, fromlist=(), level=0)
+    let level = args
+        .args
+        .get(4)
+        .or_else(|| args.kwargs.get("level"))
+        .map(|level| level.try_to_value::<usize>(vm))
+        .transpose()?
+        .unwrap_or(0);
+    match name {
+        Some(name) if level == 0 && ALLOWED_IMPORTS.contains(&name.as_str()) => {
+            vm.import_func.call(args, vm)
+        }
+        name => {
+            let shown = name.unwrap_or_else(|| "<non-string>".to_owned());
+            Err(vm.new_import_error(
+                format!(
+                    "censor scripts may only import {}; '{shown}' is not available",
+                    ALLOWED_IMPORTS.join(", ")
+                ),
+                vm.ctx.new_str(shown),
+            ))
+        }
+    }
+}
+
+/// Build the RustPython interpreter that censor scripts run in.
+///
+/// Scripts run inside the censor process, which holds CAP_NET_ADMIN/CAP_NET_RAW,
+/// so the interpreter is restricted to what censor scripts need:
+/// - Only the native modules required to initialize the interpreter are
+///   registered, plus CensorLab's own `rust`, `dns`, `tls` and `quic`; there is
+///   no `posix`/`os`, `time`, `pwd`, ... and no filesystem import path.
+/// - `__import__` only admits [`ALLOWED_IMPORTS`], and `sys.modules` is
+///   emptied of the interpreter's own modules so they can't be re-imported
+///   from the cache.
+/// - `open` is removed from builtins.
+///
+/// This is a Python-level restriction, not an OS-level sandbox: objects that
+/// exist in the interpreter (e.g. `_io` classes reachable through
+/// `object.__subclasses__()`) are still reachable by introspection.
 pub(crate) fn new_python_interpreter(hash_seed: u32) -> vm::Interpreter {
     // Initialize interpreter settings
     let mut settings: Settings = Default::default();
-    //settings.isolated = true;
+    // Ignore PYTHON* environment variables and user site-packages
+    settings.isolated = true;
+    settings.ignore_environment = true;
+    // No filesystem-based imports (also keeps importlib from loading posix)
+    settings.allow_external_library = false;
+    settings.path_list = Vec::new();
     // Don't have the python subprograms implement sigint
     settings.install_signal_handlers = false;
     settings.hash_seed = Some(hash_seed);
@@ -391,7 +448,12 @@ pub(crate) fn new_python_interpreter(hash_seed: u32) -> vm::Interpreter {
     // -OO optimization
     settings.optimize = 2;
     // Initialize the interpreter
-    vm::Interpreter::with_init(settings, |vm| {
+    let interpreter = vm::Interpreter::with_init(settings, |vm| {
+        // Register only the native modules the interpreter needs to start
+        vm::common::rc::PyRc::get_mut(&mut vm.state)
+            .expect("interpreter state is not shared during initialization")
+            .module_inits
+            .retain(|name, _| INTERPRETER_INIT_MODULES.contains(&name.as_ref()));
         // Import the native rust module used to define the packet interface
         vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
         // Import the native rust module used for dns parsing
@@ -400,7 +462,24 @@ pub(crate) fn new_python_interpreter(hash_seed: u32) -> vm::Interpreter {
         vm.add_native_module("tls".to_owned(), Box::new(rust_tls::make_module));
         // Import the native rust module used for QUIC Initial parsing
         vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
-    })
+    });
+    interpreter
+        .enter(|vm| {
+            // Gate imports
+            let import = vm.new_function("__import__", sandboxed_import);
+            vm.builtins.set_attr("__import__", import, vm)?;
+            // Drop the interpreter's own modules from the import cache, which
+            // `import x` consults before calling __import__
+            vm.sys_module.set_attr("modules", vm.ctx.new_dict(), vm)?;
+            // No file access
+            vm.builtins.dict().del_item("open", vm)?;
+            Ok::<_, PyBaseExceptionRef>(())
+        })
+        .unwrap_or_else(|err| {
+            interpreter.enter(|vm| vm.print_exception(err));
+            panic!("failed to restrict the censor-script interpreter");
+        });
+    interpreter
 }
 
 impl TransportState {
