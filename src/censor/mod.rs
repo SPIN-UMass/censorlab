@@ -498,6 +498,11 @@ impl Censor {
                 return Ok(Action::None);
             }
         };
+        let ips = IpPair::V4 {
+            src: ipv4_packet.src_addr(),
+            dst: ipv4_packet.dst_addr(),
+        };
+        let ip_layer = IpLayer::from_ipv4(&ipv4_packet);
         // Check config-level IP allow/blocklist
         match self
             .ipv4_list
@@ -505,8 +510,7 @@ impl Censor {
         {
             Some(Action::None) | None => {}
             Some(Action::Reset { .. }) => {
-                warn!("Reset is not valid for IP allow/blocklist. Dropping instead");
-                return Ok(Action::Drop);
+                return Ok(reset_or_drop_ip(ips, Some(&ip_layer)).add_ipid(ipv4_packet.ident()));
             }
             Some(action) => return Ok(action),
         }
@@ -532,14 +536,7 @@ impl Censor {
             }
         };
         // Process the remainder using the generic IP handler
-        let result = self.process_ip(
-            IpPair::V4 {
-                src: ipv4_packet.src_addr(),
-                dst: ipv4_packet.dst_addr(),
-            },
-            direction,
-            IpLayer::from_ipv4(&ipv4_packet),
-        );
+        let result = self.process_ip(ips, direction, ip_layer);
         result.map(|action| action.add_ipid(ipv4_packet.ident()))
     }
     /// Processes an IPv6 packet based on its metadata and our internal state
@@ -560,6 +557,12 @@ impl Censor {
                 return Ok(Action::None);
             }
         };
+        let ips = IpPair::V6 {
+            src: ipv6_packet.src_addr(),
+            dst: ipv6_packet.dst_addr(),
+        };
+        // Find the upper-layer protocol behind any extension headers
+        let ip_layer = IpLayer::from_ipv6(&ipv6_packet);
         // Check config-level IP allow/blocklist
         match self
             .ipv6_list
@@ -567,8 +570,7 @@ impl Censor {
         {
             Some(Action::None) | None => {}
             Some(Action::Reset { .. }) => {
-                warn!("Reset is not valid for IP allow/blocklist. Dropping instead");
-                return Ok(Action::Drop);
+                return Ok(reset_or_drop_ip(ips, ip_layer.as_ref().ok()));
             }
             Some(action) => return Ok(action),
         }
@@ -593,12 +595,7 @@ impl Censor {
                 }
             }
         };
-        let ips = IpPair::V6 {
-            src: ipv6_packet.src_addr(),
-            dst: ipv6_packet.dst_addr(),
-        };
-        // Find the upper-layer protocol behind any extension headers
-        match IpLayer::from_ipv6(&ipv6_packet) {
+        match ip_layer {
             // Process the remainder using the generic IP handler
             Ok(ip_layer) => self.process_ip(ips, direction, ip_layer),
             // A broken extension-header chain hides the upper-layer protocol
@@ -607,7 +604,7 @@ impl Censor {
                     "Could not determine upper-layer protocol ({}). Performing {} action",
                     err, self.ip_unknown
                 );
-                Ok(self.ip_unknown.clone())
+                Ok(without_reset(self.ip_unknown.clone()))
             }
         }
     }
@@ -657,7 +654,8 @@ impl Censor {
                     "Encountered packet with unknown IP protocol {}. Performing {} action",
                     other, self.ip_unknown
                 );
-                Ok(self.ip_unknown.clone())
+                // Never TCP, so there is no connection to reset
+                Ok(without_reset(self.ip_unknown.clone()))
             }
         }
     }
@@ -695,7 +693,7 @@ impl Censor {
                 .recommend_either(&packet.transport.src, &packet.transport.dst)
             {
                 Some(Action::None) | None => {}
-                Some(action) => return Ok(action),
+                Some(action) => return Ok(for_connection(action, ips, &packet)),
             }
             // TCP ip:port allow/blocklist
             let src_ipport = crate::config::IpPort(ips.src_std(), packet.transport.src);
@@ -705,7 +703,7 @@ impl Censor {
                 .recommend_either(&src_ipport, &dst_ipport)
             {
                 Some(Action::None) | None => {}
-                Some(action) => return Ok(action),
+                Some(action) => return Ok(for_connection(action, ips, &packet)),
             }
         } else {
             // UDP port allow/blocklist
@@ -714,7 +712,7 @@ impl Censor {
                 .recommend_either(&packet.transport.src, &packet.transport.dst)
             {
                 Some(Action::None) | None => {}
-                Some(action) => return Ok(action),
+                Some(action) => return Ok(for_connection(action, ips, &packet)),
             }
             // UDP ip:port allow/blocklist
             let src_ipport = crate::config::IpPort(ips.src_std(), packet.transport.src);
@@ -724,13 +722,44 @@ impl Censor {
                 .recommend_either(&src_ipport, &dst_ipport)
             {
                 Some(Action::None) | None => {}
-                Some(action) => return Ok(action),
+                Some(action) => return Ok(for_connection(action, ips, &packet)),
             }
         }
 
         self.transport_state.process(ips, direction, packet)
     }
 }
+
+/// Resolve a config-list action against the packet that triggered it: a Reset becomes a
+/// RST for that packet's TCP connection (or Drop for UDP, which has none to reset).
+fn for_connection(action: Action, ips: IpPair, packet: &Packet) -> Action {
+    if action.is_reset() {
+        crate::transport::reset_or_drop(ips, &packet.transport, packet.payload.len())
+    } else {
+        action
+    }
+}
+
+/// Resolve an IP-rule Reset: a RST for the TCP connection the packet belongs to, or Drop
+/// when it is not well-formed TCP (other protocols, fragments, truncated headers, or an
+/// unparseable IPv6 extension-header chain, passed as `None`).
+fn reset_or_drop_ip(ips: IpPair, ip_layer: Option<&IpLayer>) -> Action {
+    ip_layer
+        .filter(|ip_layer| ip_layer.protocol == IpProtocol::Tcp)
+        .and_then(|ip_layer| Packet::from_ip_layer(None, ip_layer).ok())
+        .map(|packet| crate::transport::reset_or_drop(ips, &packet.transport, packet.payload.len()))
+        .unwrap_or(Action::Drop)
+}
+
+/// Replace a Reset with Drop for traffic that can never be TCP.
+fn without_reset(action: Action) -> Action {
+    if action.is_reset() {
+        Action::Drop
+    } else {
+        action
+    }
+}
+
 impl fmt::Display for Censor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "Censor Parameters:")?;

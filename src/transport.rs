@@ -148,6 +148,42 @@ pub enum ExecutionEnvironment {
     CensorLang { env: ProgramEnv },
 }
 
+/// Build the Reset action for the TCP connection a packet belongs to.
+///
+/// This is the only place a Reset is populated from a packet, so every source of a
+/// Reset (scripts, CensorLang, config lists) targets the same connection the same way.
+/// Returns `None` for non-TCP packets, which have no connection to reset.
+pub fn reset_for(
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Option<Action> {
+    let TransportMetadataExtra::Tcp(tcp) = transport.extra else {
+        return None;
+    };
+    Some(Action::Reset {
+        src_mac: [0; 6],
+        dst_mac: [0; 6],
+        ips,
+        ipid: None,
+        src_port: transport.src,
+        dst_port: transport.dst,
+        seq: tcp.seq,
+        ack: tcp.ack,
+        payload_len,
+        is_ack: tcp.flags.ack,
+    })
+}
+
+/// [`reset_for`], falling back to Drop for traffic that has no TCP connection to reset.
+pub fn reset_or_drop(
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Action {
+    reset_for(ips, transport, payload_len).unwrap_or(Action::Drop)
+}
+
 /// Recognize the value returned by a PyCL `process()` call and map it to an
 /// engine [`Action`].
 ///
@@ -177,24 +213,7 @@ fn action_from_python(
     }
     if let Some(s) = result.payload::<PyStr>() {
         return match s.as_str().to_lowercase().as_str() {
-            "reset" => {
-                if let TransportMetadataExtra::Tcp(tcp_metadata) = transport.extra {
-                    Action::Reset {
-                        src_mac: [0; 6],
-                        dst_mac: [0; 6],
-                        ips,
-                        ipid: None,
-                        src_port: transport.src,
-                        dst_port: transport.dst,
-                        seq: tcp_metadata.seq,
-                        ack: tcp_metadata.ack,
-                        payload_len,
-                        is_ack: tcp_metadata.flags.ack,
-                    }
-                } else {
-                    Action::Drop
-                }
-            }
+            "reset" => reset_or_drop(ips, transport, payload_len),
             "drop" => Action::Drop,
             "allow" => Action::None,
             other => {
@@ -601,25 +620,7 @@ impl TransportState {
                         ProgramAction::AllowAll => Action::Ignore,
                         ProgramAction::TerminateAll => Action::Drop,
                         ProgramAction::ResetAll => {
-                            if let TransportMetadataExtra::Tcp(tcp_metadata) =
-                                packet.transport.extra
-                            {
-                                Action::Reset {
-                                    src_mac: [0; 6],
-                                    dst_mac: [0; 6],
-                                    ips,
-                                    ipid: None,
-                                    src_port: packet.transport.src,
-                                    dst_port: packet.transport.dst,
-                                    seq: tcp_metadata.seq,
-                                    ack: tcp_metadata.ack,
-                                    payload_len: packet.payload.len(),
-                                    is_ack: tcp_metadata.flags.ack,
-                                }
-                            } else {
-                                // Reset is only meaningful for TCP; fall back to Drop for UDP
-                                Action::Drop
-                            }
+                            reset_or_drop(ips, &packet.transport, packet.payload.len())
                         }
                     }
                 } else {

@@ -1779,3 +1779,102 @@ action = "Drop"
     );
     assert_eq!(result.action_lines.len(), 1, "{:?}", result.action_lines);
 }
+
+// ==========================================================================
+// List-derived Resets must target the triggering connection
+// ==========================================================================
+
+#[test]
+fn test_tcp_port_blocklist_reset_is_populated() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+
+    PcapBuilder::new()
+        // frame 0: data segment to port 443 -> Reset for this connection
+        .add_frame(&tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 1000, 2000, b"hello"))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.port_blocklist]
+list = [443]
+action = "Reset"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 1, "{:?}", result.action_lines);
+    let action = &result.action_lines[0].action;
+    for needle in [
+        "Reset",
+        "src: Address([10, 0, 0, 1])",
+        "dst: Address([93, 184, 216, 34])",
+        "src_port: 50000",
+        "dst_port: 443",
+        "seq: SeqNumber(1000)",
+        "ack: SeqNumber(2000)",
+        "is_ack: true",
+    ] {
+        assert!(action.contains(needle), "expected {needle:?} in {action}");
+    }
+}
+
+#[test]
+fn test_ip_blocklist_reset_resets_tcp_and_drops_other_traffic() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let blocked = [8, 8, 8, 8];
+
+    PcapBuilder::new()
+        // frame 0: TCP to a blocked IP -> populated Reset
+        .add_frame(&tcp_frame(client, blocked, 50000, 80, TCP_PSH_ACK, 1000, 2000, b"hi"))
+        // frame 1: ICMP to a blocked IP -> no connection to reset, so Drop
+        .add_frame(&ipv4_raw_frame(client, blocked, 1, &icmp_echo(8)))
+        // frame 2: UDP to a blocked IP -> Drop
+        .add_frame(&udp_frame(client, blocked, 50001, 53, &[0; 4]))
+        // frame 3: truncated TCP header to a blocked IP -> Drop
+        .add_frame(&ipv4_raw_frame(client, blocked, 6, &[0; 4]))
+        // frame 4: TCP over IPv6 behind a hop-by-hop header -> populated Reset
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP,
+                                   &hop_by_hop(TCP, &raw_tcp_header(50002, 443, TCP_SYN, 7, 0))))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["8.8.8.8", "2001:db8::2"]
+action = "Reset"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 5, "{:?}", result.action_lines);
+    let reset = &result.action_lines[0].action;
+    for needle in ["Reset", "src_port: 50000", "dst_port: 80", "seq: SeqNumber(1000)"] {
+        assert!(reset.contains(needle), "expected {needle:?} in {reset}");
+    }
+    let reset_v6 = &result.action_lines[4].action;
+    for needle in ["Reset", "src_port: 50002", "dst_port: 443", "seq: SeqNumber(7)"] {
+        assert!(reset_v6.contains(needle), "expected {needle:?} in {reset_v6}");
+    }
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(1), frame_idx(2), frame_idx(3)],
+        "{:?}",
+        result.action_lines
+    );
+}

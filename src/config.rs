@@ -68,7 +68,7 @@ impl Config {
     }
     /// Validate config invariants that can't be enforced at the type level.
     fn validate(&self) -> Result<(), ConfigLoadError> {
-        // Reset is only valid at the transport layer (TCP); reject it for ethernet/ARP/IP/ICMP
+        // Reset tears down a TCP connection; reject it where no TCP traffic can match
         if self.ethernet.unknown.is_reset() {
             return Err(ConfigLoadError::Validation(
                 "\"Reset\" is not a valid action for ethernet.unknown (only valid for TCP)".into(),
@@ -93,6 +93,20 @@ impl Config {
             return Err(ConfigLoadError::Validation(
                 "\"Reset\" is not a valid action for ICMP (only valid for TCP)".into(),
             ));
+        }
+        // UDP lists only ever match UDP traffic, so a Reset there could never send a RST.
+        // (IP lists may Reset: TCP traffic gets a RST and anything else is dropped.)
+        for (name, action) in [
+            ("udp.port_allowlist", &self.udp.port_allowlist.action),
+            ("udp.port_blocklist", &self.udp.port_blocklist.action),
+            ("udp.ip_port_allowlist", &self.udp.ip_port_allowlist.action),
+            ("udp.ip_port_blocklist", &self.udp.ip_port_blocklist.action),
+        ] {
+            if action.is_reset() {
+                return Err(ConfigLoadError::Validation(format!(
+                    "\"Reset\" is not a valid action for {name} (only valid for TCP)"
+                )));
+            }
         }
         Ok(())
     }
@@ -245,6 +259,10 @@ pub mod ip {
 
     #[derive(Default, Deserialize)]
     /// Config related to IP handling
+    ///
+    /// A `Reset` action here sends a RST for the matching packet's TCP connection, and
+    /// drops any matching packet that is not well-formed TCP (so `unknown`, which never
+    /// sees TCP, treats `Reset` as `Drop`).
     pub struct Config {
         /// Allowlist of IP addresses
         #[serde(default)]
@@ -544,6 +562,51 @@ ip_port_allowlist = { list = [] }
 
 [tcp.port_blocklist]
 list = [80]
+action = "Reset"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_reset_on_every_udp_list() {
+        for list in ["port_allowlist", "port_blocklist", "ip_port_allowlist", "ip_port_blocklist"] {
+            let toml_str = format!(
+                r#"
+[execution]
+mode = "Python"
+
+[udp]
+ip_port_allowlist = {{ list = [] }}
+
+[udp.{list}]
+list = []
+action = "Reset"
+"#
+            )
+            .replace("ip_port_allowlist = { list = [] }\n\n[udp.ip_port_allowlist]", "[udp.ip_port_allowlist]");
+            let config: Config = toml::from_str(&toml_str).unwrap();
+            let err = config.validate().expect_err(list).to_string();
+            assert!(err.contains(&format!("udp.{list}")), "{list}: {err}");
+        }
+    }
+
+    #[test]
+    fn validate_allows_reset_on_ip_lists() {
+        // TCP traffic matching an IP rule gets a real RST; anything else is dropped.
+        let toml_str = r#"
+[execution]
+mode = "Python"
+
+[ip]
+unknown = "Reset"
+
+[ip.blocklist]
+list = ["192.0.2.1"]
+action = "Reset"
+
+[ip.allowlist]
+list = ["192.0.2.2"]
 action = "Reset"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
