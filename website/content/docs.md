@@ -27,14 +27,15 @@ git submodule update --init
 # Interactive shell
 bash docker/censorlab.sh --shell
 
-# Run directly (NFQ mode — requires sudo for live interception)
-sudo bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
+# Run directly (NFQ mode — intercepts traffic inside the container only)
+bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
 
-# Run directly (PCAP mode — no special permissions needed)
-bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap traffic.pcap 192.168.1.100
+# Run directly (PCAP mode — no special permissions needed; mount the capture in)
+DOCKER_ARGS="-v $PWD/traffic.pcap:/tmp/traffic.pcap:ro" \
+  bash docker/censorlab.sh -c demos/dns_blocking/censor.toml pcap /tmp/traffic.pcap 192.168.1.100
 ```
 
-The Docker wrapper auto-detects NFQ vs PCAP mode and configures networking and capabilities accordingly. The image is automatically rebuilt when source files change.
+The Docker wrapper auto-detects NFQ vs PCAP mode and grants the `NET_ADMIN`/`NET_RAW` capabilities NFQ needs. Both modes run in the container's own isolated network namespace (no host networking), so NFQ mode only intercepts traffic originating inside the container — use `--shell` and generate traffic from there. The image is automatically rebuilt when source files change.
 
 ### Build from Source
 

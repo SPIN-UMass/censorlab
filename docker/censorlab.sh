@@ -2,15 +2,18 @@
 # censorlab.sh — Run CensorLab in Docker with one command.
 #
 # Builds the Docker image if needed, auto-detects NFQ vs PCAP mode,
-# and picks the right Compose service (host networking + capabilities
-# for NFQ, isolated container otherwise).
+# and picks the right Compose service (NET_ADMIN/NET_RAW capabilities
+# for NFQ, none otherwise). Both services run in their own isolated
+# network namespace (no host networking): NFQ mode only intercepts
+# traffic originating inside the container, e.g. from a --shell session.
 #
 # Usage:
 #   bash docker/censorlab.sh [censorlab args...]
-#   bash docker/censorlab.sh --shell          (NFQ-capable shell, host networking)
-#   bash docker/censorlab.sh --shell-no-nfq   (isolated shell, no host networking)
+#   bash docker/censorlab.sh --shell          (NFQ-capable shell: NET_ADMIN/NET_RAW)
+#   bash docker/censorlab.sh --shell-no-nfq   (shell without extra capabilities)
 #   bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
-#   bash docker/censorlab.sh -c censor.toml pcap traffic.pcap
+#   DOCKER_ARGS="-v $PWD/traffic.pcap:/tmp/traffic.pcap:ro" \
+#     bash docker/censorlab.sh -c demos/http_blocking/censor.toml pcap /tmp/traffic.pcap <CLIENT_IP>
 #
 # The image is automatically rebuilt when source files change.
 #
@@ -52,8 +55,8 @@ if [ "$BUILD_HASH" = "unknown" ] || [ "$BUILD_HASH" != "$STORED_HASH" ]; then
     echo ""
 fi
 
-# --shell flag: drop into an interactive shell (with host networking + NET_ADMIN/NET_RAW by default)
-# Use --shell-no-nfq for a shell without host networking/capabilities
+# --shell flag: drop into an interactive shell (with NET_ADMIN/NET_RAW by default)
+# Use --shell-no-nfq for a shell without those capabilities
 if [ "${1:-}" = "--shell" ] || [ "${1:-}" = "--shell-no-nfq" ]; then
     SERVICE="censorlab-nfq"
     if [ "${1:-}" = "--shell-no-nfq" ]; then
