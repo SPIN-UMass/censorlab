@@ -182,7 +182,7 @@ mod tests {
             None,
             1,
             2,
-            TcpSeqNumber(0),
+            Some(TcpSeqNumber(0)),
             TcpSeqNumber(0),
         )
         .unwrap();

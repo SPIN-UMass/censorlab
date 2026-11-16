@@ -465,7 +465,7 @@ mod tests {
             None,
             40000,
             443,
-            TcpSeqNumber(2000),
+            Some(TcpSeqNumber(2000)),
             TcpSeqNumber(1000),
         )
         .unwrap()
