@@ -32,9 +32,7 @@ fn demo_config(name: &str) -> PathBuf {
 }
 
 /// See `frame_idx` in pcap_integration.rs: the first frame is packet_index 2.
-fn frame_idx(n: usize) -> usize {
-    n + 2
-}
+const FIRST_FRAME_INDEX: usize = 2;
 
 /// Write `frames` to a pcap and run the named demo over it.
 fn run_demo(demo: &str, frames: &[Vec<u8>]) -> RunResult {
@@ -56,7 +54,7 @@ fn frames_with(result: &RunResult, needle: &str) -> Vec<usize> {
         .action_lines
         .iter()
         .filter(|l| l.action.contains(needle))
-        .map(|l| l.packet_index - 2)
+        .map(|l| l.packet_index - FIRST_FRAME_INDEX)
         .collect()
 }
 
@@ -173,26 +171,58 @@ fn test_demo_shadowsocks_poisoned_ip_blocklist() {
     frames.extend(tcp_flow(SERVER, 50001, 8388, b"hello"));
 
     let result = run_demo("shadowsocks_poisoned", &frames);
-    let reset = frames_with(&result, "Reset");
-    assert!(
-        reset.contains(&0) && reset.iter().all(|&f| f < 4),
-        "traffic to 192.168.31.1 must be reset and nothing else: {:?}\n{}",
+    // The config asks for "Reset", but the engine only supports Reset at the
+    // TCP layer and downgrades an IP-list Reset to Drop (with a warning).
+    let blocked_frames: Vec<usize> = result.action_lines.iter().map(|l| l.packet_index - FIRST_FRAME_INDEX).collect();
+    assert_eq!(
+        blocked_frames,
+        vec![0, 1, 2, 3],
+        "every packet to/from 192.168.31.1, and nothing else, must be blocked: {:?}\n{}",
         result.action_lines,
         result.stdout
     );
+    assert!(
+        result.action_lines.iter().all(|l| l.action.contains("Drop") || l.action.contains("Reset")),
+        "{:?}",
+        result.action_lines
+    );
 }
 
-#[test]
-fn test_demo_shadowsocks_poisoned_model_runs() {
-    // A 40-packet flow, so the script evaluates the model at packet 30.
-    let mut frames = tcp_flow(SERVER, 50000, 8388, &high_entropy_payload(256));
+/// A 40-packet bidirectional flow on `cport` whose data segments carry
+/// `payload`, so the script evaluates the model at packet 30.
+fn long_flow(cport: u16, payload: &[u8]) -> Vec<Vec<u8>> {
+    let mut frames = tcp_flow(SERVER, cport, 8388, payload);
     for i in 0..36u32 {
         let (src, dst, sp, dp) = if i % 2 == 0 {
-            (CLIENT, SERVER, 50000, 8388)
+            (CLIENT, SERVER, cport, 8388)
         } else {
-            (SERVER, CLIENT, 8388, 50000)
+            (SERVER, CLIENT, 8388, cport)
         };
-        frames.push(tcp_frame(src, dst, sp, dp, TCP_PSH_ACK, 1000 + i, 1000, &high_entropy_payload(256)));
+        frames.push(tcp_frame(src, dst, sp, dp, TCP_PSH_ACK, 1000 + i, 1000, payload));
+    }
+    frames
+}
+
+/// Regression test pinning the poisoned model's current verdicts: the script
+/// consults the model exactly once, at a connection's 30th packet, and resets
+/// when P(circumvention) < 0.5.  Of these synthetic flows only the one with
+/// all-empty payloads scores below 0.5; the random-looking and plaintext
+/// flows are let through.
+#[test]
+fn test_demo_shadowsocks_poisoned_model() {
+    const FLOW_LEN: usize = 40;
+    let flows: [&[u8]; 5] = [
+        &high_entropy_payload(256),
+        b"GET / HTTP/1.1\r\nHost: a\r\n\r\n",
+        &[],
+        &high_entropy_payload(1400),
+        &[b'A'; 1400],
+    ];
+    let mut frames = Vec::new();
+    for (k, payload) in flows.iter().enumerate() {
+        let flow = long_flow(50000 + k as u16, payload);
+        assert_eq!(flow.len(), FLOW_LEN);
+        frames.extend(flow);
     }
     let result = run_demo("shadowsocks_poisoned", &frames);
     let combined = format!("{}{}", result.stdout, result.stderr);
@@ -200,12 +230,14 @@ fn test_demo_shadowsocks_poisoned_model_runs() {
         !combined.contains("ERROR") && !combined.contains("Traceback"),
         "model evaluation must not error:\n{combined}"
     );
-    // The model is only consulted at packet 30, so nothing before it can fire.
-    assert!(
-        result.action_lines.iter().all(|l| l.packet_index >= frame_idx(29)),
+    // Flow 2 (empty payloads), packet 30 of that connection.
+    assert_eq!(
+        frames_with(&result, "Reset"),
+        vec![2 * FLOW_LEN + 29],
         "{:?}",
         result.action_lines
     );
+    assert_eq!(result.action_lines.len(), 1, "{:?}", result.action_lines);
 }
 
 // ==========================================================================
