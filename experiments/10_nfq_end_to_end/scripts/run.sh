@@ -32,9 +32,28 @@ read -r -a VARIANTS <<< "${VARIANTS:-none null pycl censorlang}"
 CLIENT_IP=172.30.0.10
 COMPOSE=(docker compose -f "$EXP_DIR/docker-compose.yml" -p censorlab-nfq)
 
+REBUILD_HINT="nix build .#docker-live && docker load < result"
 if ! docker image inspect censorlab-live:latest >/dev/null 2>&1; then
-    echo "censorlab-live image missing: nix build .#docker-live && docker load < result" >&2
+    echo "censorlab-live image missing: $REBUILD_HINT" >&2
     exit 1
+fi
+# Staleness: the image is labelled with the store path of the censorlab it
+# contains; compare against what this checkout evaluates to (no build needed).
+# Set ALLOW_STALE_IMAGE=1 to skip (e.g. on a host without nix).
+if [ "${ALLOW_STALE_IMAGE:-0}" != 1 ]; then
+    loaded="$(docker image inspect --format '{{index .Config.Labels "censorlab.package"}}' \
+        censorlab-live:latest)"
+    expected="$(nix build --dry-run --json --no-link "$REPO_ROOT#censorlab" \
+        | grep -o '"out":"/nix/store/[^"]*"' | cut -d'"' -f4)"
+    if [ -z "$expected" ]; then
+        echo "could not evaluate $REPO_ROOT#censorlab (set ALLOW_STALE_IMAGE=1 to skip this check)" >&2
+        exit 1
+    fi
+    if [ "$loaded" != "$expected" ]; then
+        echo "censorlab-live image is stale (contains ${loaded:-unlabelled build}, checkout is $expected)." >&2
+        echo "Rebuild: $REBUILD_HINT   (or set ALLOW_STALE_IMAGE=1)" >&2
+        exit 1
+    fi
 fi
 
 censor_cmd() {
@@ -51,6 +70,7 @@ censor_cmd() {
 cleanup() { "${COMPOSE[@]}" down -t 1 >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
+FAILED=()
 for scenario in "${SCENARIOS[@]}"; do
     for variant in "${VARIANTS[@]}"; do
         results="$EXP_DIR/results/$scenario/$variant"
@@ -66,6 +86,7 @@ for scenario in "${SCENARIOS[@]}"; do
             echo "  [ok] $scenario/$variant"
         else
             echo "  [FAILED] $scenario/$variant (see $results/client.log)"
+            FAILED+=("$scenario/$variant")
         fi
         "${COMPOSE[@]}" logs --no-color censor > "$results/censor.log" 2>&1 || true
         cleanup
@@ -73,3 +94,9 @@ for scenario in "${SCENARIOS[@]}"; do
 done
 
 python3 "$SCRIPT_DIR/analyze.py"
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "" >&2
+    echo "${#FAILED[@]} variant(s) failed: ${FAILED[*]}" >&2
+    exit 1
+fi

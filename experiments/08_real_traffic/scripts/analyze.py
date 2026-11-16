@@ -7,7 +7,8 @@ and writes:
     results/real_traffic.csv    one row per (scenario, mix, tool)
     results/real_traffic.json   same, plus mix metadata
 
-Columns: scenario, mix, background_packets, total_packets, tool, status,
+Columns: scenario, mix, background (ustc|iscx|combined), background_packets,
+total_packets, tool, status,
 wall_median_us, wall_stdev_us, startup_us, net_us, cpu_us, max_rss_kb,
 net_per_packet_us, throughput_pps, n, tpr, tnr, background_flows,
 background_flagged, note.
@@ -41,8 +42,19 @@ def load_mixes(path):
             m = _MIX_LINE.match(line)
             if not m:
                 raise ValueError(f"{path}:{lineno}: unrecognized line {line!r}")
+            if m.group(1).endswith(tuple("_" + b for b in BACKGROUNDS if b != "ustc")):
+                raise ValueError(f"{path}:{lineno}: mix name {m.group(1)!r} uses a reserved suffix")
             mixes.append((m.group(1), int(m.group(2))))
     return mixes
+
+
+# Background datasets (see common.sh): result directories are
+# results/<scenario>/<mix> for ustc and results/<scenario>/<mix>_<background> otherwise.
+BACKGROUNDS = ("ustc", "iscx", "combined")
+
+
+def mix_id(mix, background):
+    return mix if background == "ustc" else f"{mix}_{background}"
 
 
 def load_json(path):
@@ -58,8 +70,8 @@ def main():
     rows = []
     for scenario in sorted(d for d in os.listdir(results_root)
                            if os.path.isdir(os.path.join(results_root, d))):
-        for mix, bg_packets in mixes:
-            rdir = os.path.join(results_root, scenario, mix)
+        for background, mix, bg_packets in ((b, m, n) for b in BACKGROUNDS for m, n in mixes):
+            rdir = os.path.join(results_root, scenario, mix_id(mix, background))
             t4 = load_json(os.path.join(rdir, "table4.json"))
             acc = load_json(os.path.join(rdir, "accuracy.json"))
             if t4 is None:
@@ -72,6 +84,7 @@ def main():
                 rows.append({
                     "scenario": scenario,
                     "mix": mix,
+                    "background": background,
                     "background_packets": bg_packets,
                     "total_packets": total_packets,
                     "tool": r["tool"],
@@ -113,18 +126,18 @@ def main():
         return f"{v / scale:>{w}.{nd}f}"
 
     for scenario in sorted({r["scenario"] for r in rows}):
-        print("=" * 118)
+        print("=" * 126)
         print(f"{scenario}")
-        print("=" * 118)
-        print(f"{'mix':<7} {'pkts':>7} {'tool':<11} {'wall(ms)':>9} {'±sd':>7} {'startup':>8} {'net(ms)':>8} "
+        print("=" * 126)
+        print(f"{'mix':<15} {'pkts':>7} {'tool':<11} {'wall(ms)':>9} {'±sd':>7} {'startup':>8} {'net(ms)':>8} "
               f"{'us/pkt':>7} {'kpps':>6} {'cpu(ms)':>8} {'RSS(MB)':>8} {'TPR':>6} {'TNR':>6} {'bg-flag':>9}")
-        print("-" * 118)
+        print("-" * 126)
         for r in rows:
             if r["scenario"] != scenario or r["status"] != "measured":
                 continue
             bg = (f"{r['background_flagged']}/{r['background_flows']}"
                   if r["background_flows"] else "-")
-            print(f"{r['mix']:<7} {fmt(r['total_packets'], 7)} {r['tool']:<11} "
+            print(f"{mix_id(r['mix'], r['background']):<15} {fmt(r['total_packets'], 7)} {r['tool']:<11} "
                   f"{fmt(r['wall_median_us'], 9, 1000, 1)} {fmt(r['wall_stdev_us'], 7, 1000, 1)} "
                   f"{fmt(r['startup_us'], 8, 1000, 1)} {fmt(r['net_us'], 8, 1000, 1)} "
                   f"{fmt(r['net_per_packet_us'], 7, 1, 2)} {fmt(r['throughput_pps'], 6, 1000, 0)} "

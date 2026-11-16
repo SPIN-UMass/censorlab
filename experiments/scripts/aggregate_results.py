@@ -234,14 +234,19 @@ def static_analysis_macros(static):
     lines.append("% Experiment 9: CensorLang static cost bounds")
     lines.append("% ============================================================")
     lines.append("% Command format: \\Static<Program><Metric>")
-    lines.append("% Metrics: Lines, ConnBytes (per-connection state incl. engine counters),")
-    lines.append("%          HostBytes, Ops (worst-case constant-time ops per packet),")
+    lines.append("% Metrics: Lines, ConnBytes (per-connection state the engine allocates:")
+    lines.append("%          full register banks + model buffers + engine state),")
+    lines.append("%          ConnTouchedBytes (same, counting only registers the program uses),")
+    lines.append("%          HostBytes (host registers the program uses),")
+    lines.append("%          Ops (worst-case constant-time ops per packet),")
     lines.append("%          Regex (regex evaluations per packet), ModelCalls")
     lines.append("")
     for program, r in static.items():
         base = f"Static{sanitize_cmd(program)}"
         lines.append(f"\\newcommand{{\\{base}Lines}}{{{r['lines']}}}")
         lines.append(f"\\newcommand{{\\{base}ConnBytes}}{{{r['per_connection_bytes']}}}")
+        if "per_connection_touched_bytes" in r:
+            lines.append(f"\\newcommand{{\\{base}ConnTouchedBytes}}{{{r['per_connection_touched_bytes']}}}")
         lines.append(f"\\newcommand{{\\{base}HostBytes}}{{{r['per_host_register_bytes']}}}")
         lines.append(f"\\newcommand{{\\{base}Ops}}{{{r['constant_ops']}}}")
         lines.append(f"\\newcommand{{\\{base}Regex}}{{{r['regex_evaluations']}}}")
@@ -258,17 +263,22 @@ def real_traffic_macros(rows):
     lines.append("% Experiment 8: real-traffic workloads with background mixes")
     lines.append("% ============================================================")
     lines.append("% Command format: \\Real<Scenario><Mix><Tool><Metric>")
-    lines.append("% Mix ∈ BgZero BgTenK BgNinetyK BgThreeNinetyK; Metrics: WallTime, WallStdev,")
+    lines.append("% Mix ∈ BgZero BgTenK BgNinetyK BgThreeNinetyK (USTC-TFC2016), each optionally")
+    lines.append("%   suffixed Iscx (ISCXVPN2016) or Combined (USTC+ISCX); Metrics: WallTime, WallStdev,")
     lines.append("%   StartupTime, NetTime (s), UsPerPkt, Kpps, Cpu (s), Rss (MB), TPR, TNR,")
     lines.append("%   BgFlagged, BgFlows, Packets")
     lines.append("")
     mix_names = {"bg0": "BgZero", "bg10k": "BgTenK", "bg90k": "BgNinetyK", "bg390k": "BgThreeNinetyK"}
+    background_names = {"ustc": "", "iscx": "Iscx", "combined": "Combined"}
     scenario_macro = {k: v for k, v in EXPERIMENT_SCENARIOS.items()}
     for r in rows:
         if r.get("status") != "measured":
             continue
         scn = scenario_macro.get(r["scenario"], sanitize_cmd(r["scenario"]))
         mix = mix_names.get(r["mix"], sanitize_cmd(r["mix"]))
+        # USTC-only rows keep the original macro names; other backgrounds
+        # (ISCXVPN2016, USTC+ISCX combined) get a suffix on the mix.
+        mix += background_names.get(r.get("background", "ustc"), sanitize_cmd(r.get("background", "")))
         tool = TOOL_NAMES.get(r["tool"], sanitize_cmd(r["tool"]))
         base = f"Real{scn}{mix}{tool}"
 

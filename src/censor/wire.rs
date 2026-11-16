@@ -144,7 +144,7 @@ pub(super) fn plan_frame(
             seq,
             ack,
             is_ack,
-            payload_len,
+            seg_len,
             ..
         } => {
             // Forward the triggering segment first so the destination's
@@ -166,7 +166,7 @@ pub(super) fn plan_frame(
                 dst_port,
                 ack,
                 seq,
-                payload_len,
+                seg_len,
                 is_ack,
             ) {
                 Ok((mut to_source, mut to_dest)) => {
@@ -509,7 +509,7 @@ mod tests {
             seq: TcpSeqNumber(1000),
             ack: TcpSeqNumber(2000),
             is_ack: true,
-            payload_len: 0,
+            seg_len: 0,
         };
         let plan = plan_frame(Ok(action), &f, 2);
         // original, then 2 x (to source, to destination)

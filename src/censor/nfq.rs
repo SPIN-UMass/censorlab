@@ -1,18 +1,18 @@
 use super::{Action, Censor};
 use crate::censor::{ClientAddrs, HandleIpcError, IpPair};
+use crate::delay::DelayQueue;
 use crate::inject::{InjectError, RawIpInjector};
 use crate::route;
-use crate::watermark::Delayer;
 use clap::Parser;
-use nfq::{Queue, Verdict};
+use nfq::{Message, Queue, Verdict};
 use ort::Error as OrtError;
 use procfs::ProcError;
 use smoltcp::wire::{EthernetAddress, EthernetFrame, IpAddress, TcpSeqNumber};
 use std::fmt;
 use std::io;
 use std::net::IpAddr;
+use std::time::Instant as StdInstant;
 use thiserror::Error;
-use tokio::task::JoinError;
 use tracing::{error, info, trace, warn};
 
 /// Default IPTables table
@@ -223,14 +223,19 @@ impl Drop for IpTablesRuleActivated {
         }
     }
 }
-/// Context for the NFQ censor, providing network identity and packet delay support.
+/// Context for the NFQ censor, providing network identity.
 pub struct Context {
     pub client: ClientAddrs,
     /// Stored for potential future use in direction-less traffic handling.
     #[allow(dead_code)]
     pub no_dir_action: Action,
-    /// Module for delaying packets
-    pub delayer: Delayer,
+}
+
+/// Which netfilter queue a held message came from (its verdict must go back there).
+#[derive(Clone, Copy)]
+enum QueueSide {
+    In,
+    Out,
 }
 
 /// Strip the Ethernet header from a frame built by `construct_reset` /
@@ -299,7 +304,6 @@ impl Censor {
         let mut context_nfq = Context {
             client,
             no_dir_action: args.no_dir_action.clone(),
-            delayer: Delayer::new(interface_name),
         };
         // Convert context to generic
         let mut context = (&mut context_nfq).into();
@@ -346,6 +350,11 @@ impl Censor {
         // Start processing packets
         info!("Starting packet loop");
         let mut packet_num = 0;
+        // Packets held by the delay action. We keep the NFQ message itself and
+        // only issue its Accept verdict once the deadline passes, so the kernel
+        // resumes the packet exactly where it was intercepted (correct
+        // direction, routing and link layer) without us re-crafting it.
+        let mut delayed: DelayQueue<(QueueSide, Message)> = DelayQueue::new();
         loop {
             // Handle any incoming ipc requests
             match self.handle_ipc() {
@@ -353,8 +362,22 @@ impl Censor {
                 Err(HandleIpcError::Shutdown) => break,
                 Err(err) => return Err(err.into()),
             }
+            // Release delayed packets whose deadline has passed
+            let now = StdInstant::now();
+            while let Some((side, mut msg)) = delayed.pop_due(now) {
+                trace!("Releasing delayed packet");
+                msg.set_verdict(Verdict::Accept);
+                let queue = match side {
+                    QueueSide::In => &mut queue_in,
+                    QueueSide::Out => &mut queue_out,
+                };
+                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+            }
             // Handle each queue
-            for queue in [&mut queue_in, &mut queue_out] {
+            for (side, queue) in [
+                (QueueSide::In, &mut queue_in),
+                (QueueSide::Out, &mut queue_out),
+            ] {
                 // Handle packets on the queue
                 match queue.recv() {
                     Ok(mut msg) => {
@@ -395,7 +418,7 @@ impl Censor {
                                 seq,
                                 ack,
                                 is_ack,
-                                payload_len,
+                                seg_len,
                             } => {
                                 trace!("Sending bidirectional reset for ips={:?}, ports={},{}, seq={},ack={}", ips, src_port, dst_port, seq, ack);
                                 // The kernel does layer 2 for injected packets, so the
@@ -410,7 +433,7 @@ impl Censor {
                                     dst_port,
                                     ack,
                                     seq,
-                                    payload_len,
+                                    seg_len,
                                     is_ack,
                                 )?;
                                 // Send the resets
@@ -445,10 +468,10 @@ impl Censor {
                                 msg.set_verdict(Verdict::Accept);
                                 queue.verdict(msg).map_err(NfqModeError::Nfq)?;
                             }
-                            Action::Delay(_) => {
-                                // Drop the original packet
-                                msg.set_verdict(Verdict::Drop);
-                                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+                            Action::Delay(until) => {
+                                // Hold the packet; its verdict is issued once `until` passes
+                                trace!("Delaying packet");
+                                delayed.push(until, (side, msg));
                             }
                             Action::Rewrite(rewrite) => {
                                 // Forward a mutated copy of the packet
@@ -470,6 +493,17 @@ impl Censor {
                 }
             }
         }
+        // Release any still-held packets rather than letting the kernel drop them on unbind
+        while let Some((side, mut msg)) = delayed.pop_any() {
+            msg.set_verdict(Verdict::Accept);
+            let queue = match side {
+                QueueSide::In => &mut queue_in,
+                QueueSide::Out => &mut queue_out,
+            };
+            if let Err(err) = queue.verdict(msg) {
+                warn!("Failed to release delayed packet on shutdown: {err}");
+            }
+        }
         // We initialized firewall rules after binding the queue, so we drop them
         // before the queue is unbound
         drop(rule_in_ipv4);
@@ -483,13 +517,6 @@ impl Censor {
         queue_out
             .unbind(args.iptables.queue_num_out)
             .map_err(NfqModeError::Nfq)?;
-        // Abort the thread used to delay packets
-        context_nfq.delayer.delay_thread.abort();
-        if let Err(err) = context_nfq.delayer.delay_thread.await {
-            if !err.is_cancelled() {
-                Err(err)?
-            }
-        }
         Ok(())
     }
     /// Build the two RST frames for an intercepted segment `src -> dst`.
@@ -510,15 +537,18 @@ impl Censor {
         dst_port: u16,
         ack: TcpSeqNumber,
         seq: TcpSeqNumber,
-        payload_len: usize,
+        seg_len: usize,
         is_ack: bool,
     ) -> Result<(Vec<u8>, Vec<u8>), smoltcp::wire::Error> {
-        // Intercepted packet goes src -> dst with seq and ack fields.
-        // For a RST to be accepted, its seq must be within the recipient's receive window.
-        //
-        // Reset to packet source (client_reset with swapped IPs):
-        // - seq should be what the source expects to receive = intercepted ack
-        // - ack can acknowledge what they sent = intercepted seq + payload_len
+        // The intercepted segment goes src -> dst with SEG.SEQ = `seq`, SEG.ACK = `ack`
+        // (valid only if `is_ack`) and SEG.LEN = `seg_len` (payload + SYN + FIN).
+        // A RST is accepted only if its seq is in the recipient's receive window.
+        let next_seq = seq + seg_len;
+        // Reset to packet source (swapped IPs), per RFC 9293 section 3.10.7.1:
+        // - if the segment had an ACK, the source expects to receive SEG.ACK next;
+        // - otherwise (e.g. a SYN, sender in SYN-SENT) there is no usable seq, so
+        //   <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>, whose ACK makes it acceptable.
+        // In both cases the RST acknowledges everything the source sent.
         let client_reset = crate::transport::construct_reset(
             EthernetAddress(own_mac),
             EthernetAddress(src_host_mac),
@@ -526,28 +556,21 @@ impl Censor {
             ipid,
             dst_port, // src port (swapped)
             src_port, // dst port (swapped)
-            // ack: acknowledge what they sent
-            if is_ack {
-                seq + payload_len
-            } else {
-                TcpSeqNumber(0)
-            },
-            // seq: what they expect to receive = their ack value
-            ack,
+            Some(next_seq),
+            if is_ack { ack } else { TcpSeqNumber(0) },
         )?;
-        // Reset to packet destination (server_reset with original IPs):
-        // - seq should be what the dest expects = intercepted seq + payload_len
-        //   (since the original packet is accepted, dest will have processed it)
-        // - ack = 0 is fine for RST
+        // Reset to packet destination (original IPs): the original segment is
+        // accepted, so the destination next expects SEG.SEQ + SEG.LEN. We know nothing
+        // the destination sent, so this is a bare RST with no ACK.
         let server_reset = crate::transport::construct_reset(
             EthernetAddress(own_mac),
             EthernetAddress(dst_host_mac),
             ips,
             ipid,
-            src_port,          // src port
-            dst_port,          // dst port
-            TcpSeqNumber(0),   // ack
-            seq + payload_len, // seq: what they expect after receiving the packet
+            src_port,
+            dst_port,
+            None,
+            next_seq,
         )?;
 
         Ok((client_reset, server_reset))
@@ -585,8 +608,6 @@ pub enum NfqModeError {
     Ort(#[from] OrtError),
     #[error("Error doing processing: {0}")]
     Process(#[from] smoltcp::wire::Error),
-    #[error("Error joining watermark thread :{0}")]
-    ThreadJoin(#[from] JoinError),
 }
 
 #[cfg(test)]
@@ -612,6 +633,47 @@ mod reset_frame_tests {
         assert_eq!(f1.dst_addr(), EthernetAddress(client));
         assert_eq!(f2.src_addr(), EthernetAddress(own));
         assert_eq!(f2.dst_addr(), EthernetAddress(server));
+    }
+
+    /// (seq, ack, ACK flag, RST flag) of a crafted IPv4 reset frame.
+    fn tcp_fields(frame: &[u8]) -> (TcpSeqNumber, TcpSeqNumber, bool, bool) {
+        use smoltcp::wire::{Ipv4Packet, TcpPacket};
+        let eth = EthernetFrame::new_checked(frame).unwrap();
+        let ip = Ipv4Packet::new_checked(eth.payload()).unwrap();
+        let tcp = TcpPacket::new_checked(ip.payload()).unwrap();
+        (tcp.seq_number(), tcp.ack_number(), tcp.ack(), tcp.rst())
+    }
+
+    fn resets(seq: i32, ack: i32, seg_len: usize, is_ack: bool) -> (Vec<u8>, Vec<u8>) {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        Censor::craft_resets([2; 6], [3; 6], [4; 6], ips, None, 40000, 443,
+                             TcpSeqNumber(ack), TcpSeqNumber(seq), seg_len, is_ack)
+            .unwrap()
+    }
+
+    #[test]
+    fn resets_for_data_segment_land_in_both_windows() {
+        // Client sent 100 bytes at seq 1000, acknowledging the server up to 5000
+        let (to_client, to_server) = resets(1000, 5000, 100, true);
+        // To the sender: <SEQ=SEG.ACK>, acknowledging what it sent
+        assert_eq!(tcp_fields(&to_client), (TcpSeqNumber(5000), TcpSeqNumber(1100), true, true));
+        // To the receiver: the next sequence number it expects from the sender
+        let (seq, _, ack_flag, rst) = tcp_fields(&to_server);
+        assert_eq!((seq, ack_flag, rst), (TcpSeqNumber(1100), false, true));
+    }
+
+    #[test]
+    fn resets_for_syn_follow_rfc793() {
+        // A SYN has no ACK and occupies one sequence number
+        let (to_client, to_server) = resets(7000, 0, 1, false);
+        // To a SYN-SENT client: <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
+        assert_eq!(tcp_fields(&to_client), (TcpSeqNumber(0), TcpSeqNumber(7001), true, true));
+        // To the server, which has seen the SYN and expects ISS+1
+        let (seq, _, ack_flag, rst) = tcp_fields(&to_server);
+        assert_eq!((seq, ack_flag, rst), (TcpSeqNumber(7001), false, true));
     }
 }
 
