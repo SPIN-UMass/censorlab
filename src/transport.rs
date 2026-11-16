@@ -1,5 +1,7 @@
 use crate::application::tls::ClientHelloAssembler;
 use crate::censor::{Action, Direction, IpPair};
+use crate::config::conntrack::Config as ConntrackConfig;
+use crate::expiring_map::ExpiringMap;
 use crate::model::ModelThreadMessage;
 use crate::program::config::Config as ProgramConfig;
 use crate::program::env::{ProgramEnv, Registers};
@@ -65,27 +67,84 @@ impl ConnectionKey {
             proto,
         }
     }
+    /// Whether (`ip`, `port`) is the `addr_low`/`port_low` endpoint of this key
+    fn is_low_endpoint(&self, ip: IpAddress, port: u16) -> bool {
+        self.addr_low == ip && self.port_low == port
+    }
 }
 
-/// Per-host state shared across all connections from the same source IP
+/// Per-host state shared across all connections from the same IP
 #[derive(Debug)]
 pub struct HostState {
-    /// Number of connections initiated from this host
+    /// Number of connections whose first tracked packet came from this host
     pub num_connections: u32,
     /// Total number of packets seen from this host across all connections
     pub num_packets: u32,
     /// Host-level registers for CensorLang programs
     pub registers: Registers,
+    /// Persistent Python dict exposed as `host.state` / `dst_host.state`
+    /// (created lazily in Python mode)
+    py_state: Option<PyObjectRef>,
+}
+
+/// Packet time, in microseconds
+type Micros = u64;
+const MICROS_PER_SEC: u64 = 1_000_000;
+
+/// Source of "now" for connection-tracking timeouts
+#[derive(Debug)]
+enum Clock {
+    /// Live modes: time elapsed since the tracker was created
+    Monotonic(std::time::Instant),
+    /// PCAP mode: the latest capture timestamp seen so far
+    Packet(Micros),
+}
+
+/// Minimal TCP lifecycle: enough to know when a connection has ended so that
+/// a later SYN on the same 5-tuple starts a fresh connection
+#[derive(Clone, Copy, Debug, Default)]
+struct TcpLifecycle {
+    /// FIN seen from the `addr_low`/`port_low` endpoint
+    fin_low: bool,
+    /// FIN seen from the `addr_high`/`port_high` endpoint
+    fin_high: bool,
+    /// RST seen from either endpoint
+    rst: bool,
+}
+impl TcpLifecycle {
+    fn closed(&self) -> bool {
+        self.rst || (self.fin_low && self.fin_high)
+    }
 }
 
 /// Aggregate object used to manage state for many different connections
+///
+/// # State lifetime
+/// Connection and host state is bounded (see [`crate::config::conntrack`]):
+/// * A TCP connection is *closed* once a RST, or a FIN from both endpoints,
+///   has been processed. Packets that follow (final ACKs, retransmissions)
+///   still go to the same per-connection script state. A SYN without ACK on
+///   a closed connection starts a fresh one (script initialization re-runs).
+///   Closed connections are forgotten after `tcp_closed_timeout`.
+/// * Open TCP connections and UDP flows are forgotten after
+///   `tcp_idle_timeout` / `udp_idle_timeout` seconds without packets; a later
+///   packet on the same 5-tuple starts a fresh connection.
+/// * At most `max_connections` connections are tracked; beyond that the one
+///   closest to expiring is evicted.
+/// * Per-host state (counters, CensorLang host registers and the Python
+///   `host.state`/`dst_host.state` dicts) is kept for every IP that sends or
+///   receives traffic, for at most `max_hosts` hosts (least recently seen
+///   evicted first) and, if `host_idle_timeout` is set, until the host has
+///   been idle that long. An evicted host starts again from empty state.
 pub struct TransportState {
     /// Internal tracker for connections
-    connections: HashMap<ConnectionKey, ConnectionInfo>,
-    /// Per-host state keyed by source IP
-    host_states: HashMap<IpAddress, HostState>,
-    /// Persistent Python dicts for per-host user state (keyed by IP string)
-    python_host_dicts: HashMap<String, PyObjectRef>,
+    connections: ExpiringMap<ConnectionKey, ConnectionInfo>,
+    /// Per-host state keyed by IP
+    hosts: ExpiringMap<IpAddress, HostState>,
+    /// Limits on tracked state
+    conntrack: ConntrackConfig,
+    /// Time source for timeouts
+    clock: Clock,
     /// Execution mode
     execution_mode: ExecutionMode,
     /// Interpreter used for executing all python code
@@ -108,6 +167,8 @@ pub struct ConnectionInfo {
     is_first: bool,
     /// Reassembles the client's TLS ClientHello across segments
     client_hello: ClientHelloAssembler,
+    /// Only meaningful for TCP
+    tcp: TcpLifecycle,
 }
 
 #[derive(Debug, Error)]
@@ -281,6 +342,7 @@ impl TransportState {
         _model_config: HashMap<String, crate::config::model::Model>,
         _decision_log_path: Option<PathBuf>,
         execution_config: crate::config::execution::Config,
+        conntrack: ConntrackConfig,
         model_sender: mpsc::SyncSender<ModelThreadMessage>,
     ) -> Result<Self, TransportStateInitError> {
         // Initialize interpreter settings
@@ -371,9 +433,10 @@ impl TransportState {
         };
         // Construct the overall connection manager
         Ok(TransportState {
-            connections: HashMap::new(),
-            host_states: HashMap::new(),
-            python_host_dicts: HashMap::new(),
+            connections: ExpiringMap::new(),
+            hosts: ExpiringMap::new(),
+            conntrack,
+            clock: Clock::Monotonic(std::time::Instant::now()),
             execution_mode: execution_config.mode,
             vm,
             code,
@@ -397,7 +460,6 @@ impl TransportState {
     ) -> Result<Action, SmoltcpError> {
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.
-        let mut packet = packet;
         packet.set_direction(direction);
         // Make a connection key
         let key = ConnectionKey::new(
@@ -406,44 +468,63 @@ impl TransportState {
             packet.transport.dst,
             packet.transport_proto(),
         );
-        let new_key = key.clone();
-        // Get a reference to the tracker's packet list
-        let ConnectionInfo {
-            is_first,
-            env,
-            client_hello,
-        } =
-            self.connections.entry(new_key).or_insert_with(|| {
-                // Initialize the per-connection state
-                ConnectionInfo {
-                    env: match self.execution_mode {
-                        ExecutionMode::Python => {
-                            // New connection means we should initialize a new Python scope
-                            let scope = self
-                                .vm
-                                .enter(|vm| {
-                                    // Initialize the scope
-                                    let scope = vm.new_scope_with_builtins();
-                                    // Return the scope
-                                    Ok::<Scope, PyBaseExceptionRef>(scope)
-                                })
-                                .unwrap();
-                            ExecutionEnvironment::Python { scope }
-                        }
-                        ExecutionMode::CensorLang => {
-                            let env = ProgramEnv::new(
-                                packet.connection_identifier(),
-                                &self.censorlang_config,
-                            );
-                            ExecutionEnvironment::CensorLang { env }
-                        }
-                    },
-                    is_first: true,
-                    client_hello: ClientHelloAssembler::new(),
+        let now = self.now();
+        // Forget idle state first so this packet never lands in a timed-out connection
+        self.expire(now);
+        let src_port = packet.transport.src;
+        let tcp_flags = match packet.transport.extra {
+            TransportMetadataExtra::Tcp(tcp_metadata) => Some(tcp_metadata.flags),
+            _ => None,
+        };
+        // A bare SYN on a closed TCP connection is a new connection reusing the 5-tuple
+        let is_bare_syn = tcp_flags.is_some_and(|flags| flags.syn && !flags.ack);
+        if is_bare_syn && self.connections.get(&key).is_some_and(|c| c.tcp.closed()) {
+            if let Some(old) = self.connections.remove(&key) {
+                self.teardown(vec![old.env], Vec::new());
+            }
+        }
+        if !self.connections.contains_key(&key) {
+            // Initialize the per-connection state
+            let env = match self.execution_mode {
+                ExecutionMode::Python => {
+                    // New connection means we should initialize a new Python scope
+                    let scope = self
+                        .vm
+                        .enter(|vm| {
+                            // Initialize the scope
+                            let scope = vm.new_scope_with_builtins();
+                            // Return the scope
+                            Ok::<Scope, PyBaseExceptionRef>(scope)
+                        })
+                        .unwrap();
+                    ExecutionEnvironment::Python { scope }
                 }
-            });
-        // Track the client's ClientHello across segments so programs see it once complete
+                ExecutionMode::CensorLang => {
+                    let env = ProgramEnv::new(
+                        packet.connection_identifier(),
+                        &self.censorlang_config,
+                    );
+                    ExecutionEnvironment::CensorLang { env }
+                }
+            };
+            let info = ConnectionInfo {
+                env,
+                is_first: true,
+                tcp: TcpLifecycle::default(),
+                client_hello: ClientHelloAssembler::new(),
+            };
+            // The real deadline is set once the packet has been processed
+            self.connections.insert(key.clone(), info, now);
+        }
+        // Track the client's ClientHello across segments so programs see it once
+        // complete. The assembler lives in ConnectionInfo, so it is reset along
+        // with the rest of the connection state on 5-tuple reuse or expiry.
         if let TransportMetadataExtra::Tcp(tcp) = packet.transport.extra {
+            let client_hello = &mut self
+                .connections
+                .get_mut(&key)
+                .expect("connection was inserted above")
+                .client_hello;
             client_hello.observe(
                 (ips.src(), packet.transport.src),
                 tcp.seq.0 as u32,
@@ -454,18 +535,13 @@ impl TransportState {
             packet.tls_client_hello = client_hello.client_hello().cloned();
         }
         // Copy of is_first for the execution
-        let is_first_cl = *is_first;
+        let is_first_cl = self.connections.get(&key).is_some_and(|c| c.is_first);
 
         // Update per-host state for the source IP
         let src_ip = ips.src();
         let dst_ip = ips.dst();
-        let config = &self.censorlang_config;
         let (host_num_connections, host_num_packets) = {
-            let host = self.host_states.entry(src_ip).or_insert_with(|| HostState {
-                num_connections: 0,
-                num_packets: 0,
-                registers: Registers::new(config.program.num_registers.into(), config.env.relax_register_types),
-            });
+            let host = self.touch_host(src_ip, now);
             host.num_packets += 1;
             if is_first_cl {
                 host.num_connections += 1;
@@ -474,14 +550,19 @@ impl TransportState {
         };
         // Get dst host counters (don't increment -- dst didn't send this packet)
         let (dst_host_num_connections, dst_host_num_packets) = {
-            let dst_host = self.host_states.entry(dst_ip).or_insert_with(|| HostState {
-                num_connections: 0,
-                num_packets: 0,
-                registers: Registers::new(config.program.num_registers.into(), config.env.relax_register_types),
-            });
+            let dst_host = self.touch_host(dst_ip, now);
             (dst_host.num_connections, dst_host.num_packets)
         };
+        // Per-host persistent Python dicts
+        let host_dicts = match self.execution_mode {
+            ExecutionMode::Python => Some((self.host_py_state(src_ip), self.host_py_state(dst_ip))),
+            ExecutionMode::CensorLang => None,
+        };
 
+        let ConnectionInfo { env, .. } = self
+            .connections
+            .get_mut(&key)
+            .expect("connection was inserted above");
         // If the connection is set up for a Python environment, use that
         let action = match env {
             ExecutionEnvironment::Python { scope } => {
@@ -494,30 +575,21 @@ impl TransportState {
                 let mut packet = PythonPacket::from(packet);
                 packet.set_direction(direction);
                 let sender = self.model_sender.clone();
-                // Get existing per-host Python dict (if any) for persistent user state
-                let src_ip_key = src_ip.to_string();
-                let dst_ip_key = dst_ip.to_string();
-                let existing_host_dict = self.python_host_dicts.get(&src_ip_key).cloned();
-                let existing_dst_host_dict = self.python_host_dicts.get(&dst_ip_key).cloned();
-                let need_store_dict = existing_host_dict.is_none();
-                let need_store_dst_dict = existing_dst_host_dict.is_none();
+                // Per-host persistent user state dicts (always present in Python mode)
+                let (host_dict, dst_host_dict) =
+                    host_dicts.expect("host dicts are created in Python mode");
                 // Run a function using the per-connection scope
                 match self.vm.enter(move |vm| {
-                    // Create or reuse the per-host state dict
-                    let host_dict = existing_host_dict
-                        .unwrap_or_else(|| vm.ctx.new_dict().to_pyobject(vm));
-                    let dst_host_dict = existing_dst_host_dict
-                        .unwrap_or_else(|| vm.ctx.new_dict().to_pyobject(vm));
                     // Build host object with counters + persistent state dict
                     let host = PythonHost::new(
                         host_num_connections,
                         host_num_packets,
-                        host_dict.clone(),
+                        host_dict,
                     );
                     let dst_host = PythonHost::new(
                         dst_host_num_connections,
                         dst_host_num_packets,
-                        dst_host_dict.clone(),
+                        dst_host_dict,
                     );
                     scope
                         .locals
@@ -533,7 +605,7 @@ impl TransportState {
                         if let Err(err) = vm.run_code_obj(code, scope.clone()) {
                             error!("Error initializing environment: {:?}", err);
                             vm.print_exception(err);
-                            return Ok((Action::None, host_dict, dst_host_dict));
+                            return Ok(Action::None);
                         }
                         let model = PythonModel::new(sender);
                         let model = model.to_pyobject(vm);
@@ -562,18 +634,9 @@ impl TransportState {
                     };
                     //let result = vm.run_code_obj(process, scope.clone())?;
                     // Finally, return that everything went fine
-                    Ok::<_, PyBaseExceptionRef>((action, host_dict, dst_host_dict))
+                    Ok::<_, PyBaseExceptionRef>(action)
                 }) {
-                    Ok((action, host_dict, dst_host_dict)) => {
-                        // Store the host dicts back if they were newly created
-                        if need_store_dict {
-                            self.python_host_dicts.insert(src_ip_key, host_dict);
-                        }
-                        if need_store_dst_dict {
-                            self.python_host_dicts.insert(dst_ip_key, dst_host_dict);
-                        }
-                        action
-                    }
+                    Ok(action) => action,
                     Err(err) => {
                         self.vm.enter(|vm| vm.print_exception(err));
                         Action::None
@@ -584,7 +647,10 @@ impl TransportState {
                 // Get the program (should always exist in CensorLang mode)
                 if let Some(ref program) = self.censorlang_program {
                     let field_default_on_error = self.censorlang_config.env.field_default_on_error;
-                    let host = self.host_states.get_mut(&src_ip).unwrap();
+                    let host = self
+                        .hosts
+                        .get_mut(&src_ip)
+                        .expect("source host was touched above");
                     let program_action = env.process(
                         &packet,
                         program,
@@ -628,10 +694,150 @@ impl TransportState {
                 }
             }
         };
-        if *is_first {
-            *is_first = false;
+        // Update the connection lifecycle now that the script has seen this packet
+        let info = self
+            .connections
+            .get_mut(&key)
+            .expect("connection is only removed below");
+        info.is_first = false;
+        if let Some(flags) = tcp_flags {
+            if flags.rst {
+                info.tcp.rst = true;
+            }
+            if flags.fin {
+                if key.is_low_endpoint(src_ip, src_port) {
+                    info.tcp.fin_low = true;
+                } else {
+                    info.tcp.fin_high = true;
+                }
+            }
         }
+        let timeout = match key.proto {
+            TransportProtocol::Tcp if info.tcp.closed() => self.conntrack.tcp_closed_timeout,
+            TransportProtocol::Tcp => self.conntrack.tcp_idle_timeout,
+            TransportProtocol::Udp => self.conntrack.udp_idle_timeout,
+        };
+        self.connections
+            .set_deadline(&key, now.saturating_add(timeout.get().saturating_mul(MICROS_PER_SEC)));
+        self.enforce_limits();
         Ok(action)
+    }
+
+    /// Use capture timestamps (see [`Self::set_packet_time`]) instead of a
+    /// monotonic clock for timeouts. Used in PCAP mode.
+    pub fn use_packet_clock(&mut self) {
+        self.clock = Clock::Packet(0);
+    }
+
+    /// Advance the packet clock to `micros` (microseconds since the epoch).
+    /// Time never moves backwards, so out-of-order timestamps are ignored.
+    /// Has no effect unless [`Self::use_packet_clock`] was called.
+    pub fn set_packet_time(&mut self, micros: u64) {
+        if let Clock::Packet(now) = &mut self.clock {
+            *now = (*now).max(micros);
+        }
+    }
+
+    fn now(&self) -> Micros {
+        match &self.clock {
+            Clock::Monotonic(start) => start.elapsed().as_micros().try_into().unwrap_or(u64::MAX),
+            Clock::Packet(now) => *now,
+        }
+    }
+
+    /// Deadline for a host's state if it is last seen at `now`. Without an
+    /// idle timeout the deadline is just `now`, which orders hosts by recency
+    fn host_deadline(&self, now: Micros) -> Micros {
+        match self.conntrack.host_idle_timeout {
+            Some(timeout) => now.saturating_add(timeout.get().saturating_mul(MICROS_PER_SEC)),
+            None => now,
+        }
+    }
+
+    /// Get (creating if needed) the state for host `ip` and mark it as seen at `now`
+    fn touch_host(&mut self, ip: IpAddress, now: Micros) -> &mut HostState {
+        let deadline = self.host_deadline(now);
+        if !self.hosts.set_deadline(&ip, deadline) {
+            let config = &self.censorlang_config;
+            let host = HostState {
+                num_connections: 0,
+                num_packets: 0,
+                registers: Registers::new(
+                    config.program.num_registers.into(),
+                    config.env.relax_register_types,
+                ),
+                py_state: None,
+            };
+            self.hosts.insert(ip, host, deadline);
+        }
+        self.hosts.get_mut(&ip).expect("host was inserted above")
+    }
+
+    /// Get (creating if needed) the persistent Python dict for host `ip`,
+    /// which must already be tracked
+    fn host_py_state(&mut self, ip: IpAddress) -> PyObjectRef {
+        let host = self.hosts.get_mut(&ip).expect("host was touched");
+        host.py_state
+            .get_or_insert_with(|| self.vm.enter(|vm| vm.ctx.new_dict().to_pyobject(vm)))
+            .clone()
+    }
+
+    /// Forget connections and hosts whose idle timeout has passed
+    fn expire(&mut self, now: Micros) {
+        let mut envs = Vec::new();
+        while let Some((_, info)) = self.connections.pop_expired(now) {
+            envs.push(info.env);
+        }
+        let mut hosts = Vec::new();
+        if self.conntrack.host_idle_timeout.is_some() {
+            while let Some((_, host)) = self.hosts.pop_expired(now) {
+                hosts.push(host);
+            }
+        }
+        self.teardown(envs, hosts);
+    }
+
+    /// Evict state until the configured size caps are respected
+    fn enforce_limits(&mut self) {
+        let mut envs = Vec::new();
+        while self.connections.len() > self.conntrack.max_connections.get() {
+            match self.connections.pop_first() {
+                Some((_, info)) => envs.push(info.env),
+                None => break,
+            }
+        }
+        let mut hosts = Vec::new();
+        while self.hosts.len() > self.conntrack.max_hosts.get() {
+            match self.hosts.pop_first() {
+                Some((_, host)) => hosts.push(host),
+                None => break,
+            }
+        }
+        self.teardown(envs, hosts);
+    }
+
+    /// Release removed connection and host state
+    ///
+    /// Python objects are released inside the interpreter so `__del__` can
+    /// run. A connection's scope is cleared first: functions defined by the
+    /// script reference the scope's globals, forming a cycle that reference
+    /// counting alone would never free.
+    fn teardown(&self, envs: Vec<ExecutionEnvironment>, hosts: Vec<HostState>) {
+        let has_python = envs
+            .iter()
+            .any(|env| matches!(env, ExecutionEnvironment::Python { .. }))
+            || hosts.iter().any(|host| host.py_state.is_some());
+        if !has_python {
+            return;
+        }
+        self.vm.enter(|_vm| {
+            for env in envs {
+                if let ExecutionEnvironment::Python { scope } = env {
+                    scope.globals.clear();
+                }
+            }
+            drop(hosts);
+        });
     }
 }
 

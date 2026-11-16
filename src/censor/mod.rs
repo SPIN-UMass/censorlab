@@ -208,6 +208,7 @@ impl Censor {
             icmp,
             tcp,
             udp,
+            conntrack,
             models,
         } = config;
 
@@ -276,6 +277,7 @@ impl Censor {
             models,
             tcp_decision_log_path,
             execution,
+            conntrack,
             model_sender,
         )?;
         // Construct the censor object
