@@ -17,7 +17,7 @@ ISCXVPN2016 sits behind a registration form and must be downloaded by hand
 once; see [../README.md § Background datasets](../README.md#background-datasets)
 for the manual step, provenance, licence/citation, and why VPN captures are
 excluded.  The ingested captures live outside the repository in
-`$ISCXVPN2016_DIR` (default `/mnt/nas/jsheffey/censorlab/datasets/iscxvpn2016`),
+`$ISCXVPN2016_DIR` (default `/mnt/shared/jsheffey/censorlab/datasets/iscxvpn2016`),
 reached through the git-ignored symlink `experiments/datasets/iscxvpn2016`.
 
 The study reports:

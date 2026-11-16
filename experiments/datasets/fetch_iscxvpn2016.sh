@@ -24,7 +24,7 @@
 # type, frame counts and SHA-256; SHA256SUMS is verified on every run.
 #
 # Large data lives outside the repository: $ISCXVPN2016_DIR (default
-# /mnt/nas/jsheffey/censorlab/datasets/iscxvpn2016).  A symlink
+# /mnt/shared/jsheffey/censorlab/datasets/iscxvpn2016).  A symlink
 # experiments/datasets/iscxvpn2016 -> $ISCXVPN2016_DIR is (re)created so the
 # experiment scripts can use a fixed, git-ignored path.
 #
@@ -35,7 +35,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEST="${ISCXVPN2016_DIR:-/mnt/nas/jsheffey/censorlab/datasets/iscxvpn2016}"
+DEST="${ISCXVPN2016_DIR:-/mnt/shared/jsheffey/censorlab/datasets/iscxvpn2016}"
 MAX_PACKETS="${ISCX_MAX_PACKETS:-20000}"
 LINK="$SCRIPT_DIR/iscxvpn2016"
 FORM_URL="http://cicresearch.ca/CICDataset/ISCX-VPN-NonVPN-2016/"
