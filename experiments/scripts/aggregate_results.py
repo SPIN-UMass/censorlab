@@ -37,6 +37,9 @@ TOOL_NAMES = {
     "CensorLang": "CL",
     "Zeek": "Zeek",
     "Scapy": "Scapy",
+    "Suricata": "Suricata",
+    "Snort": "Snort",
+    "OpenGFW": "OpenGFW",
 }
 
 # Table 3 protocol columns by experiment
@@ -103,6 +106,14 @@ def collect_table4(experiments_dir):
             data[(scenario, tool)] = {
                 "median_us": row.get("median_us"),
                 "loc": row.get("loc"),
+                "wall_median_us": row.get("wall_median_us"),
+                "wall_stdev_us": row.get("wall_stdev_us"),
+                "startup_us": row.get("startup_us"),
+                "net_us": row.get("net_us"),
+                "cpu_us": row.get("cpu_us"),
+                "max_rss_kb": row.get("max_rss_kb"),
+                "n": row.get("n"),
+                "status": row.get("status", "measured"),
             }
         print(f"  [OK]   {exp_dir}: Table 4 loaded", file=sys.stderr)
 
@@ -155,6 +166,22 @@ def collect_table3(experiments_dir):
     return data
 
 
+def collect_accuracy(experiments_dir):
+    """Collect per-tool PCAP-mode accuracy from each scenario's results/accuracy.json.
+
+    Returns {(scenario, tool): {tpr, tnr}}.
+    """
+    data = {}
+    for exp_dir, scenario in EXPERIMENT_SCENARIOS.items():
+        acc = load_json(os.path.join(experiments_dir, exp_dir, "results", "accuracy.json"))
+        if acc is None:
+            continue
+        for row in acc.get("rows", []):
+            data[(scenario, row["tool"])] = {"tpr": row.get("tpr"), "tnr": row.get("tnr")}
+        print(f"  [OK]   {exp_dir}: accuracy loaded", file=sys.stderr)
+    return data
+
+
 def collect_benchmarks(experiments_dir):
     """Collect benchmark data from experiment 7.
 
@@ -179,7 +206,183 @@ def collect_benchmarks(experiments_dir):
     return data
 
 
-def generate_latex_macros(table4, table3, benchmarks):
+def collect_static_analysis(experiments_dir):
+    """Collect experiment 09: {program: row}."""
+    data = load_json(os.path.join(experiments_dir, "09_static_analysis", "results", "static_analysis.json"))
+    if data is None:
+        print("  [SKIP] 09_static_analysis: no results/static_analysis.json", file=sys.stderr)
+        return {}
+    print("  [OK]   09_static_analysis: static analysis loaded", file=sys.stderr)
+    return {row["program"]: row for row in data.get("rows", [])}
+
+
+def collect_real_traffic(experiments_dir):
+    """Collect experiment 08: list of rows (scenario, mix, tool, metrics)."""
+    data = load_json(os.path.join(experiments_dir, "08_real_traffic", "results", "real_traffic.json"))
+    if data is None:
+        print("  [SKIP] 08_real_traffic: no results/real_traffic.json", file=sys.stderr)
+        return []
+    print("  [OK]   08_real_traffic: real-traffic study loaded", file=sys.stderr)
+    return data.get("rows", [])
+
+
+def static_analysis_macros(static):
+    lines = []
+    if not static:
+        return lines
+    lines.append("% ============================================================")
+    lines.append("% Experiment 9: CensorLang static cost bounds")
+    lines.append("% ============================================================")
+    lines.append("% Command format: \\Static<Program><Metric>")
+    lines.append("% Metrics: Lines, ConnBytes (per-connection state the engine allocates:")
+    lines.append("%          full register banks + model buffers + engine state),")
+    lines.append("%          ConnTouchedBytes (same, counting only registers the program uses),")
+    lines.append("%          HostBytes (host registers the program uses),")
+    lines.append("%          Ops (worst-case constant-time ops per packet),")
+    lines.append("%          Regex (regex evaluations per packet), ModelCalls")
+    lines.append("")
+    for program, r in static.items():
+        base = f"Static{sanitize_cmd(program)}"
+        lines.append(f"\\newcommand{{\\{base}Lines}}{{{r['lines']}}}")
+        lines.append(f"\\newcommand{{\\{base}ConnBytes}}{{{r['per_connection_bytes']}}}")
+        if "per_connection_touched_bytes" in r:
+            lines.append(f"\\newcommand{{\\{base}ConnTouchedBytes}}{{{r['per_connection_touched_bytes']}}}")
+        lines.append(f"\\newcommand{{\\{base}HostBytes}}{{{r['per_host_register_bytes']}}}")
+        lines.append(f"\\newcommand{{\\{base}Ops}}{{{r['constant_ops']}}}")
+        lines.append(f"\\newcommand{{\\{base}Regex}}{{{r['regex_evaluations']}}}")
+        lines.append(f"\\newcommand{{\\{base}ModelCalls}}{{{r['model_calls']}}}")
+    lines.append("")
+    return lines
+
+
+def real_traffic_macros(rows):
+    lines = []
+    if not rows:
+        return lines
+    lines.append("% ============================================================")
+    lines.append("% Experiment 8: real-traffic workloads with background mixes")
+    lines.append("% ============================================================")
+    lines.append("% Command format: \\Real<Scenario><Mix><Tool><Metric>")
+    lines.append("% Mix ∈ BgZero BgTenK BgNinetyK BgThreeNinetyK (USTC-TFC2016), each optionally")
+    lines.append("%   suffixed Iscx (ISCXVPN2016) or Combined (USTC+ISCX); Metrics: WallTime, WallStdev,")
+    lines.append("%   StartupTime, NetTime (s), UsPerPkt, Kpps, Cpu (s), Rss (MB), TPR, TNR,")
+    lines.append("%   BgFlagged, BgFlows, Packets")
+    lines.append("")
+    mix_names = {"bg0": "BgZero", "bg10k": "BgTenK", "bg90k": "BgNinetyK", "bg390k": "BgThreeNinetyK"}
+    background_names = {"ustc": "", "iscx": "Iscx", "combined": "Combined"}
+    scenario_macro = {k: v for k, v in EXPERIMENT_SCENARIOS.items()}
+    for r in rows:
+        if r.get("status") != "measured":
+            continue
+        scn = scenario_macro.get(r["scenario"], sanitize_cmd(r["scenario"]))
+        mix = mix_names.get(r["mix"], sanitize_cmd(r["mix"]))
+        # USTC-only rows keep the original macro names; other backgrounds
+        # (ISCXVPN2016, USTC+ISCX combined) get a suffix on the mix.
+        mix += background_names.get(r.get("background", "ustc"), sanitize_cmd(r.get("background", "")))
+        tool = TOOL_NAMES.get(r["tool"], sanitize_cmd(r["tool"]))
+        base = f"Real{scn}{mix}{tool}"
+
+        def emit(metric, value):
+            lines.append(f"\\newcommand{{\\{base}{metric}}}{{{value if value is not None else 'N/A'}}}")
+
+        emit("WallTime", format_time_s(r.get("wall_median_us")))
+        emit("WallStdev", format_time_s(r.get("wall_stdev_us")))
+        emit("StartupTime", format_time_s(r.get("startup_us")))
+        emit("NetTime", format_time_s(r.get("net_us")))
+        emit("UsPerPkt", r.get("net_per_packet_us"))
+        pps = r.get("throughput_pps")
+        emit("Kpps", f"{pps / 1000:.1f}" if pps else None)
+        emit("Cpu", format_time_s(r.get("cpu_us")))
+        rss = r.get("max_rss_kb")
+        emit("Rss", f"{rss / 1024:.1f}" if rss else None)
+        emit("TPR", r.get("tpr"))
+        emit("TNR", r.get("tnr"))
+        emit("BgFlagged", r.get("background_flagged"))
+        emit("BgFlows", r.get("background_flows"))
+        emit("Packets", r.get("total_packets"))
+    lines.append("")
+    return lines
+
+
+def collect_nfq(experiments_dir):
+    """Collect experiment 10: list of rows (scenario, variant, metrics)."""
+    data = load_json(os.path.join(experiments_dir, "10_nfq_end_to_end", "results", "nfq_end_to_end.json"))
+    if data is None:
+        print("  [SKIP] 10_nfq_end_to_end: no results/nfq_end_to_end.json", file=sys.stderr)
+        return []
+    print("  [OK]   10_nfq_end_to_end: live NFQ results loaded", file=sys.stderr)
+    return data.get("rows", [])
+
+
+def collect_resilience(experiments_dir):
+    """Collect experiment 11: list of rows (traffic, program, rate)."""
+    data = load_json(os.path.join(experiments_dir, "11_resilience_matrix", "results", "resilience_matrix.json"))
+    if data is None:
+        print("  [SKIP] 11_resilience_matrix: no results/resilience_matrix.json", file=sys.stderr)
+        return []
+    print("  [OK]   11_resilience_matrix: resilience matrix loaded", file=sys.stderr)
+    return data.get("rows", [])
+
+
+def nfq_macros(rows):
+    lines = []
+    if not rows:
+        return lines
+    lines.append("% ============================================================")
+    lines.append("% Experiment 10: live NFQ end-to-end (accuracy, latency, throughput)")
+    lines.append("% ============================================================")
+    lines.append("% Command format: \\Nfq<Scenario><Variant><Metric>")
+    lines.append("% Variant ∈ None Null PyCL CL; Metrics: TPR, TNR, LatencyMs (median per-connection),")
+    lines.append("%   LatencyPNinetyFiveMs, Mbps (iperf3), Retransmits, Requests")
+    lines.append("")
+    variant_names = {"none": "None", "null": "Null", "pycl": "PyCL", "censorlang": "CL"}
+    for r in rows:
+        scn = EXPERIMENT_SCENARIOS.get(r["scenario"], sanitize_cmd(r["scenario"]))
+        base = f"Nfq{scn}{variant_names.get(r['variant'], sanitize_cmd(r['variant']))}"
+
+        def emit(metric, value):
+            lines.append(f"\\newcommand{{\\{base}{metric}}}{{{value if value is not None else 'N/A'}}}")
+
+        emit("TPR", r.get("tpr"))
+        emit("TNR", r.get("tnr"))
+        emit("LatencyMs", r.get("latency_median_ms"))
+        emit("LatencyPNinetyFiveMs", r.get("latency_p95_ms"))
+        emit("Mbps", r.get("throughput_mbps"))
+        emit("Retransmits", r.get("retransmits"))
+        emit("Requests", r.get("requests"))
+    lines.append("")
+    return lines
+
+
+def resilience_macros(rows):
+    lines = []
+    if not rows:
+        return lines
+    lines.append("% ============================================================")
+    lines.append("% Experiment 11: resilience matrix (corpus program × traffic set)")
+    lines.append("% ============================================================")
+    lines.append("% Command format: \\Res<Program><Traffic>Rate (percent of flows acted on),")
+    lines.append("%                 \\Res<Program><Traffic>Flagged, \\Res<Traffic>Flows")
+    lines.append("")
+    seen_traffic = set()
+    for r in rows:
+        t = sanitize_cmd(r["traffic"]).capitalize()
+        base = f"Res{sanitize_cmd(r['program'])}{t}"
+        lines.append(f"\\newcommand{{\\{base}Rate}}{{{r['rate'] * 100:.1f}}}")
+        lines.append(f"\\newcommand{{\\{base}Flagged}}{{{r['flagged']}}}")
+        if r["traffic"] not in seen_traffic:
+            seen_traffic.add(r["traffic"])
+            lines.append(f"\\newcommand{{\\Res{t}Flows}}{{{r['flows']}}}")
+    lines.append("")
+    return lines
+
+
+def generate_latex_macros(table4, table3, benchmarks, accuracy=None, static=None, real=None, nfq=None, resilience=None):
+    accuracy = accuracy or {}
+    static = static or {}
+    real = real or []
+    nfq = nfq or []
+    resilience = resilience or []
     """Generate LaTeX \\newcommand macros from collected data."""
     lines = []
     lines.append("% Auto-generated by experiments/scripts/aggregate_results.py")
@@ -195,31 +398,64 @@ def generate_latex_macros(table4, table3, benchmarks):
     lines.append("")
 
     # Scenarios in table order
-    table4_scenarios = ["SniFiltering", "Shadowsocks", "DnsInjection", "MlClassification"]
-    table4_tools = ["PyCL", "CensorLang", "Zeek", "Scapy"]
+    table4_scenarios = ["HttpKeyword", "SniFiltering", "Shadowsocks", "DnsInjection", "MlClassification"]
+    table4_tools = ["PyCL", "CensorLang", "Zeek", "Scapy", "Suricata", "Snort", "OpenGFW"]
+
+    lines.append("% Additional per-tool metrics (all measured identically, as separate processes):")
+    lines.append("%   WallTime     median process wall-clock (s)")
+    lines.append("%   WallStdev    stdev of wall-clock across runs (s)")
+    lines.append("%   StartupTime  median wall-clock on a one-frame PCAP = process startup/teardown (s)")
+    lines.append("%   NetTime      WallTime - StartupTime = steady-state processing (s)")
+    lines.append("%   Cpu          median user+sys CPU time (s)")
+    lines.append("%   Rss          median peak resident set size (MB)")
+    lines.append("%   Runs         number of measured iterations")
+    lines.append("%   Status       measured | unavailable | not-expressible")
+    lines.append("% `Time` keeps the legacy semantics (tool-internal timer where one exists).")
+    lines.append("")
 
     for scenario in table4_scenarios:
         lines.append(f"% {scenario}")
         for tool in table4_tools:
             tool_cmd = TOOL_NAMES[tool]
             key = (scenario, tool)
-            entry = table4.get(key)
+            entry = table4.get(key) or {}
 
             cmd_base = f"Result{sanitize_cmd(scenario)}{sanitize_cmd(tool_cmd)}"
 
-            if entry and entry["median_us"] is not None:
-                time_s = format_time_s(entry["median_us"])
-                lines.append(f"\\newcommand{{\\{cmd_base}Time}}{{{time_s}}}")
-            else:
-                lines.append(f"\\newcommand{{\\{cmd_base}Time}}{{N/A}}")
+            def emit(metric, value):
+                lines.append(f"\\newcommand{{\\{cmd_base}{metric}}}{{{value if value is not None else 'N/A'}}}")
 
-            if entry and entry["loc"] is not None:
-                lines.append(f"\\newcommand{{\\{cmd_base}Loc}}{{{entry['loc']}}}")
-            else:
-                lines.append(f"\\newcommand{{\\{cmd_base}Loc}}{{N/A}}")
+            emit("Time", format_time_s(entry.get("median_us")))
+            emit("Loc", entry.get("loc"))
+            emit("WallTime", format_time_s(entry.get("wall_median_us")))
+            emit("WallStdev", format_time_s(entry.get("wall_stdev_us")))
+            emit("StartupTime", format_time_s(entry.get("startup_us")))
+            emit("NetTime", format_time_s(entry.get("net_us")))
+            emit("Cpu", format_time_s(entry.get("cpu_us")))
+            rss = entry.get("max_rss_kb")
+            emit("Rss", f"{rss / 1024:.1f}" if rss is not None else None)
+            emit("Runs", entry.get("n"))
+            emit("Status", entry.get("status", "N/A"))
 
         lines.append("")
 
+    # --- Per-tool accuracy on the labelled PCAPs (Table 5 correctness check) ---
+    lines.append("% ============================================================")
+    lines.append("% Per-tool PCAP-mode accuracy against ground-truth labels")
+    lines.append("% ============================================================")
+    lines.append("% Command format: \\Acc<Scenario><Tool>TPR / TNR")
+    lines.append("")
+    for scenario in table4_scenarios:
+        for tool in table4_tools:
+            entry = accuracy.get((scenario, tool))
+            cmd_base = f"Acc{sanitize_cmd(scenario)}{sanitize_cmd(TOOL_NAMES[tool])}"
+            if entry:
+                lines.append(f"\\newcommand{{\\{cmd_base}TPR}}{{{entry['tpr']}}}")
+                lines.append(f"\\newcommand{{\\{cmd_base}TNR}}{{{entry['tnr']}}}")
+            else:
+                lines.append(f"\\newcommand{{\\{cmd_base}TPR}}{{---}}")
+                lines.append(f"\\newcommand{{\\{cmd_base}TNR}}{{---}}")
+    lines.append("")
     # --- Table 3: Accuracy (TPR+TNR averaged) ---
     lines.append("% ============================================================")
     lines.append("% Table 3: Evaluation Accuracy (avg of TPR and TNR)")
@@ -308,6 +544,11 @@ def generate_latex_macros(table4, table3, benchmarks):
             else:
                 lines.append(f"\\newcommand{{\\{cmd_name}}}{{N/A}}")
 
+    lines.extend(static_analysis_macros(static))
+    lines.extend(real_traffic_macros(real))
+    lines.extend(nfq_macros(nfq))
+    lines.extend(resilience_macros(resilience))
+
     lines.append("")
     lines.append("% End of auto-generated results")
     lines.append("")
@@ -350,8 +591,19 @@ def main():
     print("Collecting benchmarks:", file=sys.stderr)
     benchmarks = collect_benchmarks(args.experiments_dir)
 
+    print(file=sys.stderr)
+    print("Collecting per-tool accuracy:", file=sys.stderr)
+    accuracy = collect_accuracy(args.experiments_dir)
+
+    print(file=sys.stderr)
+    print("Collecting static analysis and real-traffic study:", file=sys.stderr)
+    static = collect_static_analysis(args.experiments_dir)
+    real = collect_real_traffic(args.experiments_dir)
+    nfq = collect_nfq(args.experiments_dir)
+    resilience = collect_resilience(args.experiments_dir)
+
     # Generate LaTeX
-    latex = generate_latex_macros(table4, table3, benchmarks)
+    latex = generate_latex_macros(table4, table3, benchmarks, accuracy, static, real, nfq, resilience)
 
     # Write output
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)

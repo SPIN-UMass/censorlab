@@ -17,19 +17,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ITERATIONS="${1:-3}"
 IMAGE_NAME="censorlab-experiments"
 
-# Compute a fingerprint of files that affect the Docker image.
-# Uses git so it's portable across Linux and macOS.
-# NOTE: These paths must match the COPY sources in the Dockerfile.
-compute_build_hash() {
-    (cd "$REPO_ROOT" && {
-        git rev-parse HEAD
-        git diff HEAD -- docker/ flake.nix flake.lock Cargo.toml Cargo.lock \
-            build.rs src/ demos/ website/ .gitmodules
-        git submodule status
-    } 2>/dev/null | git hash-object --stdin 2>/dev/null) || echo "unknown"
-}
-
-BUILD_HASH=$(compute_build_hash)
+# Fingerprint of files that affect the Docker image (see docker/build_hash.sh).
+# experiments/ is bind-mounted below, so edits there need no rebuild.
+# shellcheck source=../../docker/build_hash.sh
+source "$REPO_ROOT/docker/build_hash.sh"
+BUILD_HASH=$(compute_build_hash "$REPO_ROOT" "${DOCKERFILE_SOURCES_NO_EXPERIMENTS[@]}")
 STORED_HASH=$(docker inspect --format '{{index .Config.Labels "censorlab.build_hash"}}' \
     "$IMAGE_NAME" 2>/dev/null || echo "")
 

@@ -1,0 +1,5 @@
+*.pcap
+*.log
+*.csv
+*.txt
+server.ready

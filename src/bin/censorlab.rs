@@ -1,8 +1,10 @@
 use censorlab::censor::args::SubCmd;
-use censorlab::censor::{Censor, CensorInitError};
+use censorlab::censor::{Censor, CensorError, CensorInitError};
 use censorlab::config::{Config, ConfigLoadError};
 use censorlab::ipc::IPC_DEFAULT_PORT;
-use censorlab::model::{start_model_thread, ModelThreadMessage};
+use censorlab::model::{start_model_thread, ModelLoadError, ModelThreadMessage};
+use censorlab::program::analysis::ProgramAnalysis;
+use censorlab::program::check::ModelSignatures;
 use clap::Parser;
 use ort::Error as OrtError;
 use std::path::PathBuf;
@@ -51,6 +53,27 @@ async fn main() -> Result<(), CensorlabError> {
         .finish();
     // Set the global subscriber
     tracing::subscriber::set_global_default(subscriber)?;
+    // Static analysis needs no model thread or censor.  The config is optional:
+    // with -c the program is checked against its [execution.censorlang]
+    // settings and [models]; otherwise against the defaults (model names are
+    // then not checked).
+    if let SubCmd::Analyze { program, json } = &args.sub_cmd {
+        let source = std::fs::read_to_string(program)
+            .map_err(|e| CensorlabError::Analyze(format!("{}: {e}", program.display())))?;
+        let config = args.config_path.as_ref().map(Config::load).transpose()?;
+        let models: Option<ModelSignatures> = config
+            .as_ref()
+            .map(|c| c.models.keys().map(|name| (name.clone(), None)).collect());
+        let censorlang = config.map(|c| c.execution.censorlang).unwrap_or_default();
+        let analysis = ProgramAnalysis::from_source(&source, &censorlang, models.as_ref())
+            .map_err(|e| CensorlabError::Analyze(format!("{}: {e}", program.display())))?;
+        if *json {
+            println!("{}", serde_json::to_string_pretty(&analysis).map_err(|e| CensorlabError::Analyze(e.to_string()))?);
+        } else {
+            print!("{}", analysis.report());
+        }
+        return Ok(());
+    }
     // Load our config
     let mut config = args
         .config_path
@@ -72,15 +95,21 @@ async fn main() -> Result<(), CensorlabError> {
         model_sender.clone(),
     )?;
     // Run the censor in the specified mode using the common arguments
-    if let Err(err) = censor.run(args.sub_cmd).await {
+    let run_result = censor.run(args.sub_cmd).await;
+    if let Err(err) = &run_result {
         error!(error = tracing::field::display(err), "Error running censor");
     }
-    // Tell the model thread to shut down
-    model_sender.send(ModelThreadMessage::Shutdown).unwrap();
-    // Join the model thread
-    match model_thread.join() {
-        Ok(()) => {}
-        Err(err) => std::panic::resume_unwind(err),
+    // Tell the model thread to shut down. Sending only fails if the thread
+    // has already exited; joining it below tells us whether it panicked.
+    let shutdown_sent = model_sender.send(ModelThreadMessage::Shutdown).is_ok();
+    let join_result = model_thread.join();
+    // Report the censor's own failure first; it is the most specific error.
+    run_result?;
+    if join_result.is_err() {
+        return Err(CensorlabError::ModelThreadPanicked);
+    }
+    if !shutdown_sent {
+        return Err(CensorlabError::ModelThreadExited);
     }
     Ok(())
 }
@@ -92,6 +121,16 @@ enum CensorlabError {
     Config(#[from] ConfigLoadError),
     #[error("Failed to do something with ONNX: {0}")]
     EnvironmentBuild(#[from] OrtError),
+    #[error("Failed to load models: {0}")]
+    ModelLoad(#[from] ModelLoadError),
     #[error("Failed to initialize censor: {0}")]
     CensorInit(#[from] CensorInitError),
+    #[error("Failed to analyse program: {0}")]
+    Analyze(String),
+    #[error("Failed to run censor: {0}")]
+    Run(#[from] CensorError),
+    #[error("Model thread panicked")]
+    ModelThreadPanicked,
+    #[error("Model thread exited before shutdown was requested")]
+    ModelThreadExited,
 }

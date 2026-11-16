@@ -1,0 +1,5 @@
+# OpenGFW ruleset for TLS SNI filtering (Scenario 03).
+# Uses OpenGFW's TLS analyzer (tls.req.sni).  `block` = TCP RST / drop.
+- name: forbidden SNI
+  action: block
+  expr: tls != nil && tls.req != nil && string(tls.req.sni) matches "(?i)(google\\.com|facebook\\.com|twitter\\.com|youtube\\.com|instagram\\.com|whatsapp\\.com|telegram\\.org|signal\\.org|wikipedia\\.org|reddit\\.com|discord\\.com|medium\\.com|soundcloud\\.com|tumblr\\.com|vimeo\\.com|pinterest\\.com|nytimes\\.com|washingtonpost\\.com|bbc\\.com|theguardian\\.com|reuters\\.com|amnesty\\.org|hrw\\.org|rsf\\.org|torproject\\.org|psiphon\\.ca|lanternvpn\\.org|mullvad\\.net|protonvpn\\.com|nordvpn\\.com|expressvpn\\.com|github\\.com|gitlab\\.com|stackoverflow\\.com|twitch\\.tv)"

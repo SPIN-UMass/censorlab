@@ -7,14 +7,14 @@
 # Prerequisites:
 #   - CensorLab built with: cargo build --release
 #   - Network capabilities set: ./set_permissions.sh
-#   - iptables NFQ rule configured (see below)
+#   - root / CAP_NET_ADMIN (censorlab nfq installs its own iptables rules)
 #   - A simple HTTP server running on the target
 #
 # Usage:
 #   sudo bash experiments/01_http_keyword/scripts/run_evaluation.sh
 #
 # This script is designed to run inside the Docker Compose environment
-# (experiments/docker-compose.yml) or on a configured host.
+# (see experiments/10_nfq_end_to_end/docker-compose.yml) or on a configured host.
 
 set -euo pipefail
 
@@ -34,18 +34,14 @@ echo "Requests: $NUM_REQUESTS"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 1: Set up iptables NFQUEUE rule
+# Step 1: Cleanup handler.  No iptables setup here: `censorlab nfq` installs
+# and removes its own rules (raw PREROUTING -> queue 0, raw OUTPUT -> queue 1).
+# Adding filter INPUT/OUTPUT rules on queue 0 as well queued every packet twice.
 # ---------------------------------------------------------------------------
-echo "--- Setting up iptables NFQ rule ---"
-# Queue outbound HTTP traffic to NFQUEUE 0
-iptables -I OUTPUT -p tcp --dport "$TARGET_PORT" -j NFQUEUE --queue-num 0 2>/dev/null || true
-iptables -I INPUT -p tcp --sport "$TARGET_PORT" -j NFQUEUE --queue-num 0 2>/dev/null || true
 
 cleanup() {
     echo ""
     echo "--- Cleaning up ---"
-    iptables -D OUTPUT -p tcp --dport "$TARGET_PORT" -j NFQUEUE --queue-num 0 2>/dev/null || true
-    iptables -D INPUT -p tcp --sport "$TARGET_PORT" -j NFQUEUE --queue-num 0 2>/dev/null || true
     # Kill censorlab if we started it
     if [ -n "${CENSOR_PID:-}" ]; then
         kill "$CENSOR_PID" 2>/dev/null || true

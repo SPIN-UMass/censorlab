@@ -1,0 +1,15 @@
+== latency probe ==
+probe: 200/200 ok, median total 1.38 ms
+== iperf3 ==
+iperf3: 10807.6 Mbit/s received, retransmits 0
+Sending 200 TLS ClientHello requests to 172.30.0.20:443...
+  100/200 (0.1s elapsed, 0 errors)
+  200/200 (0.2s elapsed, 0 errors)
+
+=== Results ===
+Total: 200 requests in 0.2s
+Errors: 0
+TP=0 FN=100 FP=0 TN=100
+TPR=0.0000  TNR=1.0000
+Output: /results/live_eval_results.csv
+== client done ==

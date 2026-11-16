@@ -1,0 +1,5 @@
+# Snort 3 rule for TLS SNI filtering (Scenario 03).
+# Snort 3 exposes no SNI buffer, so the ClientHello payload is matched directly
+# (same approach as the CensorLang program).  `reject` sends a TCP RST inline;
+# in PCAP (-r) mode it is logged as an alert.
+reject tcp any any -> any 443 (msg:"CensorLab exp03 forbidden SNI"; flow:to_server,established; ssl_state:client_hello; pcre:"/(google\.com|facebook\.com|twitter\.com|youtube\.com|instagram\.com|whatsapp\.com|telegram\.org|signal\.org|wikipedia\.org|reddit\.com|discord\.com|medium\.com|soundcloud\.com|tumblr\.com|vimeo\.com|pinterest\.com|nytimes\.com|washingtonpost\.com|bbc\.com|theguardian\.com|reuters\.com|amnesty\.org|hrw\.org|rsf\.org|torproject\.org|psiphon\.ca|lanternvpn\.org|mullvad\.net|protonvpn\.com|nordvpn\.com|expressvpn\.com|github\.com|gitlab\.com|stackoverflow\.com|twitch\.tv)/i"; sid:3000001; rev:1;)

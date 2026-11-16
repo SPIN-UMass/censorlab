@@ -1,0 +1,6 @@
+tool,file,loc
+PyCL,censor.py,65
+CensorLang,censor.cl,25
+Zeek,comparison/zeek_shadowsocks.zeek,92
+Scapy,comparison/scapy_shadowsocks.py,144
+OpenGFW,comparison/opengfw_shadowsocks.yaml,3

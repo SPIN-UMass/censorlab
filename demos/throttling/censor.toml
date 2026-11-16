@@ -1,0 +1,5 @@
+# Traffic policing demo: TSPU-style throttling of selected domains.
+# Uses the Delay action (Tap/NFQ mode only).
+[execution]
+mode = "Python"
+script = "throttle.py"

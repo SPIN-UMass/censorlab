@@ -16,7 +16,9 @@ import os
 import sys
 import time
 
-from scapy.all import rdpcap, TCP, Raw
+import re
+
+from scapy.all import IP, TCP, Raw, rdpcap
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -67,8 +69,12 @@ def is_printable_ascii(b):
     return 0x20 <= b <= 0x7E
 
 
+NON_PRINTABLE = bytes(range(0x20)) + bytes(range(0x7F, 0x100))
+PRINTABLE_RUN = re.compile(rb"[\x20-\x7e]{21}")
+
+
 def detect_encrypted(payload):
-    """Apply Wu et al. 2023 heuristics to detect fully encrypted traffic.
+    """Apply Wu et al. 2023 heuristics to the first data packet of a connection.
 
     Returns 'drop' if detected as encrypted, 'allow' otherwise.
     """
@@ -99,20 +105,56 @@ def detect_encrypted(payload):
     if entropy < 0.375:
         return "allow"
 
+    # Rule 7 (Ex3): more than half of the bytes printable
+    if len(payload.translate(None, NON_PRINTABLE)) * 2 > len(payload):
+        return "allow"
+
+    # Rule 8 (Ex4): a run of more than 20 printable bytes
+    if PRINTABLE_RUN.search(payload):
+        return "allow"
+
     return "drop"
 
 
+def flow_key(pkt):
+    """Canonical bidirectional key (ip, port, ip, port)."""
+    ip = pkt[IP]
+    tcp = pkt[TCP]
+    a = (ip.src, tcp.sport)
+    b = (ip.dst, tcp.dport)
+    return (a, b) if a <= b else (b, a)
+
+
 def process_pcap(pcap_path):
-    """Process PCAP and return (decisions list, elapsed seconds)."""
+    """Process PCAP and return (decisions list, elapsed seconds).
+
+    Connection tracking mirrors the CensorLab programs: the client is the side
+    that sent the SYN, only the client's first data packet of a connection whose
+    SYN was seen is inspected, and a blocked connection stays blocked.
+    """
     packets = rdpcap(pcap_path)
     decisions = []
+    flows = {}   # key -> {"client": (ip, port), "checked": bool, "blocked": bool}
 
     start = time.perf_counter()
     for i, pkt in enumerate(packets):
         action = "allow"
-        if pkt.haslayer(TCP) and pkt.haslayer(Raw):
-            payload = bytes(pkt[Raw].load)
-            action = detect_encrypted(payload)
+        if pkt.haslayer(IP) and pkt.haslayer(TCP):
+            tcp = pkt[TCP]
+            key = flow_key(pkt)
+            state = flows.get(key)
+            flags = int(tcp.flags)
+            if flags & 0x02 and not flags & 0x10:          # SYN without ACK: connection start
+                flows[key] = {"client": (pkt[IP].src, tcp.sport), "checked": False, "blocked": False}
+            elif state is not None:
+                if state["blocked"]:
+                    action = "drop"
+                elif (not state["checked"] and pkt.haslayer(Raw)
+                      and (pkt[IP].src, tcp.sport) == state["client"]):
+                    state["checked"] = True
+                    action = detect_encrypted(bytes(pkt[Raw].load))
+                    if action == "drop":
+                        state["blocked"] = True
         decisions.append({"index": i, "action": action})
     elapsed = time.perf_counter() - start
 

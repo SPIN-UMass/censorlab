@@ -427,9 +427,9 @@ mod tests {
     fn registers_get_set_float() {
         let mut regs = Registers::new(4, false);
         let reg = Register { ty: RegisterType::Float, index: 1, host: false };
-        regs.set(&reg, &Value::Float(3.14)).unwrap();
+        regs.set(&reg, &Value::Float(2.5)).unwrap();
         let val = regs.get(&reg).unwrap();
-        assert!(matches!(val, Value::Float(f) if (f - 3.14).abs() < f64::EPSILON));
+        assert!(matches!(val, Value::Float(f) if (f - 2.5).abs() < f64::EPSILON));
     }
 
     #[test]

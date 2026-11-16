@@ -10,35 +10,26 @@ use crate::censor::pcap::PcapModeError;
 #[cfg(feature = "wire")]
 use crate::censor::wire::WireError;
 use crate::config::ethernet::MACAddress;
-use crate::config::Config;
+use crate::config::{Config, IpNetPort};
 use crate::ipc::{ipc_thread, ModelThreadError};
 use crate::model::onnx::ModelLoadError;
 use crate::model::ModelThreadMessage;
-use crate::program::packet::Packet;
+use crate::program::packet::{IpLayer, Packet};
 use crate::transport::{TransportState, TransportStateInitError};
 use bitvec::prelude::*;
-#[cfg(feature = "wire")]
-use core::ops::{Index, IndexMut};
 use ort::Error as OrtError;
 use serde::{de, Deserialize, Deserializer};
-#[cfg(feature = "wire")]
-use smoltcp::phy::RawSocket;
-#[cfg(feature = "wire")]
-use smoltcp::phy::Device;
 use smoltcp::wire::Error as SmoltcpError;
 use smoltcp::wire::{
-    ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol as EtherType, Icmpv4Packet,
-    Icmpv6Packet, IpAddress, IpProtocol, Ipv4Address, Ipv4Packet, Ipv6Address, Ipv6Packet,
+    ArpPacket, EthernetAddress, EthernetFrame, EthernetProtocol as EtherType,
+    IpAddress, IpProtocol, Ipv4Address, Ipv4Packet, Ipv6Address, Ipv6Packet,
     TcpSeqNumber,
 };
-use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt;
 use std::io;
-use std::net::IpAddr;
+use crate::subnet::IpNet;
 use std::path::PathBuf;
-#[cfg(feature = "wire")]
-use std::slice::SliceIndex;
 use std::str::FromStr;
 use std::sync::mpsc;
 use std::time::Instant;
@@ -55,6 +46,7 @@ pub type PortVec = BitArr!(for 65536, in u64, Msb0);
 /// Arguments to the censor are stored here
 pub mod args {
     use clap::Parser;
+    use std::path::PathBuf;
     /// Censorlab is a framework for simulating censors
     #[derive(Debug, Parser)]
     pub enum SubCmd {
@@ -78,6 +70,15 @@ pub mod args {
             #[clap(flatten)]
             args: super::nfq::Args,
         },
+        /// Statically analyse a CensorLang program: per-connection/per-host memory
+        /// and worst-case per-packet operation counts.  No traffic is processed.
+        Analyze {
+            /// Path to the CensorLang program (.cl)
+            program: PathBuf,
+            /// Emit JSON instead of a human-readable report
+            #[clap(long)]
+            json: bool,
+        },
     }
 }
 
@@ -94,9 +95,9 @@ pub struct Censor {
     arp: crate::config::arp::Config,
     // IP
     /// IPv4 allow/blocklist
-    ipv4_list: AllowBlockList<HashSet<Ipv4Address>>,
+    ipv4_list: AllowBlockList<crate::subnet::Ipv4Set>,
     /// IPv6 allow/blocklist
-    ipv6_list: AllowBlockList<HashSet<Ipv6Address>>,
+    ipv6_list: AllowBlockList<crate::subnet::Ipv6Set>,
     /// What to do with ip packets with unknown type
     ip_unknown: Action,
     // ICMP
@@ -106,12 +107,12 @@ pub struct Censor {
     /// TCP allow/blocklist for ports
     tcp_port_list: AllowBlockList<PortVec>,
     /// TCP allow/blocklist for ip-port pairs
-    tcp_ip_port_list: AllowBlockList<HashSet<crate::config::IpPort>>,
+    tcp_ip_port_list: AllowBlockList<crate::subnet::IpPortSet>,
     // UDP
     /// UDP allow/blocklist for ports
     udp_port_list: AllowBlockList<PortVec>,
     /// UDP allow/blocklist for ip-port pairs
-    udp_ip_port_list: AllowBlockList<HashSet<crate::config::IpPort>>,
+    udp_ip_port_list: AllowBlockList<crate::subnet::IpPortSet>,
     // Reset
     /// Number of times to repeat TCP RST packets
     reset_repeat: usize,
@@ -198,6 +199,7 @@ impl Censor {
             icmp,
             tcp,
             udp,
+            conntrack,
             models,
         } = config;
 
@@ -211,27 +213,27 @@ impl Censor {
 
         // Split IP lists out into ipv4 and ipv6
         let ipv4_filter = |ip| {
-            if let IpAddr::V4(ipv4) = ip {
-                Some(ipv4.into())
+            if let IpNet::V4(ipv4) = ip {
+                Some(ipv4)
             } else {
                 None
             }
         };
         let ipv6_filter = |ip| {
-            if let IpAddr::V6(ipv6) = ip {
-                Some(ipv6.into())
+            if let IpNet::V6(ipv6) = ip {
+                Some(ipv6)
             } else {
                 None
             }
         };
         // Perform filtering (ipv4)
-        let ipv4_allowlist = AllowList::from(ip.allowlist.filter_map(ipv4_filter).set());
-        let ipv4_blocklist = BlockList::from(ip.blocklist.filter_map(ipv4_filter).set());
+        let ipv4_allowlist = AllowList::from(ip.allowlist.filter_map(ipv4_filter).collect());
+        let ipv4_blocklist = BlockList::from(ip.blocklist.filter_map(ipv4_filter).collect());
         // Combine allow and blocklist
         let ipv4_list = AllowBlockList::new(ipv4_allowlist, ipv4_blocklist);
         // Perform filtering (ipv6)
-        let ipv6_allowlist = AllowList::from(ip.allowlist.filter_map(ipv6_filter).set());
-        let ipv6_blocklist = BlockList::from(ip.blocklist.filter_map(ipv6_filter).set());
+        let ipv6_allowlist = AllowList::from(ip.allowlist.filter_map(ipv6_filter).collect());
+        let ipv6_blocklist = BlockList::from(ip.blocklist.filter_map(ipv6_filter).collect());
         // Combine allow and blocklist
         let ipv6_list = AllowBlockList::new(ipv6_allowlist, ipv6_blocklist);
 
@@ -240,9 +242,9 @@ impl Censor {
         let tcp_port_blocklist = BlockList::from(tcp.port_blocklist.bit_vec());
         // Combine into 1 thing
         let tcp_port_list = AllowBlockList::new(tcp_port_allowlist, tcp_port_blocklist);
-        // Initialize hashmaps for tcp ip-port lists
-        let tcp_ip_port_allowlist = AllowList::from(tcp.ip_port_allowlist.set());
-        let tcp_ip_port_blocklist = BlockList::from(tcp.ip_port_blocklist.set());
+        // Initialize subnet sets for tcp ip-port lists
+        let tcp_ip_port_allowlist = AllowList::from(tcp.ip_port_allowlist.map(IpNetPort::into_pair).collect());
+        let tcp_ip_port_blocklist = BlockList::from(tcp.ip_port_blocklist.map(IpNetPort::into_pair).collect());
         // Combine into 1 thing
         let tcp_ip_port_list = AllowBlockList::new(tcp_ip_port_allowlist, tcp_ip_port_blocklist);
 
@@ -251,9 +253,9 @@ impl Censor {
         let udp_port_blocklist = BlockList::from(udp.port_blocklist.bit_vec());
         // Combine into 1 thing
         let udp_port_list = AllowBlockList::new(udp_port_allowlist, udp_port_blocklist);
-        // Initialize hashmaps for udp ip-port lists
-        let udp_ip_port_allowlist = AllowList::from(udp.ip_port_allowlist.set());
-        let udp_ip_port_blocklist = BlockList::from(udp.ip_port_blocklist.set());
+        // Initialize subnet sets for udp ip-port lists
+        let udp_ip_port_allowlist = AllowList::from(udp.ip_port_allowlist.map(IpNetPort::into_pair).collect());
+        let udp_ip_port_blocklist = BlockList::from(udp.ip_port_blocklist.map(IpNetPort::into_pair).collect());
         // Combine into 1 thing
         let udp_ip_port_list = AllowBlockList::new(udp_ip_port_allowlist, udp_ip_port_blocklist);
 
@@ -266,6 +268,7 @@ impl Censor {
             models,
             tcp_decision_log_path,
             execution,
+            conntrack,
             model_sender,
         )?;
         // Construct the censor object
@@ -397,6 +400,8 @@ impl Censor {
             args::SubCmd::Wire { args } => self.run_wire(args)?,
             args::SubCmd::Pcap { args } => self.run_pcap(args)?,
             args::SubCmd::Nfq { args } => self.run_nfq(args).await?,
+            // Handled in the binary before a Censor is constructed
+            args::SubCmd::Analyze { .. } => {}
         };
         Ok(())
     }
@@ -407,44 +412,14 @@ impl Censor {
         censor_ctx: &mut Context,
     ) -> Result<Action, SmoltcpError> {
         coz::progress!("process_frame_payload");
-        // For non-IP ethertypes, skip full packet parsing
         let action = match ethertype {
             EtherType::Arp => return self.process_arp(&payload),
             EtherType::Unknown(_) => return Ok(self.ethernet_unknown.clone()),
-            // IP packets need full parsing for transport-layer processing
-            EtherType::Ipv4 | EtherType::Ipv6 => {
-                match Packet::from_ts_bytes(None, payload.as_ref(), ethertype) {
-                    Ok(packet) => match ethertype {
-                        EtherType::Ipv4 => self.process_ipv4(&payload, censor_ctx, packet),
-                        EtherType::Ipv6 => self.process_ipv6(&payload, censor_ctx, packet),
-                        _ => unreachable!(),
-                    },
-                    // Unparseable packets are expected (e.g. truncated frames) and
-                    // should not block traffic.
-                    Err(err) => {
-                        warn!("Error parsing packet, allowing through: {:?}", err);
-                        return Ok(Default::default());
-                    }
-                }
-            }
+            EtherType::Ipv4 => self.process_ipv4(&payload, censor_ctx),
+            EtherType::Ipv6 => self.process_ipv6(&payload, censor_ctx),
         };
-        // Handle the delayer if relevant
-        match action? {
-            Action::Delay(instant) => {
-                if let Context::Nfq(nfq::Context { delayer, .. }) = censor_ctx {
-                    delayer
-                        .delay_packet(payload.as_ref().to_vec(), instant)
-                        .unwrap();
-                    // We consider the packet "dropped" here
-                    Ok(Action::Drop)
-                } else {
-                    // If we couldnt delay the packet, just pass it
-                    Ok(Action::None)
-                }
-            }
-            // Return any other actions
-            action => Ok(action),
-        }
+        // Mode-specific actions (e.g. Delay) are carried out by each mode's packet loop
+        action
     }
     /// Processes the raw packet based on its metadata and our internal state
     ///
@@ -486,10 +461,21 @@ impl Censor {
         &mut self,
         data: T,
         censor_ctx: &mut Context,
-        packet: Packet,
     ) -> Result<Action, SmoltcpError> {
-        // Just make sure the packet is indeed ipv4
-        let ipv4_packet = Ipv4Packet::new_checked(data.as_ref())?;
+        // Without a well-formed IP header there are no addresses to apply rules to.
+        // Such packets are expected (e.g. truncated frames) and should not block traffic.
+        let ipv4_packet = match Ipv4Packet::new_checked(data.as_ref()) {
+            Ok(ipv4_packet) => ipv4_packet,
+            Err(err) => {
+                warn!("Error parsing IPv4 header, allowing through: {:?}", err);
+                return Ok(Action::None);
+            }
+        };
+        let ips = IpPair::V4 {
+            src: ipv4_packet.src_addr(),
+            dst: ipv4_packet.dst_addr(),
+        };
+        let ip_layer = IpLayer::from_ipv4(&ipv4_packet);
         // Check config-level IP allow/blocklist
         match self
             .ipv4_list
@@ -497,8 +483,7 @@ impl Censor {
         {
             Some(Action::None) | None => {}
             Some(Action::Reset { .. }) => {
-                warn!("Reset is not valid for IP allow/blocklist. Dropping instead");
-                return Ok(Action::Drop);
+                return Ok(reset_or_drop_ip(ips, Some(&ip_layer)).add_ipid(ipv4_packet.ident()));
             }
             Some(action) => return Ok(action),
         }
@@ -508,33 +493,14 @@ impl Censor {
             #[cfg(feature = "wire")]
             Context::Wire(ctx) => ctx.direction,
             // For pcap/nfq mode we infer it using a client IP
-            Context::Pcap(pcap::Context { client_ip })
-            | Context::Nfq(nfq::Context { client_ip, .. }) => {
-                if let IpAddress::Ipv4(client_ip) = client_ip {
-                    if ipv4_packet.src_addr() == *client_ip {
-                        Direction::ClientToWan
-                    } else if ipv4_packet.dst_addr() == *client_ip {
-                        Direction::WanToClient
-                    } else {
-                        Direction::Unknown
-                    }
-                } else {
-                    Direction::Unknown
-                }
-            }
+            Context::Pcap(pcap::Context { client })
+            | Context::Nfq(nfq::Context { client, .. }) => client.direction(
+                ipv4_packet.src_addr().into(),
+                ipv4_packet.dst_addr().into(),
+            ),
         };
         // Process the remainder using the generic IP handler
-        let result = self.process_ip(
-            IpPair::V4 {
-                src: ipv4_packet.src_addr(),
-                dst: ipv4_packet.dst_addr(),
-            },
-            Some(ipv4_packet.ident()),
-            ipv4_packet.next_header(),
-            direction,
-            ipv4_packet.payload(),
-            packet,
-        );
+        let result = self.process_ip(ips, direction, ip_layer);
         result.map(|action| action.add_ipid(ipv4_packet.ident()))
     }
     /// Processes an IPv6 packet based on its metadata and our internal state
@@ -545,10 +511,22 @@ impl Censor {
         &mut self,
         data: T,
         censor_ctx: &mut Context,
-        packet: Packet,
     ) -> Result<Action, SmoltcpError> {
-        // Just make sure the packet is indeed ipv6
-        let ipv6_packet = Ipv6Packet::new_checked(data.as_ref())?;
+        // Without a well-formed IP header there are no addresses to apply rules to.
+        // Such packets are expected (e.g. truncated frames) and should not block traffic.
+        let ipv6_packet = match Ipv6Packet::new_checked(data.as_ref()) {
+            Ok(ipv6_packet) => ipv6_packet,
+            Err(err) => {
+                warn!("Error parsing IPv6 header, allowing through: {:?}", err);
+                return Ok(Action::None);
+            }
+        };
+        let ips = IpPair::V6 {
+            src: ipv6_packet.src_addr(),
+            dst: ipv6_packet.dst_addr(),
+        };
+        // Find the upper-layer protocol behind any extension headers
+        let ip_layer = IpLayer::from_ipv6(&ipv6_packet);
         // Check config-level IP allow/blocklist
         match self
             .ipv6_list
@@ -556,8 +534,7 @@ impl Censor {
         {
             Some(Action::None) | None => {}
             Some(Action::Reset { .. }) => {
-                warn!("Reset is not valid for IP allow/blocklist. Dropping instead");
-                return Ok(Action::Drop);
+                return Ok(reset_or_drop_ip(ips, ip_layer.as_ref().ok()));
             }
             Some(action) => return Ok(action),
         }
@@ -567,53 +544,37 @@ impl Censor {
             #[cfg(feature = "wire")]
             Context::Wire(ctx) => ctx.direction,
             // For pcap/nfq mode we infer it using a client IP
-            Context::Pcap(pcap::Context { client_ip })
-            | Context::Nfq(nfq::Context { client_ip, .. }) => {
-                if let IpAddress::Ipv6(client_ip) = *client_ip {
-                    if ipv6_packet.src_addr() == client_ip {
-                        Direction::ClientToWan
-                    } else if ipv6_packet.dst_addr() == client_ip {
-                        Direction::WanToClient
-                    } else {
-                        Direction::Unknown
-                    }
-                } else {
-                    Direction::Unknown
-                }
-            }
+            Context::Pcap(pcap::Context { client })
+            | Context::Nfq(nfq::Context { client, .. }) => client.direction(
+                ipv6_packet.src_addr().into(),
+                ipv6_packet.dst_addr().into(),
+            ),
         };
-        // Process the remainder using the generic IP handler
-        self.process_ip(
-            IpPair::V6 {
-                src: ipv6_packet.src_addr(),
-                dst: ipv6_packet.dst_addr(),
-            },
-            None,
-            ipv6_packet.next_header(),
-            direction,
-            ipv6_packet.payload(),
-            packet,
-        )
+        match ip_layer {
+            // Process the remainder using the generic IP handler
+            Ok(ip_layer) => self.process_ip(ips, direction, ip_layer),
+            // A broken extension-header chain hides the upper-layer protocol
+            Err(err) => {
+                debug!(
+                    "Could not determine upper-layer protocol ({}). Performing {} action",
+                    err, self.ip_unknown
+                );
+                Ok(without_reset(self.ip_unknown.clone()))
+            }
+        }
     }
     /// Generic IP processing function that simplifies some of the logic and avoids exponential
-    /// branching
+    /// branching. Called only after the IP-layer allow/blocklists have passed.
     ///
     /// # Parameters
-    /// * `ip_src` - source ip
-    /// * `ip_dst` - destination ip
-    /// * `next_header` -  protocol of the underlying packet
+    /// * `ips` - source and destination ip
     /// * `direction` - which direction this packet was processed in
-    /// * `data` - payload of ip packet
-    /// * `reset` - Whether we should issue a reset if tcp
-    /// * `swap` - Whether we should swap src and dst fields
-    fn process_ip<T: AsRef<[u8]>>(
+    /// * `ip_layer` - the recognized IP layer, including the upper-layer protocol and payload
+    fn process_ip(
         &mut self,
         ips: IpPair,
-        _ipid: Option<u16>,
-        next_header: IpProtocol,
         direction: Direction,
-        data: T,
-        packet: Packet,
+        ip_layer: IpLayer,
     ) -> Result<Action, SmoltcpError> {
         // Enrich logging
         let span = info_span!(
@@ -624,17 +585,32 @@ impl Censor {
         );
         let _enter = span.enter();
         // Dispatch processing based on protocol
-        match next_header {
-            IpProtocol::Tcp | IpProtocol::Udp => {
-                self.process_transport(ips, data.as_ref(), direction, packet)
+        match (ip_layer.protocol, ips) {
+            (IpProtocol::Tcp | IpProtocol::Udp, _) => {
+                match Packet::from_ip_layer(None, &ip_layer) {
+                    Ok(packet) => self.process_transport(ips, direction, packet),
+                    // The IP-layer rules have already passed. Without a transport header
+                    // (truncated/malformed, or a non-first fragment) there are no ports
+                    // to match and no connection to track, so let the packet through.
+                    Err(err) => {
+                        warn!(
+                            "Error parsing {} header, allowing through: {}",
+                            ip_layer.protocol, err
+                        );
+                        Ok(Action::None)
+                    }
+                }
             }
-            IpProtocol::Icmp => self.process_icmp(ips, direction, data.as_ref()),
-            other => {
+            (IpProtocol::Icmp, IpPair::V4 { .. }) | (IpProtocol::Icmpv6, IpPair::V6 { .. }) => {
+                Ok(self.icmp.action.clone())
+            }
+            (other, _) => {
                 debug!(
                     "Encountered packet with unknown IP protocol {}. Performing {} action",
                     other, self.ip_unknown
                 );
-                Ok(self.ip_unknown.clone())
+                // Never TCP, so there is no connection to reset
+                Ok(without_reset(self.ip_unknown.clone()))
             }
         }
     }
@@ -648,36 +624,15 @@ impl Censor {
         // Do what we are supposed to for arp
         Ok(self.arp.action.clone())
     }
-    /// Processes an ICMP packet based on its metadata nad our internal state
-    ///
-    /// # Parameters
-    /// * `data` - Raw payload of an IP packet
-    fn process_icmp<T: AsRef<[u8]>>(
-        &mut self,
-        ips: IpPair,
-        _direction: Direction,
-        data: T,
-    ) -> Result<Action, SmoltcpError> {
-        match ips {
-            IpPair::V4 { .. } => {
-                let _icmp_packet = Icmpv4Packet::new_checked(data)?;
-            }
-            IpPair::V6 { .. } => {
-                let _icmp_packet = Icmpv6Packet::new_checked(data)?;
-            }
-        }
-        Ok(self.icmp.action.clone())
-    }
     /// Processes the transport-layer  packet based on its metadata and our internal state
     ///
     /// # Parameters
-    /// * `src_ip` - Source IP address from the encapsulating IP payload
-    /// * `dst_ip` - Destination IP address from the encapsulating IP payload
-    /// * `data` - Raw transport-layer payload from an ip frame
-    fn process_transport<T: AsRef<[u8]>>(
+    /// * `ips` - Source and destination IP addresses from the encapsulating IP packet
+    /// * `direction` - which direction this packet was processed in
+    /// * `packet` - The parsed TCP/UDP packet
+    fn process_transport(
         &mut self,
         ips: IpPair,
-        _data: T,
         direction: Direction,
         packet: Packet,
     ) -> Result<Action, SmoltcpError> {
@@ -693,7 +648,7 @@ impl Censor {
                 .recommend_either(&packet.transport.src, &packet.transport.dst)
             {
                 Some(Action::None) | None => {}
-                Some(action) => return Ok(action),
+                Some(action) => return Ok(for_connection(action, ips, &packet)),
             }
             // TCP ip:port allow/blocklist
             let src_ipport = crate::config::IpPort(ips.src_std(), packet.transport.src);
@@ -703,7 +658,7 @@ impl Censor {
                 .recommend_either(&src_ipport, &dst_ipport)
             {
                 Some(Action::None) | None => {}
-                Some(action) => return Ok(action),
+                Some(action) => return Ok(for_connection(action, ips, &packet)),
             }
         } else {
             // UDP port allow/blocklist
@@ -712,7 +667,7 @@ impl Censor {
                 .recommend_either(&packet.transport.src, &packet.transport.dst)
             {
                 Some(Action::None) | None => {}
-                Some(action) => return Ok(action),
+                Some(action) => return Ok(for_connection(action, ips, &packet)),
             }
             // UDP ip:port allow/blocklist
             let src_ipport = crate::config::IpPort(ips.src_std(), packet.transport.src);
@@ -722,13 +677,44 @@ impl Censor {
                 .recommend_either(&src_ipport, &dst_ipport)
             {
                 Some(Action::None) | None => {}
-                Some(action) => return Ok(action),
+                Some(action) => return Ok(for_connection(action, ips, &packet)),
             }
         }
 
         self.transport_state.process(ips, direction, packet)
     }
 }
+
+/// Resolve a config-list action against the packet that triggered it: a Reset becomes a
+/// RST for that packet's TCP connection (or Drop for UDP, which has none to reset).
+fn for_connection(action: Action, ips: IpPair, packet: &Packet) -> Action {
+    if action.is_reset() {
+        crate::transport::reset_or_drop(ips, &packet.transport, packet.payload.len())
+    } else {
+        action
+    }
+}
+
+/// Resolve an IP-rule Reset: a RST for the TCP connection the packet belongs to, or Drop
+/// when it is not well-formed TCP (other protocols, fragments, truncated headers, or an
+/// unparseable IPv6 extension-header chain, passed as `None`).
+fn reset_or_drop_ip(ips: IpPair, ip_layer: Option<&IpLayer>) -> Action {
+    ip_layer
+        .filter(|ip_layer| ip_layer.protocol == IpProtocol::Tcp)
+        .and_then(|ip_layer| Packet::from_ip_layer(None, ip_layer).ok())
+        .map(|packet| crate::transport::reset_or_drop(ips, &packet.transport, packet.payload.len()))
+        .unwrap_or(Action::Drop)
+}
+
+/// Replace a Reset with Drop for traffic that can never be TCP.
+fn without_reset(action: Action) -> Action {
+    if action.is_reset() {
+        Action::Drop
+    } else {
+        action
+    }
+}
+
 impl fmt::Display for Censor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "Censor Parameters:")?;
@@ -819,14 +805,51 @@ impl IpPair {
     }
 }
 
-/// Result of reading a packet then sending it, incorporating special cases
-// this is basically just an option. should we convert it?
-pub enum ForwardFramesResult {
-    /// Some frames were successfully forwarded
-    Success,
-    /// A frame was successfully read, but failed to send, and we reached our max number of tries
-    /// Contains the size of the failed frame
-    TxFull(usize),
+/// The set of addresses considered to be "the client" when inferring traffic
+/// direction in NFQ/PCAP mode.  Holding a set (rather than a single address)
+/// lets IPv4 and IPv6 traffic both get a direction, and covers hosts with
+/// several addresses per family (e.g. IPv6 temporary addresses).
+#[derive(Clone, Debug, Default)]
+pub struct ClientAddrs(Vec<IpAddress>);
+
+impl ClientAddrs {
+    pub fn new(addrs: impl IntoIterator<Item = IpAddress>) -> Self {
+        let mut v: Vec<IpAddress> = Vec::new();
+        for addr in addrs {
+            if !v.contains(&addr) {
+                v.push(addr);
+            }
+        }
+        Self(v)
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn contains(&self, addr: IpAddress) -> bool {
+        self.0.contains(&addr)
+    }
+    /// Direction of a packet `src -> dst` relative to the client.
+    pub fn direction(&self, src: IpAddress, dst: IpAddress) -> Direction {
+        if self.contains(src) {
+            Direction::ClientToWan
+        } else if self.contains(dst) {
+            Direction::WanToClient
+        } else {
+            Direction::Unknown
+        }
+    }
+}
+
+impl fmt::Display for ClientAddrs {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        for (i, addr) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{addr}")?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -866,51 +889,6 @@ impl From<Direction> for f64 {
     }
 }
 
-#[cfg(feature = "wire")]
-pub struct RetryBuffer {
-    buf: Vec<u8>,
-    size: Option<usize>,
-}
-
-#[cfg(feature = "wire")]
-impl RetryBuffer {
-    fn for_interface(interface: &RawSocket) -> Self {
-        // Get iface MTU
-        let mtu = interface.capabilities().max_transmission_unit;
-        // Create an MTU size buffer
-        Self {
-            buf: vec![0; mtu],
-            size: None,
-        }
-    }
-    fn get_data(&self) -> Option<&[u8]> {
-        self.size.map(|size| &self.buf[..size])
-    }
-    fn clear(&mut self) {
-        self.size = None;
-    }
-}
-
-#[cfg(feature = "wire")]
-impl<T> Index<T> for RetryBuffer
-where
-    T: SliceIndex<[u8]>,
-{
-    type Output = <T as SliceIndex<[u8]>>::Output;
-    fn index(&self, index: T) -> &Self::Output {
-        self.buf.index(index)
-    }
-}
-#[cfg(feature = "wire")]
-impl<T> IndexMut<T> for RetryBuffer
-where
-    T: SliceIndex<[u8]>,
-{
-    fn index_mut(&mut self, index: T) -> &mut Self::Output {
-        self.buf.index_mut(index)
-    }
-}
-
 /// An action taken by the censor
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Default)]
 pub enum Action {
@@ -919,6 +897,9 @@ pub enum Action {
     #[default]
     None,
     /// Send a RST in both directions
+    ///
+    /// Addresses, ports and sequence numbers describe the triggering segment; build
+    /// it with [`crate::transport::reset_for`].
     Reset {
         src_mac: [u8; 6],
         dst_mac: [u8; 6],
@@ -926,10 +907,14 @@ pub enum Action {
         ipid: Option<u16>,
         src_port: u16,
         dst_port: u16,
+        /// SEG.SEQ of the triggering segment
         seq: TcpSeqNumber,
+        /// SEG.ACK of the triggering segment (meaningful only if `is_ack`)
         ack: TcpSeqNumber,
+        /// Whether the triggering segment had the ACK flag set
         is_ack: bool,
-        payload_len: usize,
+        /// SEG.LEN of the triggering segment: payload bytes plus one each for SYN and FIN
+        seg_len: usize,
     },
     /// Inject a UDP packet (e.g. forged DNS response) while allowing the original through
     Inject {
@@ -948,50 +933,70 @@ pub enum Action {
     Drop,
     /// Delay the packet until the given time
     Delay(Instant),
+    /// Forward a mutated copy of the packet (normalization, e.g. TSPU-style TTL
+    /// rewriting).  The mutation is structured and applied by the engine, which
+    /// recomputes checksums; censor programs never hand back raw packet bytes.
+    Rewrite(Rewrite),
 }
 
-impl Ord for Action {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Less)
+/// A structured packet mutation applied by the [`Action::Rewrite`] action.
+///
+/// Only named, bounded fields are supported so that the rewritten packet is
+/// correct by construction: the engine re-validates the header it edits and
+/// fixes the IPv4 header checksum itself.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd)]
+pub struct Rewrite {
+    /// New IPv4 TTL / IPv6 hop limit.
+    pub ttl: Option<u8>,
+}
+
+impl Rewrite {
+    /// Apply the mutation in place to an IP packet (no link-layer header).
+    /// Returns `false` (leaving the buffer untouched) if the packet is not a
+    /// well-formed IPv4/IPv6 header.
+    pub fn apply_ip(&self, packet: &mut [u8]) -> bool {
+        match packet.first().map(|b| b >> 4) {
+            Some(4) => {
+                let mut ip = match Ipv4Packet::new_checked(packet) {
+                    Ok(ip) => ip,
+                    Err(_) => return false,
+                };
+                if let Some(ttl) = self.ttl {
+                    ip.set_hop_limit(ttl);
+                }
+                ip.fill_checksum();
+                true
+            }
+            Some(6) => {
+                let mut ip = match Ipv6Packet::new_checked(packet) {
+                    Ok(ip) => ip,
+                    Err(_) => return false,
+                };
+                if let Some(ttl) = self.ttl {
+                    ip.set_hop_limit(ttl);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Apply the mutation in place to an Ethernet frame carrying IPv4/IPv6.
+    pub fn apply_ethernet(&self, frame: &mut [u8]) -> bool {
+        let mut eth = match EthernetFrame::new_checked(frame) {
+            Ok(eth) => eth,
+            Err(_) => return false,
+        };
+        match eth.ethertype() {
+            EtherType::Ipv4 | EtherType::Ipv6 => self.apply_ip(eth.payload_mut()),
+            _ => false,
+        }
     }
 }
 
 impl Action {
     pub fn is_reset(&self) -> bool {
         matches!(self, Action::Reset { .. })
-    }
-    pub fn enrich(
-        self,
-        ips: IpPair,
-        src_port: u16,
-        dst_port: u16,
-        ack: TcpSeqNumber,
-        seq: TcpSeqNumber,
-        payload_len: usize,
-    ) -> Self {
-        if let Action::Reset {
-            src_mac,
-            dst_mac,
-            ipid,
-            is_ack,
-            ..
-        } = self
-        {
-            Action::Reset {
-                src_mac,
-                dst_mac,
-                ips,
-                ipid,
-                src_port,
-                dst_port,
-                seq,
-                ack,
-                payload_len,
-                is_ack,
-            }
-        } else {
-            self
-        }
     }
     pub fn is_inject(&self) -> bool {
         matches!(self, Action::Inject { .. })
@@ -1005,7 +1010,7 @@ impl Action {
                 dst_port,
                 seq,
                 ack,
-                payload_len,
+                seg_len,
                 is_ack,
                 ..
             } => Action::Reset {
@@ -1017,7 +1022,7 @@ impl Action {
                 dst_port,
                 seq,
                 ack,
-                payload_len,
+                seg_len,
                 is_ack,
             },
             // Inject already carries its own MAC addresses
@@ -1033,7 +1038,7 @@ impl Action {
             dst_port,
             seq,
             ack,
-            payload_len,
+            seg_len,
             is_ack,
             ..
         } = self
@@ -1047,7 +1052,7 @@ impl Action {
                 dst_port,
                 seq,
                 ack,
-                payload_len,
+                seg_len,
                 is_ack,
             }
         } else {
@@ -1080,7 +1085,7 @@ impl FromStr for Action {
                 dst_port: 0,
                 ack: TcpSeqNumber(0),
                 seq: TcpSeqNumber(0),
-                payload_len: 0,
+                seg_len: 0,
                 is_ack: false,
             }),
             _other => Err(ActionFromStrError(s.to_owned())),
@@ -1107,6 +1112,7 @@ impl fmt::Display for Action {
             }
             Action::Inject { .. } => "inject a forged UDP response packet",
             Action::Delay(_instant) => "delay the packet",
+            Action::Rewrite(_) => "forward a rewritten copy of the packet",
         })
     }
 }
@@ -1341,5 +1347,98 @@ mod tests {
         assert_eq!(abl.recommend(&443), None);
         // Port 22 is not in allowlist and not in blocklist => Ignore (allowlist action)
         assert_eq!(abl.recommend(&22), Some(Action::Ignore));
+    }
+}
+
+#[cfg(test)]
+mod rewrite_tests {
+    use super::*;
+
+    /// Minimal IPv4/TCP packet (20-byte header, no payload) with a valid checksum.
+    fn ipv4_packet(ttl: u8) -> Vec<u8> {
+        let mut buf = vec![0u8; 40];
+        buf[0] = 0x45;
+        buf[3] = 40;
+        buf[8] = ttl;
+        buf[9] = 6;
+        buf[12..16].copy_from_slice(&[10, 0, 0, 1]);
+        buf[16..20].copy_from_slice(&[10, 0, 0, 2]);
+        let mut ip = Ipv4Packet::new_unchecked(&mut buf[..]);
+        ip.fill_checksum();
+        buf
+    }
+
+    #[test]
+    fn rewrite_sets_ipv4_ttl_and_fixes_checksum() {
+        let mut pkt = ipv4_packet(3);
+        assert!(Rewrite { ttl: Some(64) }.apply_ip(&mut pkt));
+        let ip = Ipv4Packet::new_checked(&pkt[..]).unwrap();
+        assert_eq!(ip.hop_limit(), 64);
+        assert!(ip.verify_checksum(), "header checksum must be recomputed");
+    }
+
+    #[test]
+    fn rewrite_sets_ipv6_hop_limit() {
+        let mut pkt = vec![0u8; 40];
+        pkt[0] = 0x60;
+        pkt[7] = 2;
+        assert!(Rewrite { ttl: Some(64) }.apply_ip(&mut pkt));
+        assert_eq!(Ipv6Packet::new_checked(&pkt[..]).unwrap().hop_limit(), 64);
+    }
+
+    #[test]
+    fn rewrite_rejects_garbage() {
+        let mut pkt = vec![0xffu8; 3];
+        let before = pkt.clone();
+        assert!(!Rewrite { ttl: Some(64) }.apply_ip(&mut pkt));
+        assert_eq!(pkt, before);
+    }
+
+    #[test]
+    fn rewrite_applies_through_ethernet() {
+        let mut frame = vec![0u8; 14];
+        frame[12] = 0x08; // IPv4
+        frame.extend(ipv4_packet(1));
+        assert!(Rewrite { ttl: Some(64) }.apply_ethernet(&mut frame));
+        assert_eq!(Ipv4Packet::new_checked(&frame[14..]).unwrap().hop_limit(), 64);
+    }
+}
+
+#[cfg(test)]
+mod client_addrs_tests {
+    use super::*;
+
+    fn v4(a: u8) -> IpAddress {
+        Ipv4Address::new(10, 0, 0, a).into()
+    }
+    fn v6(a: u16) -> IpAddress {
+        Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, a).into()
+    }
+
+    #[test]
+    fn direction_for_both_address_families() {
+        let client = ClientAddrs::new([v4(1), v6(1)]);
+        assert_eq!(client.direction(v4(1), v4(2)), Direction::ClientToWan);
+        assert_eq!(client.direction(v4(2), v4(1)), Direction::WanToClient);
+        assert_eq!(client.direction(v6(1), v6(2)), Direction::ClientToWan);
+        assert_eq!(client.direction(v6(2), v6(1)), Direction::WanToClient);
+        assert_eq!(client.direction(v6(2), v6(3)), Direction::Unknown);
+        assert_eq!(client.direction(v4(2), v4(3)), Direction::Unknown);
+    }
+
+    #[test]
+    fn multiple_addresses_per_family() {
+        // e.g. a host with a stable and a temporary (privacy) IPv6 address
+        let client = ClientAddrs::new([v6(1), v6(9)]);
+        assert_eq!(client.direction(v6(9), v6(2)), Direction::ClientToWan);
+        assert_eq!(client.direction(v6(2), v6(1)), Direction::WanToClient);
+        assert_eq!(client.direction(v4(1), v4(2)), Direction::Unknown);
+    }
+
+    #[test]
+    fn empty_is_always_unknown() {
+        let client = ClientAddrs::default();
+        assert!(client.is_empty());
+        assert_eq!(client.direction(v4(1), v4(2)), Direction::Unknown);
     }
 }

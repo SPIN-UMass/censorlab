@@ -5,12 +5,13 @@
 #   1. Generate PCAPs for experiments 01-05 (if missing)
 #   2. Train ONNX model for experiment 05 (if missing)
 #   3. Run run_showcase.sh for experiments 01-05
-#   4. Run run_benchmarks.sh for experiment 07
+#   4. Run run_benchmarks.sh for experiment 07 and the static analysis (09)
 #   5. Run analyze.py for each experiment
 #   6. Run aggregate_results.py
 #   7. Print summary
 #
-# Experiment 06 is excluded (requires live NFQ mode).
+# Excluded: 06 (live NFQ), 08 (needs the real-traffic dataset; see its README),
+# 10 and 11 (Docker).  Run them separately and re-run aggregate_results.py.
 #
 # Usage:
 #   bash experiments/scripts/run_all.sh [ITERATIONS]
@@ -39,6 +40,11 @@ SHOWCASE_EXPERIMENTS=(
 
 FAILED=()
 
+# Result files are committed, so mere existence says nothing about this run.
+# A file only counts as produced if it is newer than this start marker.
+RUN_MARKER="$(mktemp)"
+trap 'rm -f "$RUN_MARKER"' EXIT
+
 # ----------------------------------------------------------------
 # Step 1: Generate PCAPs for experiments 01-05
 # ----------------------------------------------------------------
@@ -57,7 +63,7 @@ for exp in "${SHOWCASE_EXPERIMENTS[@]}"; do
     elif [ -f "$pcap_path" ]; then
         echo "  [$exp] PCAP already exists, skipping"
     else
-        echo "  [$exp] Generating PCAP..."
+        echo "  [$exp] Generating PCAP (complete TCP flows)..."
         python3 "$EXPERIMENTS_DIR/$exp/pcap/generate_pcap.py"
     fi
 done
@@ -105,6 +111,18 @@ fi
 echo ""
 
 # ----------------------------------------------------------------
+# Step 4b: CensorLang static analysis (experiment 09)
+# ----------------------------------------------------------------
+echo "=== Step 4b: Static analysis (experiment 09) ==="
+if bash "$EXPERIMENTS_DIR/09_static_analysis/scripts/run.sh" > /dev/null; then
+    echo "  [09_static_analysis] Static analysis complete"
+else
+    echo "  [09_static_analysis] WARNING: static analysis failed"
+    FAILED+=("09_static_analysis/run.sh")
+fi
+echo ""
+
+# ----------------------------------------------------------------
 # Step 5: Run analysis for each experiment
 # ----------------------------------------------------------------
 echo "=== Step 5: Running analysis ==="
@@ -147,30 +165,26 @@ echo "  Pipeline Complete"
 echo "============================================================"
 echo ""
 
-# Check which result files exist
+# check_result <path relative to experiments/> — OK only if written by this run
+check_result() {
+    local rel="$1" f="$EXPERIMENTS_DIR/$1"
+    if [ ! -f "$f" ]; then
+        echo "  [MISS]  $rel"
+        FAILED+=("$rel missing")
+    elif [ "$f" -nt "$RUN_MARKER" ]; then
+        echo "  [OK]    $rel"
+    else
+        echo "  [STALE] $rel (not updated by this run)"
+        FAILED+=("$rel stale")
+    fi
+}
+
 echo "Result files:"
 for exp in "${SHOWCASE_EXPERIMENTS[@]}"; do
-    t4="$EXPERIMENTS_DIR/$exp/results/table4.json"
-    if [ -f "$t4" ]; then
-        echo "  [OK]   $exp/results/table4.json"
-    else
-        echo "  [MISS] $exp/results/table4.json"
-    fi
+    check_result "$exp/results/table4.json"
 done
-
-bench="$EXPERIMENTS_DIR/07_benchmarks/results/benchmark_summary.json"
-if [ -f "$bench" ]; then
-    echo "  [OK]   07_benchmarks/results/benchmark_summary.json"
-else
-    echo "  [MISS] 07_benchmarks/results/benchmark_summary.json"
-fi
-
-agg="$EXPERIMENTS_DIR/results.tex"
-if [ -f "$agg" ]; then
-    echo "  [OK]   experiments/results.tex"
-else
-    echo "  [MISS] experiments/results.tex"
-fi
+check_result "07_benchmarks/results/benchmark_summary.json"
+check_result "results.tex"
 
 echo ""
 if [ ${#FAILED[@]} -gt 0 ]; then

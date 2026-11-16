@@ -1,0 +1,39 @@
+{
+  "source_lines": 4,
+  "lines": 4,
+  "max_lines_per_packet": 4,
+  "regexes": 1,
+  "fields": [
+    "Tcp(DstPort)",
+    "Tcp(PayloadLength)"
+  ],
+  "models": [],
+  "connection_registers": {
+    "float": [],
+    "int": [],
+    "bool": [
+      0
+    ]
+  },
+  "host_registers": {
+    "float": [],
+    "int": [],
+    "bool": []
+  },
+  "per_connection_register_bytes": 1,
+  "per_connection_bytes": 21,
+  "per_host_register_bytes": 0,
+  "per_packet": {
+    "conditions": 3,
+    "reads": 6,
+    "writes": 1,
+    "copies": 0,
+    "arithmetic": 0,
+    "logic": 0,
+    "regex": 1,
+    "model_inputs": 0,
+    "model_calls": 0,
+    "returns": 3
+  },
+  "ends_with_unconditional_return": false
+}

@@ -7,9 +7,9 @@ RUN mkdir -p /etc/nix && \
 
 WORKDIR /censorlab
 
-# NOTE: censorlab.sh hashes the paths copied below to detect when a rebuild is
-# needed. If you add, remove, or rename any COPY source paths, you MUST update
-# the path list in compute_build_hash() in docker/censorlab.sh to match.
+# NOTE: docker/build_hash.sh hashes the paths copied below to detect when a
+# rebuild is needed. If you add, remove, or rename any COPY source paths, you
+# MUST update DOCKERFILE_SOURCES in docker/build_hash.sh to match.
 
 # Copy flake inputs first (best layer caching)
 COPY flake.nix flake.lock ./
@@ -22,6 +22,10 @@ COPY src/ src/
 
 # Copy demos (referenced by build/configs)
 COPY demos/ demos/
+
+# flake.nix's experiments shell includes packages.opengfw, built from this
+# file; without it, evaluating .#experiments below fails.
+COPY experiments/tools/opengfw/ experiments/tools/opengfw/
 
 # Materialize the experiments shell (expensive, cached by Docker layers).
 # This must come BEFORE copying experiments so that editing experiment

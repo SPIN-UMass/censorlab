@@ -1,0 +1,22 @@
+# Minimal OpenGFW configuration for offline PCAP replay (experiments/).
+#
+# The harness invokes `OpenGFW -c config.yaml -p <pcap> -f json <rules.yaml>`.
+# In replay mode the `io` section is unused; worker settings match OpenGFW's
+# documented defaults.  `realtime: false` replays as fast as possible.
+io:
+  queueSize: 1024
+  rcvBuf: 4194304
+  sndBuf: 4194304
+  local: true
+  rst: false
+
+workers:
+  count: 1
+  queueSize: 64
+  tcpMaxBufferedPagesTotal: 65536
+  tcpMaxBufferedPagesPerConn: 16
+  tcpTimeout: 10m
+  udpMaxStreams: 4096
+
+replay:
+  realtime: false

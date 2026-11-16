@@ -1,10 +1,10 @@
-/// Builds raw Ethernet frames wrapping IPv4 + TCP/UDP packets.
-///
-/// The Ethernet header is 14 bytes:
-///   dst_mac(6) + src_mac(6) + ethertype(2)
-///
-/// Reuses the same IP/TCP/UDP construction patterns from `src/program/packet.rs`
-/// unit tests, with the addition of the Ethernet framing.
+//! Builds raw Ethernet frames wrapping IPv4 + TCP/UDP packets.
+//!
+//! The Ethernet header is 14 bytes:
+//!   dst_mac(6) + src_mac(6) + ethertype(2)
+//!
+//! Reuses the same IP/TCP/UDP construction patterns from `src/program/packet.rs`
+//! unit tests, with the addition of the Ethernet framing.
 
 const SRC_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01];
 const DST_MAC: [u8; 6] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x02];
@@ -103,7 +103,11 @@ fn build_ipv4_tcp_raw(
 }
 
 /// TCP flag constants
+#[allow(dead_code)]
+pub const TCP_FIN: u8 = 0x01;
 pub const TCP_SYN: u8 = 0x02;
+#[allow(dead_code)]
+pub const TCP_RST: u8 = 0x04;
 pub const TCP_ACK: u8 = 0x10;
 pub const TCP_PSH_ACK: u8 = 0x18;
 
@@ -182,6 +186,12 @@ pub fn udp_frame(
 ///
 /// Constructs a minimal DNS query (QR=0, OPCODE=0, 1 question, type A, class IN).
 pub fn dns_query(domain: &str) -> Vec<u8> {
+    dns_query_typed(domain, 1, false)
+}
+
+/// Build a DNS query payload with an arbitrary QTYPE (class IN), optionally
+/// carrying an EDNS(0) OPT pseudo-RR in the additional section, as browsers do.
+pub fn dns_query_typed(domain: &str, qtype: u16, edns: bool) -> Vec<u8> {
     let mut buf = Vec::new();
 
     // Header (12 bytes)
@@ -190,7 +200,7 @@ pub fn dns_query(domain: &str) -> Vec<u8> {
     buf.extend_from_slice(&[0x00, 0x01]); // QDCOUNT = 1
     buf.extend_from_slice(&[0x00, 0x00]); // ANCOUNT
     buf.extend_from_slice(&[0x00, 0x00]); // NSCOUNT
-    buf.extend_from_slice(&[0x00, 0x00]); // ARCOUNT
+    buf.extend_from_slice(&[0x00, u8::from(edns)]); // ARCOUNT
 
     // QNAME
     for label in domain.split('.') {
@@ -199,9 +209,19 @@ pub fn dns_query(domain: &str) -> Vec<u8> {
     }
     buf.push(0x00); // root label
 
-    // QTYPE = A (1), QCLASS = IN (1)
+    // QTYPE, QCLASS = IN (1)
+    buf.extend_from_slice(&qtype.to_be_bytes());
     buf.extend_from_slice(&[0x00, 0x01]);
-    buf.extend_from_slice(&[0x00, 0x01]);
+
+    if edns {
+        // OPT RR: root owner, TYPE=41, CLASS=UDP size 1232, TTL=0 (ext-rcode,
+        // version, flags), RDLENGTH=0
+        buf.push(0x00);
+        buf.extend_from_slice(&41u16.to_be_bytes());
+        buf.extend_from_slice(&1232u16.to_be_bytes());
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        buf.extend_from_slice(&[0x00, 0x00]);
+    }
 
     buf
 }
@@ -269,7 +289,7 @@ fn tls_client_hello_message(sni: &str, padding: usize) -> Vec<u8> {
         extensions.extend_from_slice(&[0x00, 0x15]);
         extensions.push(((padding >> 8) & 0xff) as u8);
         extensions.push((padding & 0xff) as u8);
-        extensions.extend(std::iter::repeat(0u8).take(padding));
+        extensions.extend(std::iter::repeat_n(0u8, padding));
     }
 
     let ch_body_len = 2 + 32 + 1 + 2 + 2 + 1 + 1 + 2 + extensions.len();
@@ -309,49 +329,109 @@ pub fn high_entropy_payload(len: usize) -> Vec<u8> {
         .collect()
 }
 
-/// Build a QUIC Initial packet (unencrypted) wrapping a TLS ClientHello with the given SNI.
-///
-/// The payload is NOT encrypted — suitable for testing the QUIC parser.
+/// QUIC client Initial DCID used by the fixtures below.
+const QUIC_DCID: [u8; 8] = [0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
+
+/// Seal one protected (RFC 9001) QUIC v1 client Initial whose frames are
+/// `frames`, padded to the 1162-byte payload real clients use.
+fn sealed_initial(pn: u64, mut frames: Vec<u8>) -> Vec<u8> {
+    use censorlab::application::quic::{seal_client_initial, QuicVersion};
+    frames.resize(frames.len().max(1162), 0x00); // PADDING frames
+    seal_client_initial(QuicVersion::V1, &QUIC_DCID, &[], &[], pn, 1, &frames)
+}
+
+/// Build a protected QUIC v1 client Initial carrying a TLS ClientHello with
+/// the given SNI, encrypted with the Initial keys derived from its DCID
+/// exactly as a real client would.
 pub fn quic_initial_packet(sni: &str) -> Vec<u8> {
+    use censorlab::application::quic::crypto_frame;
+    sealed_initial(0, crypto_frame(0, &tls_client_hello_message(sni, 0)))
+}
+
+/// Two protected client Initial datagrams of one connection whose
+/// ClientHello (with the given SNI) is split between them, like large
+/// post-quantum ClientHellos. Neither datagram alone contains the full SNI.
+pub fn quic_initial_split_datagrams(sni: &str) -> (Vec<u8>, Vec<u8>) {
+    use censorlab::application::quic::crypto_frame;
     let ch = tls_client_hello_message(sni, 0);
+    // Split inside the SNI value.
+    let sni_pos = ch
+        .windows(sni.len())
+        .position(|w| w == sni.as_bytes())
+        .expect("SNI is in the ClientHello");
+    let split = sni_pos + sni.len() / 2;
+    let first = sealed_initial(0, crypto_frame(0, &ch[..split]));
+    let second = sealed_initial(1, crypto_frame(split as u64, &ch[split..]));
+    (first, second)
+}
 
-    // CRYPTO frame
-    let mut crypto_frame = Vec::new();
-    crypto_frame.push(0x06); // CRYPTO frame type
-    crypto_frame.push(0x00); // offset = 0
-    if ch.len() < 64 {
-        crypto_frame.push(ch.len() as u8);
-    } else {
-        let len = ch.len() as u16;
-        crypto_frame.push(0x40 | ((len >> 8) as u8));
-        crypto_frame.push((len & 0xff) as u8);
-    }
-    crypto_frame.extend_from_slice(&ch);
+// ---------------------------------------------------------------------------
+// Arbitrary IP payloads (ICMP, unknown protocols, IPv6 extension headers)
+// ---------------------------------------------------------------------------
 
-    // Packet number (1 byte)
-    let pn = vec![0x00u8];
-    let payload = [pn.as_slice(), crypto_frame.as_slice()].concat();
+/// Build an Ethernet frame containing an IPv4 packet with an arbitrary protocol
+/// number and raw (already-encoded) payload.
+pub fn ipv4_raw_frame(src_ip: [u8; 4], dst_ip: [u8; 4], protocol: u8, payload: &[u8]) -> Vec<u8> {
+    let total_len = 20 + payload.len();
+    let mut buf = vec![0u8; total_len];
+    buf[0] = 0x45;
+    buf[2] = (total_len >> 8) as u8;
+    buf[3] = total_len as u8;
+    buf[8] = 64;
+    buf[9] = protocol;
+    buf[12..16].copy_from_slice(&src_ip);
+    buf[16..20].copy_from_slice(&dst_ip);
+    let ck = ipv4_checksum(&buf[..20]);
+    buf[10] = (ck >> 8) as u8;
+    buf[11] = ck as u8;
+    buf[20..].copy_from_slice(payload);
+    ethernet_wrap(0x0800, &buf)
+}
 
-    let dcid: &[u8] = &[0x01, 0x02, 0x03, 0x04];
-    let scid: &[u8] = &[];
+/// Build an Ethernet frame containing an IPv6 packet whose fixed header has the
+/// given next-header value, followed by `payload` verbatim (which may begin with
+/// extension headers).
+pub fn ipv6_raw_frame(src_ip: [u8; 16], dst_ip: [u8; 16], next_header: u8, payload: &[u8]) -> Vec<u8> {
+    let mut buf = vec![0u8; 40 + payload.len()];
+    buf[0] = 0x60;
+    buf[4] = (payload.len() >> 8) as u8;
+    buf[5] = payload.len() as u8;
+    buf[6] = next_header;
+    buf[7] = 64;
+    buf[8..24].copy_from_slice(&src_ip);
+    buf[24..40].copy_from_slice(&dst_ip);
+    buf[40..].copy_from_slice(payload);
+    ethernet_wrap(0x86DD, &buf)
+}
 
-    // QUIC long header
-    let mut buf = Vec::new();
-    buf.push(0xC0); // Initial long header
-    buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]); // QUIC v1
-    buf.push(dcid.len() as u8);
-    buf.extend_from_slice(dcid);
-    buf.push(scid.len() as u8);
-    buf.extend_from_slice(scid);
-    buf.push(0x00); // token length: 0
-    if payload.len() < 64 {
-        buf.push(payload.len() as u8);
-    } else {
-        let len = payload.len() as u16;
-        buf.push(0x40 | ((len >> 8) as u8));
-        buf.push((len & 0xff) as u8);
-    }
-    buf.extend_from_slice(&payload);
+/// A minimal ICMP/ICMPv6 echo request (type 8 or 128, code 0, no data).
+/// The checksum is left zero; CensorLab does not verify it.
+pub fn icmp_echo(icmp_type: u8) -> Vec<u8> {
+    vec![icmp_type, 0, 0, 0, 0, 1, 0, 1]
+}
 
-    buf
+/// A raw 20-byte TCP header (no checksum), for embedding with [`ipv6_raw_frame`].
+pub fn raw_tcp_header(src_port: u16, dst_port: u16, flags: u8, seq: u32, ack: u32) -> Vec<u8> {
+    let mut tcp = vec![0u8; 20];
+    tcp[0..2].copy_from_slice(&src_port.to_be_bytes());
+    tcp[2..4].copy_from_slice(&dst_port.to_be_bytes());
+    tcp[4..8].copy_from_slice(&seq.to_be_bytes());
+    tcp[8..12].copy_from_slice(&ack.to_be_bytes());
+    tcp[12] = 5 << 4;
+    tcp[13] = flags;
+    tcp[14] = 0xFF;
+    tcp[15] = 0xFF;
+    tcp
+}
+
+/// Overwrite the IPv4 TTL of an Ethernet-framed IPv4 packet and fix the
+/// header checksum.  Used to emulate low-TTL "fake" segments.
+pub fn set_ipv4_ttl(frame: &mut [u8], ttl: u8) {
+    let ip = &mut frame[14..];
+    ip[8] = ttl;
+    ip[10] = 0;
+    ip[11] = 0;
+    let ck = ipv4_checksum(&ip[..20]);
+    ip[10] = (ck >> 8) as u8;
+    ip[11] = ck as u8;
 }
