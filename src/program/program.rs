@@ -770,6 +770,14 @@ pub enum Value {
     Bool(bool),
 }
 impl Value {
+    /// The register type this value belongs in
+    pub fn type_of(&self) -> RegisterType {
+        match self {
+            Value::Float(_) => RegisterType::Float,
+            Value::Int(_) => RegisterType::Int,
+            Value::Bool(_) => RegisterType::Bool,
+        }
+    }
     pub fn as_bool(&self) -> bool {
         match self {
             Value::Float(f) => *f != 0.0,
@@ -844,7 +852,7 @@ pub enum InputError {
 pub mod field {
     use super::{
         program_parse, DeserializeFromStr, EnvFields, FromStr, IpVersionMetadata, Packet, TcpFlags,
-        TransportMetadataExtra, TryFromIntError, Value,
+        RegisterType, TransportMetadataExtra, TryFromIntError, Value,
     };
     #[derive(Clone, Debug, DeserializeFromStr, Eq, Hash, PartialEq)]
     pub enum Field {
@@ -898,8 +906,29 @@ pub mod field {
                 Field::PayloadPrintableFraction => Ok(Value::Float(packet.payload_printable_fraction())),
             }
         }
+        /// Static type of the field: `eval` always yields a value of this type
+        /// (including the default substituted on error)
+        pub fn ty(&self) -> RegisterType {
+            match self {
+                Field::Env(_) | Field::Direction => RegisterType::Int,
+                Field::Timestamp
+                | Field::PayloadEntropy
+                | Field::PayloadAveragePopcount
+                | Field::PayloadPrintableFraction => RegisterType::Float,
+                Field::Ip(field) => field.ty(),
+                Field::Tcp(field) => field.ty(),
+                Field::Udp(field) => field.ty(),
+            }
+        }
         pub fn all() -> Vec<Field> {
-            let mut fields = vec![Field::Timestamp];
+            let mut fields = vec![
+                Field::Env(env::Field::NumPackets),
+                Field::Env(env::Field::HostNumConnections),
+                Field::Env(env::Field::HostNumPackets),
+                Field::Env(env::Field::DstHostNumConnections),
+                Field::Env(env::Field::DstHostNumPackets),
+                Field::Timestamp,
+            ];
             for field in ip::Field::all() {
                 fields.push(Field::Ip(field))
             }
@@ -960,7 +989,7 @@ pub mod field {
         }
     }
     pub mod ip {
-        use super::{IpVersionMetadata, Packet, TryFromIntError, Value};
+        use super::{IpVersionMetadata, Packet, TryFromIntError, RegisterType, Value};
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
             HeaderLen,
@@ -980,6 +1009,14 @@ pub mod field {
                     fields.push(V6(v6_field));
                 }
                 fields
+            }
+            pub fn ty(&self) -> RegisterType {
+                match self {
+                    Field::V4(V4Field::DontFrag) | Field::V4(V4Field::MoreFrags) => {
+                        RegisterType::Bool
+                    }
+                    _ => RegisterType::Int,
+                }
             }
             pub fn eval(
                 &self,
@@ -1047,7 +1084,7 @@ pub mod field {
                     }
                 };
                 if default_on_error {
-                    Ok(result.unwrap_or(Value::Int(0)))
+                    Ok(result.unwrap_or_else(|_| self.ty().default_value()))
                 } else {
                     result
                 }
@@ -1088,7 +1125,7 @@ pub mod field {
         }
     }
     pub mod tcp {
-        use super::{Packet, TcpFlags, TransportMetadataExtra, TryFromIntError, Value};
+        use super::{Packet, TcpFlags, TransportMetadataExtra, TryFromIntError, RegisterType, Value};
 
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
@@ -1117,6 +1154,12 @@ pub mod field {
             Ns,
         }
         impl Field {
+            pub fn ty(&self) -> RegisterType {
+                match self {
+                    Field::Flag(_) => RegisterType::Bool,
+                    _ => RegisterType::Int,
+                }
+            }
             pub fn eval(
                 &self,
                 packet: &Packet,
@@ -1149,7 +1192,7 @@ pub mod field {
                         Err(FieldError::WrongProtocol)
                     };
                 if default_on_error {
-                    Ok(result.unwrap_or(Value::Int(0)))
+                    Ok(result.unwrap_or_else(|_| self.ty().default_value()))
                 } else {
                     result
                 }
@@ -1202,7 +1245,7 @@ pub mod field {
         }
     }
     pub mod udp {
-        use super::{Packet, TransportMetadataExtra, TryFromIntError, Value};
+        use super::{Packet, TransportMetadataExtra, TryFromIntError, RegisterType, Value};
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
             SrcPort,
@@ -1213,6 +1256,9 @@ pub mod field {
         impl Field {
             pub fn all() -> Vec<Field> {
                 vec![Field::SrcPort, Field::DstPort, Field::Length, Field::Checksum]
+            }
+            pub fn ty(&self) -> RegisterType {
+                RegisterType::Int
             }
             pub fn eval(
                 &self,
@@ -1232,7 +1278,7 @@ pub mod field {
                         Err(FieldError::WrongProtocol)
                     };
                 if default_on_error {
-                    Ok(result.unwrap_or(Value::Int(0)))
+                    Ok(result.unwrap_or_else(|_| self.ty().default_value()))
                 } else {
                     result
                 }
@@ -1260,11 +1306,7 @@ impl Register {
         format!("{}_{}_{}", prefix, self.ty, self.index)
     }
     pub fn as_uninitialized_value(&self) -> Value {
-        match self.ty {
-            RegisterType::Float => Value::Float(0.0),
-            RegisterType::Int => Value::Int(0),
-            RegisterType::Bool => Value::Bool(false),
-        }
+        self.ty.default_value()
     }
 }
 impl fmt::Display for Register {
@@ -1278,6 +1320,17 @@ pub enum RegisterType {
     Float,
     Int,
     Bool,
+}
+impl RegisterType {
+    /// Zero value of the type: initial register contents and the value of a
+    /// field that cannot be read when `field_default_on_error` is set
+    pub fn default_value(&self) -> Value {
+        match self {
+            RegisterType::Float => Value::Float(0.0),
+            RegisterType::Int => Value::Int(0),
+            RegisterType::Bool => Value::Bool(false),
+        }
+    }
 }
 impl fmt::Display for RegisterType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -2336,6 +2389,36 @@ mod tests {
         let pkt = make_udp_packet(b"data");
         let val = field::tcp::Field::PayloadLength.eval(&pkt, true).unwrap();
         assert!(matches!(val, Value::Int(0)));
+    }
+
+    #[test]
+    fn field_default_on_error_is_typed() {
+        let pkt = make_udp_packet(b"data");
+        let val = field::tcp::Field::Flag(field::tcp::Flag::Syn).eval(&pkt, true).unwrap();
+        assert!(matches!(val, Value::Bool(false)), "{val:?}");
+        let mut v6 = make_tcp_packet(b"");
+        v6.ip.version = IpVersionMetadata::V6 {
+            src: smoltcp::wire::Ipv6Address::UNSPECIFIED,
+            dst: smoltcp::wire::Ipv6Address::UNSPECIFIED,
+            traffic_class: 0,
+            flow_label: 0,
+            payload_len: 0,
+        };
+        let val = field::ip::Field::V4(field::ip::V4Field::DontFrag).eval(&v6, true).unwrap();
+        assert!(matches!(val, Value::Bool(false)), "{val:?}");
+    }
+
+    #[test]
+    fn field_values_match_static_types() {
+        // Every field evaluates to its declared static type, both when present
+        // and when defaulted on error.
+        let fields = EnvFields::default();
+        for pkt in [make_tcp_packet(b"abc"), make_udp_packet(b"abc")] {
+            for f in field::Field::all() {
+                let v = f.eval(&pkt, &fields, true).unwrap();
+                assert_eq!(Value::type_of(&v), f.ty(), "{f:?} -> {v:?}");
+            }
+        }
     }
 
     #[test]
