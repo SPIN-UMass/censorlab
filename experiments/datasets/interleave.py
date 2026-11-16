@@ -8,17 +8,23 @@ experiments/08_real_traffic (MR4): the censor programs must find the labelled
 flows inside realistic traffic instead of a PCAP that contains nothing else.
 
 Method
-  * Background packets are read from the given captures in order (after an
-    optional --background-offset) and truncated to --background-packets (all
-    if omitted).  Non-IP frames are dropped; frames are re-framed as Ethernet.
-  * Background timestamps are rescaled linearly onto the scenario's time span
-    so that the two sources overlap uniformly; ties go to the scenario packet.
-    Relative order *within* each source is kept, so every TCP stream stays
-    valid.
-  * Background hosts are left unmodified, except that any background address
-    colliding with a scenario address is rewritten into 172.16.0.0/12 (with
-    checksums recomputed) so background flows can never be confused with
-    labelled flows.
+  * --background may be given more than once; each occurrence is one
+    background *source* (e.g. one dataset).  The --background-packets budget
+    is split evenly across sources (remainder to the earlier ones), so a
+    USTC-TFC2016 + ISCXVPN2016 mix gets half its packets from each.  With a
+    single source the behaviour is exactly that of the original tool.
+  * Within a source, packets are read from its captures in order (after an
+    optional --background-offset) and truncated to the source's share (all if
+    --background-packets is omitted).  Non-IP frames are dropped; frames are
+    re-framed as Ethernet.
+  * Each source's timestamps are rescaled linearly onto the scenario's time
+    span so that all sources overlap uniformly; ties go to the scenario
+    packet, then to the earlier source.  Relative order *within* each source
+    is kept, so every TCP stream stays valid.
+  * Background hosts are left unmodified, except that any address colliding
+    with a scenario address (or, for the second and later sources, with an
+    address of an earlier source) is rewritten into 172.16.0.0/12 (with
+    checksums recomputed) so flows from different origins can never merge.
   * Labels are re-indexed to flow ordinals in the mixed file (see
     common/report.py); the original index is kept as `scenario_index`.
     Background flows are unlabelled; the reporting module counts tool
@@ -28,12 +34,14 @@ Usage
   interleave.py --scenario-pcap 03_tls_sni/pcap/test.pcap \
                 --scenario-labels 03_tls_sni/pcap/labels.csv \
                 --background datasets/ustc-tfc2016/*.pcap \
+                [--background datasets/iscxvpn2016/pcap/*.pcap] \
                 --background-packets 90000 \
                 --output pcap/03_tls_sni_bg90k.pcap --output-labels pcap/03_tls_sni_bg90k.labels.csv
 """
 
 import argparse
 import csv
+import heapq
 import ipaddress
 import os
 import sys
@@ -76,17 +84,34 @@ def read_background(paths, offset, limit):
     return pkts
 
 
-def remap_collisions(bg, scenario_addrs):
-    """Rewrite background addresses that collide with scenario addresses."""
+def addresses(pkts):
+    out = set()
+    for _ts, frame in pkts:
+        a = ip_addresses(frame, 1)
+        if a:
+            out.update(a)
+    return out
+
+
+def remap_collisions(bg, reserved, pool):
+    """Rewrite background addresses that collide with `reserved` addresses.
+
+    `pool` is a shared iterator of replacement addresses (strings);
+    replacements that are themselves reserved are skipped.
+    """
     colliding = set()
     for _ts, frame in bg:
         a = ip_addresses(frame, 1)
         if a:
-            colliding.update(x for x in a if x in scenario_addrs)
+            colliding.update(x for x in a if x in reserved)
     if not colliding:
         return bg, {}
-    pool = ipaddress.ip_network("172.16.0.0/12").hosts()
-    remap = {a: str(next(pool)) for a in sorted(colliding)}
+    remap = {}
+    for a in sorted(colliding):
+        new = next(pool)
+        while new in reserved:
+            new = next(pool)
+        remap[a] = new
 
     from scapy.all import IP, TCP, UDP, Ether  # only needed for checksum recomputation
 
@@ -117,11 +142,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scenario-pcap", required=True)
     ap.add_argument("--scenario-labels", required=True)
-    ap.add_argument("--background", nargs="+", required=True, help="background PCAP file(s)")
+    ap.add_argument("--background", nargs="+", action="append", required=True,
+                    help="background PCAP file(s) of one source; repeat for several sources")
     ap.add_argument("--background-packets", type=int, default=None,
-                    help="number of background packets to use (default: all)")
+                    help="total background packets, split evenly across sources (default: all)")
     ap.add_argument("--background-offset", type=int, default=0,
-                    help="skip this many background packets first")
+                    help="skip this many packets of each source first")
     ap.add_argument("--output", required=True)
     ap.add_argument("--output-labels", required=True)
     args = ap.parse_args()
@@ -129,17 +155,42 @@ def main():
     scen, scen_addrs = read_scenario(args.scenario_pcap)
     if not scen:
         sys.exit("empty scenario pcap")
-    bg = read_background(args.background, args.background_offset, args.background_packets)
-    if not bg:
-        sys.exit("no background packets read")
-    bg, remap = remap_collisions(bg, scen_addrs)
+    if args.background_packets is not None and args.background_packets < 0:
+        sys.exit("--background-packets must be >= 0")
+    sources = args.background
+    if args.background_packets is None:
+        shares = [None] * len(sources)
+    else:
+        q, r = divmod(args.background_packets, len(sources))
+        shares = [q + (1 if k < r else 0) for k in range(len(sources))]
 
-    # Rescale background time onto the scenario's span, preserving order.
     s_t0, s_t1 = scen[0][0], scen[-1][0]
-    b_t0, b_t1 = bg[0][0], bg[-1][0]
-    span_b = (b_t1 - b_t0) or 1.0
     span_s = (s_t1 - s_t0) or 1.0
-    bg = [(s_t0 + (ts - b_t0) / span_b * span_s, frame) for ts, frame in bg]
+    reserved = set(scen_addrs)
+    pool = (str(h) for h in ipaddress.ip_network("172.16.0.0/12").hosts())
+    remap = {}
+    streams = []
+    for paths, share in zip(sources, shares):
+        if share == 0:
+            continue
+        src = read_background(paths, args.background_offset, share)
+        if not src:
+            sys.exit(f"no background packets read from {' '.join(paths)}")
+        if share is not None and len(src) < share:
+            print(f"warning: wanted {share} background packets from {' '.join(paths)}, "
+                  f"got {len(src)}", file=sys.stderr)
+        src, src_remap = remap_collisions(src, reserved, pool)
+        remap.update(src_remap)
+        reserved |= addresses(src)
+        # Rescale this source's time onto the scenario's span, preserving order.
+        b_t0, b_t1 = src[0][0], src[-1][0]
+        span_b = (b_t1 - b_t0) or 1.0
+        streams.append([(s_t0 + (ts - b_t0) / span_b * span_s, frame) for ts, frame in src])
+    if not streams:
+        sys.exit("no background packets read")
+    # Stable k-way merge of the sources by timestamp (earlier source wins ties).
+    bg = [(ts, frame) for ts, _k, _i, frame in heapq.merge(
+        *[[(ts, k, i, frame) for i, (ts, frame) in enumerate(s)] for k, s in enumerate(streams)])]
 
     # Stable two-way merge by timestamp (scenario wins ties).
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)

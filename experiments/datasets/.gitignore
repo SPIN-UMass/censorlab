@@ -1,3 +1,5 @@
 ustc-tfc2016/
+# symlink to $ISCXVPN2016_DIR (created by fetch_iscxvpn2016.sh)
+iscxvpn2016
 *.pcap
 *.pcapng
