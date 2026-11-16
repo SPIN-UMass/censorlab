@@ -33,7 +33,7 @@ smoltcp = { git = "https://github.com/smoltcp-rs/smoltcp", default-features = fa
 thiserror = "2"
 tokio = {version="1.40", features=["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"]}
 tokio-byteorder = "0.3"
-toml = "0.8"
+toml = "1"
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter"] }
 aes = "0.8"
