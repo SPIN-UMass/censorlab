@@ -1,9 +1,12 @@
+use crate::program::check::{check, CheckErrors, ModelSignatures};
+use crate::program::config::Config as ProgramEnvConfig;
 use crate::program::env::{EnvFields, RegisterBanks, RegisterWriteError};
 use crate::program::packet::Packet;
 use crate::program::packet::{IpVersionMetadata, TcpFlags, TransportMetadataExtra};
+use crate::subnet::IpNet;
 use fnv::FnvHashSet;
 use lalrpop_util::lalrpop_mod;
-use num::Zero;
+
 use regex::bytes::Regex as BytesRegex;
 use serde::Deserialize;
 use serde_with::DeserializeFromStr;
@@ -49,6 +52,8 @@ pub enum ProgramLoadError {
     Read(#[from] std::io::Error),
     #[error("Failed to parse program: {0}")]
     Parse(String),
+    #[error("Program rejected: {0}")]
+    Check(#[from] CheckErrors),
 }
 
 // Load in the parsing module
@@ -65,20 +70,107 @@ pub struct Program {
     pub lines: Vec<Line>,
     #[serde(skip)]
     pub regexes: Vec<BytesRegex>,
+    /// Subnets declared with `subnet "cidr"`, referenced by index from SRC_IN/DST_IN
+    #[serde(skip)]
+    pub subnets: Vec<IpNet>,
 }
 impl Program {
-    /// Loads a program
-    pub fn load(program_path: PathBuf) -> Result<Self, ProgramLoadError> {
-        // Load the program
-        let program = fs::read_to_string(program_path)?;
-        let program = program.parse().map_err(ProgramLoadError::Parse)?;
+    /// Loads a program for execution: parse, check against the configuration
+    /// (see [`crate::program::check`]) and optimise.
+    pub fn load(
+        program_path: PathBuf,
+        config: &ProgramEnvConfig,
+        models: Option<&ModelSignatures>,
+    ) -> Result<Self, ProgramLoadError> {
+        let source = fs::read_to_string(program_path)?;
+        Self::from_source_checked(&source, config, models)
+    }
+    /// Parse, check and optimise a program held in memory
+    pub fn from_source_checked(
+        source: &str,
+        config: &ProgramEnvConfig,
+        models: Option<&ModelSignatures>,
+    ) -> Result<Self, ProgramLoadError> {
+        let (mut program, line_numbers) =
+            Self::parse_numbered(source).map_err(ProgramLoadError::Parse)?;
+        check(&program, Some(&line_numbers), config, models)?;
+        program.optimise();
         Ok(program)
+    }
+    /// Parse a program without checking or optimising it, also returning the
+    /// 1-based source line number of each parsed line
+    pub fn parse_numbered(s: &str) -> Result<(Self, Vec<usize>), String> {
+        let mut lines = Vec::new();
+        let mut line_numbers = Vec::new();
+        let mut regexes = Vec::new();
+        let mut subnets = Vec::new();
+        for (number, line) in s.lines().enumerate() {
+            let number = number + 1;
+            let trimmed = line.trim();
+            // Skip blank lines and comments
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            // Parse regex directives: regex "pattern"
+            if let Some(rest) = trimmed.strip_prefix("regex ") {
+                let rest = rest.trim();
+                if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
+                    let pattern = &rest[1..rest.len() - 1];
+                    let re = BytesRegex::new(pattern).map_err(|e| {
+                        format!("line {number}: invalid regex pattern \"{pattern}\": {e}")
+                    })?;
+                    regexes.push(re);
+                } else {
+                    return Err(format!(
+                        "line {number}: invalid regex directive, expected regex \"pattern\", got: {trimmed}"
+                    ));
+                }
+                continue;
+            }
+            // Parse subnet directives: subnet "cidr" (same strict syntax as the config)
+            if let Some(rest) = trimmed.strip_prefix("subnet ") {
+                let cidr = rest
+                    .trim()
+                    .strip_prefix('"')
+                    .and_then(|r| r.strip_suffix('"'))
+                    .ok_or_else(|| {
+                        format!(
+                            "line {number}: invalid subnet directive, expected subnet \"cidr\", got: {trimmed}"
+                        )
+                    })?;
+                let net: IpNet = cidr
+                    .parse()
+                    .map_err(|e| format!("line {number}: invalid subnet directive: {e}"))?;
+                subnets.push(net);
+                continue;
+            }
+            let line = program_parse::LineParser::new()
+                .parse(trimmed)
+                .map_err(|e| format!("line {number}: {e}"))?;
+            lines.push(line);
+            line_numbers.push(number);
+        }
+        // Subnet references must name a declared subnet
+        for (line, number) in lines.iter().zip(&line_numbers) {
+            if let Operation::SubnetIn { index, .. } = line.operation {
+                if index >= subnets.len() {
+                    return Err(format!(
+                        "line {number}: subnet index {index} out of bounds ({} subnet(s) declared): {line}",
+                        subnets.len()
+                    ));
+                }
+            }
+        }
+        Ok((Program { lines, regexes, subnets }, line_numbers))
     }
 }
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for re in &self.regexes {
             writeln!(f, "regex \"{}\"", re.as_str())?;
+        }
+        for net in &self.subnets {
+            writeln!(f, "subnet \"{net}\"")?;
         }
         for line in &self.lines {
             writeln!(f, "{}", line)?;
@@ -91,7 +183,10 @@ impl Program {
         Self::new_with_regexes(lines, vec![])
     }
     pub fn new_with_regexes(lines: Vec<Line>, regexes: Vec<BytesRegex>) -> Self {
-        let mut program = Program { lines, regexes };
+        Self::new_with_tables(lines, regexes, vec![])
+    }
+    pub fn new_with_tables(lines: Vec<Line>, regexes: Vec<BytesRegex>, subnets: Vec<IpNet>) -> Self {
+        let mut program = Program { lines, regexes, subnets };
         program.optimise();
         program
     }
@@ -233,7 +328,8 @@ impl Program {
                 | Or { ref out, .. }
                 | Xor { ref out, .. }
                 | Regex { ref out, .. }
-                | RegexSni { ref out, .. } => {
+                | RegexSni { ref out, .. }
+                | SubnetIn { ref out, .. } => {
                     regs.push(if out.host { None } else { Some(out.index) });
                 }
                 _ => {
@@ -332,7 +428,7 @@ impl Program {
         // including plain `allow`) ends processing of this packet.
         for line in &self.lines {
             if let Some(action) =
-                line.run(packet, registers, fields, field_default_on_error, &self.regexes, model_io, model_sender)?
+                line.run(packet, registers, fields, field_default_on_error, &self.regexes, &self.subnets, model_io, model_sender)?
             {
                 return Ok(action);
             }
@@ -342,36 +438,10 @@ impl Program {
 }
 impl FromStr for Program {
     type Err = String;
+    /// Parse only: the program is neither checked nor optimised (use
+    /// [`Program::from_source_checked`] / [`Program::load`] for execution)
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut lines = Vec::new();
-        let mut regexes = Vec::new();
-        for line in s.lines() {
-            let trimmed = line.trim();
-            // Skip blank lines and comments
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            // Parse regex directives: regex "pattern"
-            if let Some(rest) = trimmed.strip_prefix("regex ") {
-                let rest = rest.trim();
-                if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                    let pattern = &rest[1..rest.len() - 1];
-                    let re = BytesRegex::new(pattern)
-                        .map_err(|e| format!("Invalid regex pattern \"{pattern}\": {e}"))?;
-                    regexes.push(re);
-                } else {
-                    return Err(format!(
-                        "Invalid regex directive, expected regex \"pattern\", got: {trimmed}"
-                    ));
-                }
-                continue;
-            }
-            let line = program_parse::LineParser::new()
-                .parse(trimmed)
-                .map_err(|e| e.to_string())?;
-            lines.push(line);
-        }
-        Ok(Program { lines, regexes })
+        Self::parse_numbered(s).map(|(program, _)| program)
     }
 }
 
@@ -451,7 +521,8 @@ impl Line {
             | Or { ref out, .. }
             | Xor { ref out, .. }
             | Regex { ref out, .. }
-            | RegexSni { ref out, .. } => Some(out.clone()),
+            | RegexSni { ref out, .. }
+            | SubnetIn { ref out, .. } => Some(out.clone()),
             _ => None,
         }
     }
@@ -462,6 +533,7 @@ impl Line {
         fields: &EnvFields,
         field_default_on_error: bool,
         regexes: &[BytesRegex],
+        subnets: &[IpNet],
         model_io: &mut ModelIO,
         model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
     ) -> Result<Option<Action>, LineExecutionError> {
@@ -601,6 +673,18 @@ impl Line {
                         .is_some_and(|h| h.sni_list.iter().any(|name| re.is_match(name)));
                     registers.set(out, &Value::Bool(matched))?;
                 }
+                SubnetIn { index, endpoint, out } => {
+                    let net = subnets
+                        .get(*index)
+                        .ok_or(LineExecutionError::SubnetIndex(*index))?;
+                    let addr: std::net::IpAddr = match (&packet.ip.version, endpoint) {
+                        (IpVersionMetadata::V4 { src, .. }, Endpoint::Src) => std::net::Ipv4Addr::from(src.0).into(),
+                        (IpVersionMetadata::V4 { dst, .. }, Endpoint::Dst) => std::net::Ipv4Addr::from(dst.0).into(),
+                        (IpVersionMetadata::V6 { src, .. }, Endpoint::Src) => std::net::Ipv6Addr::from(src.0).into(),
+                        (IpVersionMetadata::V6 { dst, .. }, Endpoint::Dst) => std::net::Ipv6Addr::from(dst.0).into(),
+                    };
+                    registers.set(out, &Value::Bool(net.contains(addr)))?;
+                }
                 Return(action) => {
                     return Ok(Some(*action));
                 }
@@ -674,6 +758,8 @@ pub enum LineExecutionError {
     RegisterWrite(#[from] RegisterWriteError),
     #[error("Regex index {0} out of bounds")]
     RegexIndex(usize),
+    #[error("Subnet index {0} out of bounds")]
+    SubnetIndex(usize),
     #[error("Failed to send request to model thread")]
     ModelSendError,
     #[error("Failed to receive response from model thread")]
@@ -683,9 +769,9 @@ pub enum LineExecutionError {
 }
 impl fmt::Display for Line {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // One source line per Line, so a displayed program parses back
         if let Some(ref cond) = self.condition {
-            writeln!(f, "if {cond}:")?;
-            write!(f, "    {}", self.operation)
+            write!(f, "if {cond}: {}", self.operation)
         } else {
             self.operation.fmt(f)
         }
@@ -783,6 +869,14 @@ pub enum Value {
     Bool(bool),
 }
 impl Value {
+    /// The register type this value belongs in
+    pub fn type_of(&self) -> RegisterType {
+        match self {
+            Value::Float(_) => RegisterType::Float,
+            Value::Int(_) => RegisterType::Int,
+            Value::Bool(_) => RegisterType::Bool,
+        }
+    }
     pub fn as_bool(&self) -> bool {
         match self {
             Value::Float(f) => *f != 0.0,
@@ -837,12 +931,22 @@ impl fmt::Display for Input {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Input::*;
         match self {
-            Field(field) => write!(f, "field:{field:?}"),
+            Field(field) => write!(f, "field:{field}"),
             Register(reg) => reg.fmt(f),
             ModelOutput(slot) => write!(f, "model:{}:out:{}", slot.name, slot.index),
-            Float(flt) => flt.fmt(f),
+            Float(flt) => {
+                // Float literals need a fractional part to parse as floats;
+                // Rust's Display for f64 never uses exponent notation.
+                let s = flt.to_string();
+                if s.contains('.') {
+                    f.write_str(&s)
+                } else {
+                    write!(f, "{s}.0")
+                }
+            }
             Int(i) => i.fmt(f),
-            Bool(b) => b.fmt(f),
+            Bool(true) => f.write_str("True"),
+            Bool(false) => f.write_str("False"),
         }
     }
 }
@@ -857,7 +961,7 @@ pub enum InputError {
 pub mod field {
     use super::{
         program_parse, DeserializeFromStr, EnvFields, FromStr, IpVersionMetadata, Packet, TcpFlags,
-        TransportMetadataExtra, TryFromIntError, Value,
+        RegisterType, TransportMetadataExtra, TryFromIntError, Value,
     };
     #[derive(Clone, Debug, DeserializeFromStr, Eq, Hash, PartialEq)]
     pub enum Field {
@@ -914,8 +1018,29 @@ pub mod field {
                 Field::Tls(field) => field.eval(packet, default_on_error).map_err(FieldError::Tls),
             }
         }
+        /// Static type of the field: `eval` always yields a value of this type
+        /// (including the default substituted on error)
+        pub fn ty(&self) -> RegisterType {
+            match self {
+                Field::Env(_) | Field::Direction => RegisterType::Int,
+                Field::Timestamp
+                | Field::PayloadEntropy
+                | Field::PayloadAveragePopcount
+                | Field::PayloadPrintableFraction => RegisterType::Float,
+                Field::Ip(field) => field.ty(),
+                Field::Tcp(field) => field.ty(),
+                Field::Udp(field) => field.ty(),
+            }
+        }
         pub fn all() -> Vec<Field> {
-            let mut fields = vec![Field::Timestamp];
+            let mut fields = vec![
+                Field::Env(env::Field::NumPackets),
+                Field::Env(env::Field::HostNumConnections),
+                Field::Env(env::Field::HostNumPackets),
+                Field::Env(env::Field::DstHostNumConnections),
+                Field::Env(env::Field::DstHostNumPackets),
+                Field::Timestamp,
+            ];
             for field in ip::Field::all() {
                 fields.push(Field::Ip(field))
             }
@@ -933,6 +1058,65 @@ pub mod field {
                 fields.push(Field::Tls(field));
             }
             fields
+        }
+    }
+    impl Field {
+        /// The field's name in CensorLang source (the inverse of `FieldParser`)
+        pub fn name(&self) -> &'static str {
+            use ip::{V4Field, V6Field};
+            use tcp::Flag;
+            match self {
+                Field::Env(env::Field::NumPackets) => "env.num_packets",
+                Field::Env(env::Field::HostNumConnections) => "host.num_connections",
+                Field::Env(env::Field::HostNumPackets) => "host.num_packets",
+                Field::Env(env::Field::DstHostNumConnections) => "dst_host.num_connections",
+                Field::Env(env::Field::DstHostNumPackets) => "dst_host.num_packets",
+                Field::Timestamp => "timestamp",
+                Field::Ip(ip::Field::HeaderLen) => "ip.header_len",
+                Field::Ip(ip::Field::TotalLen) => "ip.total_len",
+                Field::Ip(ip::Field::HopLimit) => "ip.hop_limit",
+                Field::Ip(ip::Field::V4(V4Field::Dscp)) => "ip4.dscp",
+                Field::Ip(ip::Field::V4(V4Field::Ecn)) => "ip4.ecn",
+                Field::Ip(ip::Field::V4(V4Field::Ident)) => "ip4.ident",
+                Field::Ip(ip::Field::V4(V4Field::DontFrag)) => "ip4.dont_frag",
+                Field::Ip(ip::Field::V4(V4Field::MoreFrags)) => "ip4.more_frags",
+                Field::Ip(ip::Field::V4(V4Field::FragOffset)) => "ip4.frag_offset",
+                Field::Ip(ip::Field::V4(V4Field::Checksum)) => "ip4.checksum",
+                Field::Ip(ip::Field::V6(V6Field::TrafficClass)) => "ip6.traffic_class",
+                Field::Ip(ip::Field::V6(V6Field::FlowLabel)) => "ip6.flow_label",
+                Field::Ip(ip::Field::V6(V6Field::PayloadLen)) => "ip6.payload_len",
+                Field::Tcp(tcp::Field::SrcPort) => "tcp.src",
+                Field::Tcp(tcp::Field::DstPort) => "tcp.dst",
+                Field::Tcp(tcp::Field::Seq) => "tcp.seq",
+                Field::Tcp(tcp::Field::Ack) => "tcp.ack",
+                Field::Tcp(tcp::Field::Flag(Flag::Fin)) => "tcp.flag.fin",
+                Field::Tcp(tcp::Field::Flag(Flag::Syn)) => "tcp.flag.syn",
+                Field::Tcp(tcp::Field::Flag(Flag::Rst)) => "tcp.flag.rst",
+                Field::Tcp(tcp::Field::Flag(Flag::Psh)) => "tcp.flag.psh",
+                Field::Tcp(tcp::Field::Flag(Flag::Ack)) => "tcp.flag.ack",
+                Field::Tcp(tcp::Field::Flag(Flag::Urg)) => "tcp.flag.urg",
+                Field::Tcp(tcp::Field::Flag(Flag::Ece)) => "tcp.flag.ece",
+                Field::Tcp(tcp::Field::Flag(Flag::Cwr)) => "tcp.flag.cwr",
+                Field::Tcp(tcp::Field::Flag(Flag::Ns)) => "tcp.flag.ns",
+                Field::Tcp(tcp::Field::Length) => "tcp.len",
+                Field::Tcp(tcp::Field::HeaderLength) => "tcp.header.len",
+                Field::Tcp(tcp::Field::PayloadLength) => "tcp.payload.len",
+                Field::Tcp(tcp::Field::UrgentAt) => "tcp.urgent_at",
+                Field::Tcp(tcp::Field::WindowLength) => "tcp.window_len",
+                Field::Udp(udp::Field::SrcPort) => "udp.src",
+                Field::Udp(udp::Field::DstPort) => "udp.dst",
+                Field::Udp(udp::Field::Length) => "udp.length",
+                Field::Udp(udp::Field::Checksum) => "udp.checksum",
+                Field::Direction => "direction",
+                Field::PayloadEntropy => "transport.payload.entropy",
+                Field::PayloadAveragePopcount => "transport.payload.avg_popcount",
+                Field::PayloadPrintableFraction => "transport.payload.printable_fraction",
+            }
+        }
+    }
+    impl std::fmt::Display for Field {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str(self.name())
         }
     }
     impl FromStr for Field {
@@ -981,7 +1165,7 @@ pub mod field {
         }
     }
     pub mod ip {
-        use super::{IpVersionMetadata, Packet, TryFromIntError, Value};
+        use super::{IpVersionMetadata, Packet, TryFromIntError, RegisterType, Value};
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
             HeaderLen,
@@ -1001,6 +1185,14 @@ pub mod field {
                     fields.push(V6(v6_field));
                 }
                 fields
+            }
+            pub fn ty(&self) -> RegisterType {
+                match self {
+                    Field::V4(V4Field::DontFrag) | Field::V4(V4Field::MoreFrags) => {
+                        RegisterType::Bool
+                    }
+                    _ => RegisterType::Int,
+                }
             }
             pub fn eval(
                 &self,
@@ -1068,7 +1260,7 @@ pub mod field {
                     }
                 };
                 if default_on_error {
-                    Ok(result.unwrap_or(Value::Int(0)))
+                    Ok(result.unwrap_or_else(|_| self.ty().default_value()))
                 } else {
                     result
                 }
@@ -1184,7 +1376,7 @@ pub mod field {
         }
     }
     pub mod tcp {
-        use super::{Packet, TcpFlags, TransportMetadataExtra, TryFromIntError, Value};
+        use super::{Packet, TcpFlags, TransportMetadataExtra, TryFromIntError, RegisterType, Value};
 
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
@@ -1213,6 +1405,12 @@ pub mod field {
             Ns,
         }
         impl Field {
+            pub fn ty(&self) -> RegisterType {
+                match self {
+                    Field::Flag(_) => RegisterType::Bool,
+                    _ => RegisterType::Int,
+                }
+            }
             pub fn eval(
                 &self,
                 packet: &Packet,
@@ -1224,8 +1422,8 @@ pub mod field {
                         match self {
                             SrcPort => Ok(Value::Int(packet.transport.src.into())),
                             DstPort => Ok(Value::Int(packet.transport.dst.into())),
-                            Seq => Ok(Value::Int(tcp_metadata.seq.0.into())),
-                            Ack => Ok(Value::Int(tcp_metadata.ack.0.into())),
+                            Seq => Ok(Value::Int(tcp_metadata.seq_number().into())),
+                            Ack => Ok(Value::Int(tcp_metadata.ack_number().into())),
                             Flag(flag) => Ok(flag.eval(&tcp_metadata.flags)),
                             Length => {
                                 let total_len: u32 = (usize::from(tcp_metadata.header_len)
@@ -1245,7 +1443,7 @@ pub mod field {
                         Err(FieldError::WrongProtocol)
                     };
                 if default_on_error {
-                    Ok(result.unwrap_or(Value::Int(0)))
+                    Ok(result.unwrap_or_else(|_| self.ty().default_value()))
                 } else {
                     result
                 }
@@ -1298,7 +1496,7 @@ pub mod field {
         }
     }
     pub mod udp {
-        use super::{Packet, TransportMetadataExtra, TryFromIntError, Value};
+        use super::{Packet, TransportMetadataExtra, TryFromIntError, RegisterType, Value};
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
             SrcPort,
@@ -1309,6 +1507,9 @@ pub mod field {
         impl Field {
             pub fn all() -> Vec<Field> {
                 vec![Field::SrcPort, Field::DstPort, Field::Length, Field::Checksum]
+            }
+            pub fn ty(&self) -> RegisterType {
+                RegisterType::Int
             }
             pub fn eval(
                 &self,
@@ -1328,7 +1529,7 @@ pub mod field {
                         Err(FieldError::WrongProtocol)
                     };
                 if default_on_error {
-                    Ok(result.unwrap_or(Value::Int(0)))
+                    Ok(result.unwrap_or_else(|_| self.ty().default_value()))
                 } else {
                     result
                 }
@@ -1356,11 +1557,7 @@ impl Register {
         format!("{}_{}_{}", prefix, self.ty, self.index)
     }
     pub fn as_uninitialized_value(&self) -> Value {
-        match self.ty {
-            RegisterType::Float => Value::Float(0.0),
-            RegisterType::Int => Value::Int(0),
-            RegisterType::Bool => Value::Bool(false),
-        }
+        self.ty.default_value()
     }
 }
 impl fmt::Display for Register {
@@ -1374,6 +1571,17 @@ pub enum RegisterType {
     Float,
     Int,
     Bool,
+}
+impl RegisterType {
+    /// Zero value of the type: initial register contents and the value of a
+    /// field that cannot be read when `field_default_on_error` is set
+    pub fn default_value(&self) -> Value {
+        match self {
+            RegisterType::Float => Value::Float(0.0),
+            RegisterType::Int => Value::Int(0),
+            RegisterType::Bool => Value::Bool(false),
+        }
+    }
 }
 impl fmt::Display for RegisterType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1615,9 +1823,8 @@ impl MathOperator {
                 (Value::Float(l), Value::Float(r)) => Value::Float(op.call(*l, *r)),
                 (Value::Int(l), Value::Int(r)) => Value::Int(op.call(*l, *r)),
                 (Value::Bool(l), Value::Bool(r)) => {
-                    let l_i = u8::from(*l);
-                    let r_i = u8::from(*r);
-                    Value::Int(i64::from(op.call(l_i, r_i)))
+                    // Promote to Int first (False - True == -1, not a u8 underflow)
+                    Value::Int(op.call(i64::from(*l), i64::from(*r)))
                 }
                 // LHS is the base, and RHS should be made compatible
                 (Value::Float(l), Value::Int(r)) => {
@@ -1654,40 +1861,99 @@ impl MathOperator {
         }
     }
 }
-use std::ops::{Add, Div, Mul, Rem, Sub};
-impl MathOperatorNumeric {
-    fn call<T>(&self, lhs: T, rhs: T) -> T
-    where
-        T: Add<Output = T>
-            + Sub<Output = T>
-            + Mul<Output = T>
-            + Div<Output = T>
-            + Rem<Output = T>
-            + Zero
-            + PartialEq,
-    {
-        use MathOperatorNumeric::*;
-        match self {
-            Add => lhs + rhs,
-            Sub => lhs - rhs,
-            Mul => lhs * rhs,
-            Div => {
-                if rhs != T::zero() {
-                    lhs / rhs
-                } else {
-                    T::zero()
-                }
-            }
-            Mod => {
-                if rhs != T::zero() {
-                    lhs % rhs
-                } else {
-                    T::zero()
-                }
-            }
+/// Arithmetic as CensorLang defines it.  Every operation is total, so a program
+/// can never fault (or panic the engine) on any packet:
+///
+/// * integers use two's-complement wrapping (`i64::MAX + 1 == i64::MIN`,
+///   `i64::MIN / -1 == i64::MIN`, `i64::MIN % -1 == 0`), identically in debug
+///   and release builds;
+/// * division and modulo by zero yield zero, for integers and floats alike;
+/// * floats otherwise follow IEEE 754.
+trait Arith: Copy {
+    fn cl_add(self, rhs: Self) -> Self;
+    fn cl_sub(self, rhs: Self) -> Self;
+    fn cl_mul(self, rhs: Self) -> Self;
+    fn cl_div(self, rhs: Self) -> Self;
+    fn cl_rem(self, rhs: Self) -> Self;
+}
+impl Arith for i64 {
+    fn cl_add(self, rhs: Self) -> Self {
+        self.wrapping_add(rhs)
+    }
+    fn cl_sub(self, rhs: Self) -> Self {
+        self.wrapping_sub(rhs)
+    }
+    fn cl_mul(self, rhs: Self) -> Self {
+        self.wrapping_mul(rhs)
+    }
+    fn cl_div(self, rhs: Self) -> Self {
+        if rhs == 0 {
+            0
+        } else {
+            self.wrapping_div(rhs)
+        }
+    }
+    fn cl_rem(self, rhs: Self) -> Self {
+        if rhs == 0 {
+            0
+        } else {
+            self.wrapping_rem(rhs)
         }
     }
 }
+impl Arith for f64 {
+    fn cl_add(self, rhs: Self) -> Self {
+        self + rhs
+    }
+    fn cl_sub(self, rhs: Self) -> Self {
+        self - rhs
+    }
+    fn cl_mul(self, rhs: Self) -> Self {
+        self * rhs
+    }
+    fn cl_div(self, rhs: Self) -> Self {
+        if rhs == 0.0 {
+            0.0
+        } else {
+            self / rhs
+        }
+    }
+    fn cl_rem(self, rhs: Self) -> Self {
+        if rhs == 0.0 {
+            0.0
+        } else {
+            self % rhs
+        }
+    }
+}
+impl MathOperatorNumeric {
+    fn call<T: Arith>(&self, lhs: T, rhs: T) -> T {
+        use MathOperatorNumeric::*;
+        match self {
+            Add => lhs.cl_add(rhs),
+            Sub => lhs.cl_sub(rhs),
+            Mul => lhs.cl_mul(rhs),
+            Div => lhs.cl_div(rhs),
+            Mod => lhs.cl_rem(rhs),
+        }
+    }
+}
+/// Which packet address a SubnetIn operation tests
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Endpoint {
+    Src,
+    Dst,
+}
+impl fmt::Display for Endpoint {
+    /// The CensorLang opcode for this endpoint
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Endpoint::Src => write!(f, "SRC_IN"),
+            Endpoint::Dst => write!(f, "DST_IN"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Operation {
     Copy {
@@ -1742,6 +2008,12 @@ pub enum Operation {
     /// matches regex `index` (False until a ClientHello has been recognised).
     RegexSni {
         index: usize,
+        out: Register,
+    },
+    /// Whether the packet's source/destination address is in declared subnet `index`
+    SubnetIn {
+        index: usize,
+        endpoint: Endpoint,
         out: Register,
     },
     Return(Action),
@@ -1808,7 +2080,7 @@ impl fmt::Display for Operation {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Operation::*;
         match self {
-            Copy { from, to } => write!(f, "COPY {from}->{to}"),
+            Copy { from, to } => write!(f, "COPY {from} -> {to}"),
             Add { lhs, rhs, out }
             | Sub { lhs, rhs, out }
             | Mul { lhs, rhs, out }
@@ -1828,15 +2100,16 @@ impl fmt::Display for Operation {
                     Xor { .. } => "XOR",
                     _ => unreachable!(),
                 };
-                write!(f, "{name} {lhs},{rhs}->{out}")
+                write!(f, "{name} {lhs}, {rhs} -> {out}")
             }
-            Regex { index, out } => write!(f, "REGEX {index}->{out}"),
-            RegexSni { index, out } => write!(f, "REGEX_SNI {index}->{out}"),
+            Regex { index, out } => write!(f, "REGEX {index} -> {out}"),
+            RegexSni { index, out } => write!(f, "REGEX_SNI {index} -> {out}"),
+            SubnetIn { index, endpoint, out } => write!(f, "{endpoint} {index} -> {out}"),
             Return(action) => write!(f, "RETURN {action}"),
             Noop => write!(f, "NOOP"),
             Model { ref name } => write!(f, "MODEL {name}"),
             CopyToModel { from, name, index } => {
-                write!(f, "COPY {from}->model:{name}:in:{index}")
+                write!(f, "COPY {from} -> model:{name}:in:{index}")
             }
         }
     }
@@ -2400,6 +2673,49 @@ mod tests {
     }
 
     #[test]
+    fn field_default_on_error_is_typed() {
+        let pkt = make_udp_packet(b"data");
+        let val = field::tcp::Field::Flag(field::tcp::Flag::Syn).eval(&pkt, true).unwrap();
+        assert!(matches!(val, Value::Bool(false)), "{val:?}");
+        let mut v6 = make_tcp_packet(b"");
+        v6.ip.version = IpVersionMetadata::V6 {
+            src: smoltcp::wire::Ipv6Address::UNSPECIFIED,
+            dst: smoltcp::wire::Ipv6Address::UNSPECIFIED,
+            traffic_class: 0,
+            flow_label: 0,
+            payload_len: 0,
+        };
+        let val = field::ip::Field::V4(field::ip::V4Field::DontFrag).eval(&v6, true).unwrap();
+        assert!(matches!(val, Value::Bool(false)), "{val:?}");
+    }
+
+    #[test]
+    fn field_tcp_seq_ack_non_negative() {
+        let mut pkt = make_tcp_packet(b"");
+        if let TransportMetadataExtra::Tcp(ref mut tcp) = pkt.transport.extra {
+            tcp.seq = TcpSeqNumber(-1);
+            tcp.ack = TcpSeqNumber(i32::MIN);
+        }
+        let seq = field::tcp::Field::Seq.eval(&pkt, false).unwrap();
+        let ack = field::tcp::Field::Ack.eval(&pkt, false).unwrap();
+        assert!(matches!(seq, Value::Int(4294967295)), "{seq:?}");
+        assert!(matches!(ack, Value::Int(2147483648)), "{ack:?}");
+    }
+
+    #[test]
+    fn field_values_match_static_types() {
+        // Every field evaluates to its declared static type, both when present
+        // and when defaulted on error.
+        let fields = EnvFields::default();
+        for pkt in [make_tcp_packet(b"abc"), make_udp_packet(b"abc")] {
+            for f in field::Field::all() {
+                let v = f.eval(&pkt, &fields, true).unwrap();
+                assert_eq!(Value::type_of(&v), f.ty(), "{f:?} -> {v:?}");
+            }
+        }
+    }
+
+    #[test]
     fn field_eval_payload_entropy_zeros() {
         let pkt = make_tcp_packet(&[0u8; 100]);
         let fields = default_env_fields();
@@ -2492,6 +2808,7 @@ mod tests {
                 },
             ],
             regexes: vec![],
+            subnets: vec![],
         };
         prog.optimise();
         assert_eq!(prog.lines.len(), 0);
@@ -2582,7 +2899,6 @@ mod tests {
         let fields = default_env_fields();
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
-        drop(banks);
         let val = regs.get(&Register { ty: RegisterType::Float, index: 0, host: false }).unwrap();
         assert!(matches!(val, Value::Float(f) if (f - 3.5).abs() < f64::EPSILON));
     }
@@ -2671,6 +2987,69 @@ mod tests {
     }
 
     // =========================================================================
+    // Group 8b: subnet membership (SRC_IN / DST_IN)
+    // =========================================================================
+
+    fn run_source(source: &str) -> Action {
+        let prog: Program = source.parse().unwrap();
+        // make_tcp_packet: 10.0.0.1 -> 10.0.0.2
+        let pkt = make_tcp_packet(b"data");
+        let mut regs = default_registers();
+        let mut host_regs = default_host_registers();
+        let fields = default_env_fields();
+        let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
+        prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap()
+    }
+
+    #[test]
+    fn program_parse_subnet_directive() {
+        let source = "subnet \"10.0.0.0/8\"\nsubnet \"2001:db8::/32\"\nsubnet \"1.2.3.4\"\nSRC_IN 2 -> reg:b.0\nDST_IN 0 -> reg:b.1";
+        let prog: Program = source.parse().unwrap();
+        let nets: Vec<String> = prog.subnets.iter().map(|n| n.to_string()).collect();
+        assert_eq!(nets, ["10.0.0.0/8", "2001:db8::/32", "1.2.3.4/32"]);
+        // Display round-trips
+        let reparsed: Program = prog.to_string().parse().unwrap();
+        assert_eq!(reparsed.to_string(), prog.to_string());
+        assert!(prog.to_string().contains("SRC_IN 2 -> reg:b.0"), "{prog}");
+    }
+
+    #[test]
+    fn program_subnet_src_and_dst() {
+        // 10.0.0.0/31 holds the source (10.0.0.1) but not the destination (10.0.0.2)
+        let source = "subnet \"10.0.0.0/31\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\nSRC_IN 0 -> reg:b.1\nif reg:b.1 == True: RETURN reset";
+        assert_eq!(run_source(source), Action::ResetAll);
+        let source = "subnet \"10.0.0.2\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\nSRC_IN 0 -> reg:b.1\nif reg:b.1 == True: RETURN reset";
+        assert_eq!(run_source(source), Action::TerminateAll);
+        // Other family never matches
+        let source = "subnet \"::/0\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\nSRC_IN 0 -> reg:b.1\nif reg:b.1 == True: RETURN reset";
+        assert_eq!(run_source(source), Action::Allow);
+        // /0 matches everything of its family
+        let source = "subnet \"0.0.0.0/0\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate";
+        assert_eq!(run_source(source), Action::TerminateAll);
+    }
+
+    #[test]
+    fn program_subnet_invalid_rejected_at_parse() {
+        for bad in [
+            "subnet \"10.0.0.1/8\"",
+            "subnet \"10.0.0.0/33\"",
+            "subnet \"2001:db8::/129\"",
+            "subnet 10.0.0.0/8",
+            "subnet \"10.0.0.0/8\" extra",
+            "subnet \"\"",
+        ] {
+            assert!(bad.parse::<Program>().is_err(), "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn program_subnet_index_checked_at_parse() {
+        assert!("SRC_IN 0 -> reg:b.0".parse::<Program>().is_err());
+        assert!("subnet \"10.0.0.0/8\"\nDST_IN 1 -> reg:b.0".parse::<Program>().is_err());
+        assert!("subnet \"10.0.0.0/8\"\nif reg:b.1 == True: DST_IN 0 -> reg:b.0".parse::<Program>().is_ok());
+    }
+
+    // =========================================================================
     // Port field tests
     // =========================================================================
 
@@ -2750,6 +3129,24 @@ mod tests {
         let field = field::Field::PayloadAveragePopcount;
         let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
         assert!(matches!(result, Value::Float(f) if f == 4.0));
+    }
+
+    #[test]
+    fn empty_payload_features_are_zero_not_nan() {
+        // Entropy, popcount and printable fraction must all be 0.0 for an
+        // empty payload; NaN would silently poison comparisons and model inputs.
+        let pkt = make_tcp_packet(&[]);
+        for field in [
+            field::Field::PayloadEntropy,
+            field::Field::PayloadAveragePopcount,
+            field::Field::PayloadPrintableFraction,
+        ] {
+            let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+            assert!(
+                matches!(result, Value::Float(f) if f == 0.0),
+                "{field:?} on empty payload gave {result:?}"
+            );
+        }
     }
 
     #[test]
@@ -2842,7 +3239,6 @@ mod tests {
         let fields = EnvFields { host_num_packets: 42, ..Default::default() };
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         let _ = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
-        drop(banks);
         assert!(matches!(
             regs.get(&Register { ty: RegisterType::Int, index: 0, host: false }),
             Some(Value::Int(42))
@@ -2980,7 +3376,6 @@ mod tests {
         let mut banks = RegisterBanks::new(&mut regs, &mut host_regs);
         let result = prog.run(&pkt, &mut banks, &fields, false, &mut ModelIO::default(), None).unwrap();
         assert_eq!(result, Action::TerminateAll);
-        drop(banks);
         // Verify host register was written
         let hreg = Register { ty: RegisterType::Bool, index: 0, host: false };
         let val = host_regs.get(&hreg).unwrap();
@@ -3028,5 +3423,162 @@ mod tests {
         assert!(
             matches!(&prog.lines[0].operation, Operation::Model { name } if name == "wf")
         );
+    }
+
+    // --- Integer arithmetic is total: two's-complement wrapping, x/0 = x%0 = 0 ---
+
+    fn int_op(op: MathOperatorNumeric, l: i64, r: i64) -> i64 {
+        match MathOperator::Numeric(op).call(&Value::Int(l), &Value::Int(r)) {
+            Value::Int(i) => i,
+            other => panic!("expected Int, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn math_int_overflow_wraps() {
+        assert_eq!(int_op(MathOperatorNumeric::Add, i64::MAX, 1), i64::MIN);
+        assert_eq!(int_op(MathOperatorNumeric::Sub, i64::MIN, 1), i64::MAX);
+        assert_eq!(int_op(MathOperatorNumeric::Mul, i64::MAX, 2), -2);
+        assert_eq!(int_op(MathOperatorNumeric::Div, i64::MIN, -1), i64::MIN);
+        assert_eq!(int_op(MathOperatorNumeric::Mod, i64::MIN, -1), 0);
+        assert_eq!(int_op(MathOperatorNumeric::Div, i64::MIN, 0), 0);
+        assert_eq!(int_op(MathOperatorNumeric::Mod, 7, 0), 0);
+        assert_eq!(int_op(MathOperatorNumeric::Div, -7, 2), -3);
+        assert_eq!(int_op(MathOperatorNumeric::Mod, -7, 2), -1);
+    }
+
+    #[test]
+    fn math_bool_bool_promotes_to_int() {
+        let v = MathOperator::Numeric(MathOperatorNumeric::Sub).call(&Value::Bool(false), &Value::Bool(true));
+        assert!(matches!(v, Value::Int(-1)));
+    }
+
+    #[test]
+    fn optimise_folds_overflowing_constants_without_panicking() {
+        let prog: Program = "DIV -9223372036854775808, -1 -> reg:i.0\nif reg:i.0 < 0: RETURN terminate"
+            .parse()
+            .unwrap();
+        let prog = Program::new(prog.lines);
+        assert!(matches!(
+            &prog.lines[0].operation,
+            Operation::Copy { from: Input::Int(i64::MIN), .. }
+        ));
+    }
+
+    #[test]
+    fn math_float_division_by_zero_is_zero() {
+        let v = MathOperator::Numeric(MathOperatorNumeric::Div).call(&Value::Float(1.0), &Value::Float(0.0));
+        assert!(matches!(v, Value::Float(f) if f == 0.0));
+    }
+
+    // --- Loading for execution checks and optimises ---
+
+    #[test]
+    fn from_source_checked_rejects_ill_typed_program() {
+        let config = ProgramEnvConfig::default();
+        let err = Program::from_source_checked("DIV field:tcp.payload.len, 2 -> reg:f.0", &config, None)
+            .unwrap_err();
+        assert!(matches!(err, ProgramLoadError::Check(_)), "{err}");
+        let err = Program::from_source_checked("COPY 1 -> reg:i.0\nNOPE", &config, None).unwrap_err();
+        assert!(err.to_string().contains("line 2"), "{err}");
+    }
+
+    #[test]
+    fn from_source_checked_optimises() {
+        let config = ProgramEnvConfig::default();
+        let prog = Program::from_source_checked("NOOP\nADD 2, 3 -> reg:i.0\nif reg:i.0 == 5: RETURN terminate\nRETURN allow\nRETURN reset", &config, None)
+            .unwrap();
+        assert_eq!(prog.to_string(), "COPY 5 -> reg:i.0\nif reg:i.0 == 5: RETURN terminate\nRETURN allow\n");
+    }
+
+    // --- Display is the inverse of parsing ---
+
+    #[test]
+    fn field_display_round_trips() {
+        for f in field::Field::all() {
+            let shown = f.to_string();
+            let parsed: field::Field = shown.parse().unwrap_or_else(|e| panic!("{shown}: {e}"));
+            assert_eq!(parsed, f);
+        }
+    }
+
+    #[test]
+    fn program_display_round_trips() {
+        let src = r#"regex "^(GET |POST )"
+regex "a\"b"
+if field:tcp.payload.len == 0: RETURN allow
+if field:ip4.dont_frag == True: RETURN allow_all
+if reg:b.0 != False: RETURN terminate
+COPY field:transport.payload.entropy -> reg:f.1
+COPY 1.0 -> reg:f.2
+COPY -2.5 -> reg:f.3
+COPY -9223372036854775808 -> reg:i.1
+ADD reg:i.1, 1 -> reg:i.1
+SUB hreg:i.2, field:env.num_packets -> hreg:i.2
+MUL 2, reg:f.1 -> reg:f.1
+DIV field:tcp.payload.len, 2 -> reg:i.3
+MOD reg:i.3, 7 -> reg:i.3
+AND reg:b.0, True -> reg:b.1
+OR reg:b.0, field:tcp.flag.syn -> reg:b.1
+XOR reg:b.0, reg:b.1 -> reg:b.2
+REGEX 1 -> reg:b.0
+COPY reg:f.1 -> model:m:in:3
+MODEL m
+COPY model:m:out:1 -> reg:f.4
+if field:tcp.seq >= 100: RETURN reset
+if reg:f.1 xnor reg:b.2: RETURN reset
+NOOP
+"#;
+        let prog: Program = src.parse().unwrap();
+        let shown = prog.to_string();
+        let reparsed: Program = shown.parse().unwrap_or_else(|e| panic!("{shown}\n{e}"));
+        assert_eq!(reparsed.lines.len(), prog.lines.len());
+        assert_eq!(reparsed.to_string(), shown);
+        // Values survive the round trip exactly
+        assert!(shown.contains("COPY 1.0 -> reg:f.2"), "{shown}");
+        assert!(shown.contains("field:ip4.dont_frag == True"), "{shown}");
+        assert!(shown.contains("DIV field:tcp.payload.len, 2 -> reg:i.3"), "{shown}");
+    }
+
+    // --- Parser robustness: numeric literals are recognized, never panic ---
+
+    #[test]
+    fn parse_out_of_range_integer_is_error() {
+        assert!("COPY 99999999999999999999 -> reg:i.0".parse::<Program>().is_err());
+        assert!("COPY -99999999999999999999 -> reg:i.0".parse::<Program>().is_err());
+    }
+
+    #[test]
+    fn parse_i64_min_literal() {
+        let prog: Program = "COPY -9223372036854775808 -> reg:i.0".parse().unwrap();
+        assert!(matches!(
+            &prog.lines[0].operation,
+            Operation::Copy { from: Input::Int(i64::MIN), .. }
+        ));
+    }
+
+    #[test]
+    fn parse_out_of_range_register_index_is_error() {
+        assert!("COPY 1 -> reg:i.99999999999999999999".parse::<Program>().is_err());
+        assert!("REGEX 99999999999999999999 -> reg:b.0".parse::<Program>().is_err());
+        assert!("COPY 1 -> model:m:in:99999999999999999999".parse::<Program>().is_err());
+        assert!("COPY model:m:out:99999999999999999999 -> reg:f.0".parse::<Program>().is_err());
+    }
+
+    #[test]
+    fn parse_non_finite_float_is_error() {
+        let huge = format!("COPY {}.0 -> reg:f.0", "9".repeat(400));
+        assert!(huge.parse::<Program>().is_err());
+    }
+
+    #[test]
+    fn parse_model_name_that_is_a_keyword() {
+        // Model names follow the same rule in MODEL and in model:<name>:in/out
+        let prog: Program = "COPY 1 -> model:f:in:0\nMODEL f\nCOPY model:f:out:0 -> reg:f.0"
+            .parse()
+            .unwrap();
+        assert!(matches!(&prog.lines[1].operation, Operation::Model { name } if name == "f"));
+        let prog: Program = "MODEL allow".parse().unwrap();
+        assert!(matches!(&prog.lines[0].operation, Operation::Model { name } if name == "allow"));
     }
 }

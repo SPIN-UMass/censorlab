@@ -6,7 +6,8 @@ use std::path::Path;
 ///   - 24-byte global header
 ///   - Per-packet: 16-byte record header + frame bytes
 pub struct PcapBuilder {
-    frames: Vec<Vec<u8>>,
+    /// (capture timestamp in seconds, frame bytes)
+    frames: Vec<(u32, Vec<u8>)>,
 }
 
 impl PcapBuilder {
@@ -14,9 +15,17 @@ impl PcapBuilder {
         Self { frames: Vec::new() }
     }
 
-    /// Append a raw Ethernet frame to the capture.
-    pub fn add_frame(mut self, frame: &[u8]) -> Self {
-        self.frames.push(frame.to_vec());
+    /// Append a raw Ethernet frame to the capture, timestamped one second
+    /// after the previous frame (the first frame is at t=0).
+    pub fn add_frame(self, frame: &[u8]) -> Self {
+        let ts_sec = self.frames.last().map(|(ts, _)| ts + 1).unwrap_or(0);
+        self.add_frame_at(ts_sec, frame)
+    }
+
+    /// Append a raw Ethernet frame with an explicit capture timestamp (seconds).
+    #[allow(dead_code)]
+    pub fn add_frame_at(mut self, ts_sec: u32, frame: &[u8]) -> Self {
+        self.frames.push((ts_sec, frame.to_vec()));
         self
     }
 
@@ -34,8 +43,8 @@ impl PcapBuilder {
         buf.extend_from_slice(&1u32.to_le_bytes()); // network (LINKTYPE_ETHERNET)
 
         // Packet records
-        for (i, frame) in self.frames.iter().enumerate() {
-            let ts_sec = i as u32;
+        for (ts_sec, frame) in self.frames.iter() {
+            let ts_sec = *ts_sec;
             let ts_usec = 0u32;
             let incl_len = frame.len() as u32;
             let orig_len = frame.len() as u32;

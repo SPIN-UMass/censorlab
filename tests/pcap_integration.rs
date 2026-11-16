@@ -1,9 +1,14 @@
+// Test packet builders mirror wire formats: many header-field arguments and
+// byte-by-byte pushes are clearer than the alternatives here.
+#![allow(clippy::too_many_arguments, clippy::vec_init_then_push)]
+
 mod common;
 
 use common::packet_builder::{
-    dns_query, high_entropy_payload, http_get, quic_initial_packet, ssh_banner, tcp_frame,
-    tls_client_hello_record, tls_client_hello_record_padded, udp_frame, TCP_ACK, TCP_PSH_ACK,
-    TCP_SYN,
+    dns_query, dns_query_typed, high_entropy_payload, http_get, icmp_echo, ipv4_raw_frame,
+    ipv6_raw_frame, quic_initial_packet, quic_initial_split_datagrams, raw_tcp_header,
+    ssh_banner, tcp_frame, tls_client_hello_record, tls_client_hello_record_padded, udp_frame,
+    TCP_ACK, TCP_PSH_ACK, TCP_SYN,
 };
 use common::pcap_builder::PcapBuilder;
 use common::runner::run_pcap_with_config;
@@ -151,6 +156,128 @@ fn test_dns_blocking() {
     assert!(result.action_lines[0].action.contains("Inject"));
     assert_eq!(result.action_lines[1].packet_index, frame_idx(2));
     assert!(result.action_lines[1].action.contains("Inject"));
+}
+
+/// Browsers send HTTPS (65) and SVCB (64) queries, usually with EDNS(0),
+/// alongside A/AAAA. A DNS censor must recognize them rather than failing to
+/// parse and silently allowing them.
+#[test]
+fn test_dns_blocking_modern_qtypes() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let dns_server = [8, 8, 8, 8];
+
+    PcapBuilder::new()
+        // frame 0: HTTPS query for google.com with EDNS -> injected
+        .add_frame(&udp_frame(client, dns_server, 45000, 53, &dns_query_typed("google.com", 65, true)))
+        // frame 1: SVCB query for _dns.google.com -> injected
+        .add_frame(&udp_frame(client, dns_server, 45001, 53, &dns_query_typed("_dns.google.com", 64, false)))
+        // frame 2: AAAA query with EDNS for google.com -> injected
+        .add_frame(&udp_frame(client, dns_server, 45002, 53, &dns_query_typed("google.com", 28, true)))
+        // frame 3: HTTPS query for yahoo.com -> passes
+        .add_frame(&udp_frame(client, dns_server, 45003, 53, &dns_query_typed("yahoo.com", 65, true)))
+        // frame 4: unassigned qtype for google.com -> injected
+        .add_frame(&udp_frame(client, dns_server, 45004, 53, &dns_query_typed("google.com", 0xFF00, false)))
+        .write_to(&pcap_path);
+
+    let config = demo_config("dns_blocking");
+    let result = run_pcap_with_config(&config, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let injected: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|a| a.action.contains("Inject"))
+        .map(|a| a.packet_index)
+        .collect();
+    assert_eq!(
+        injected,
+        vec![frame_idx(0), frame_idx(1), frame_idx(2), frame_idx(4)],
+        "actions: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+/// Python DNS API: DNS over TCP framing, raw labels, numeric codes, EDNS OPT
+/// accessors, and opaque RDATA for record types that are not decoded.
+#[test]
+fn test_dns_python_api_tcp_and_unknown_types() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let dns_server = [8, 8, 8, 8];
+
+    let query = dns_query_typed("blocked.example", 65, true);
+    let mut framed = (query.len() as u16).to_be_bytes().to_vec();
+    framed.extend_from_slice(&query);
+    let other = dns_query_typed("fine.example", 65, true);
+    let mut framed_other = (other.len() as u16).to_be_bytes().to_vec();
+    framed_other.extend_from_slice(&other);
+
+    // UDP response carrying an HTTPS answer (opaque RDATA)
+    let mut response = dns_query_typed("svc.example", 65, false);
+    response[2] = 0x81;
+    response[3] = 0x80;
+    response[7] = 1; // ANCOUNT
+    response.extend_from_slice(&[0xC0, 0x0C, 0x00, 0x41, 0x00, 0x01, 0, 0, 0, 60, 0, 3, 0, 1, 0]);
+
+    PcapBuilder::new()
+        // frame 0: TCP DNS HTTPS query for blocked.example -> dropped
+        .add_frame(&tcp_frame(client, dns_server, 50000, 53, TCP_PSH_ACK, 1, 1, &framed))
+        // frame 1: TCP DNS HTTPS query for fine.example -> passes
+        .add_frame(&tcp_frame(client, dns_server, 50001, 53, TCP_PSH_ACK, 1, 1, &framed_other))
+        // frame 2: UDP response with HTTPS answer -> dropped
+        .add_frame(&udp_frame(dns_server, client, 53, 45000, &response))
+        .write_to(&pcap_path);
+
+    let script = r#"
+from dns import parse, parse_tcp
+
+def process(packet):
+    tcp = packet.tcp
+    if tcp and tcp.dst == 53 and packet.payload:
+        for m in parse_tcp(packet.payload):
+            q = m.questions[0]
+            if (q.qtype == "HTTPS" and q.qtype_code == 65 and q.qclass == "IN"
+                    and q.labels == [b"blocked", b"example"]
+                    and m.opt.udp == 1232 and m.opt.options == []
+                    and m.trailing_len == 0):
+                return "drop"
+    udp = packet.udp
+    if udp and udp.src == 53:
+        m = parse(packet.payload)
+        a = m.answers[0]
+        if (not m.query and a.rtype == "HTTPS" and a.name == "svc.example"
+                and a.data == ("UNKNOWN", 65, b"\x00\x01\x00") and a.ttl == 60):
+            return "drop"
+"#;
+    let config_str = r#"
+[execution]
+mode = "Python"
+script = "censor.py"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.py", script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|a| a.action.contains("Drop"))
+        .map(|a| a.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0), frame_idx(2)],
+        "actions: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
 }
 
 // ==========================================================================
@@ -423,6 +550,37 @@ fn test_quic_blocking() {
     );
 }
 
+#[test]
+fn test_quic_blocking_client_hello_split_across_datagrams() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    let (first, second) = quic_initial_split_datagrams("example.com");
+
+    PcapBuilder::new()
+        // frame 0: first half of the ClientHello -> SNI not yet known, passes
+        .add_frame(&udp_frame(client, server, 55002, 443, &first))
+        // frame 1: rest of the ClientHello on the same connection -> dropped
+        .add_frame(&udp_frame(client, server, 55002, 443, &second))
+        .write_to(&pcap_path);
+
+    let config = demo_config("quic_blocking");
+    let result = run_pcap_with_config(&config, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        result.action_lines.len(),
+        1,
+        "expected 1 drop action, got: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(1));
+    assert!(result.action_lines[0].action.contains("Drop"));
+}
+
 // ==========================================================================
 // Test 8: IP blocking via config-level blocklist (no Python script)
 // ==========================================================================
@@ -467,6 +625,256 @@ action = "Drop"
         result.action_lines[0].action.contains("Drop"),
         "expected Drop, got: {}",
         result.action_lines[0].action
+    );
+}
+
+// ==========================================================================
+// Test 8a: IP blocking via config-level CIDR subnet blocklist
+// ==========================================================================
+
+#[test]
+fn test_config_ip_subnet_blocklist() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: first address of 198.51.100.0/24 -> dropped
+        .add_frame(&tcp_frame(client, [198, 51, 100, 0], 50000, 80, TCP_SYN, 100, 0, &[]))
+        // frame 1: just below the subnet -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 99, 255], 50001, 80, TCP_SYN, 200, 0, &[]))
+        // frame 2: last address of the subnet -> dropped
+        .add_frame(&tcp_frame(client, [198, 51, 100, 255], 50002, 80, TCP_SYN, 300, 0, &[]))
+        // frame 3: just above the subnet -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 101, 0], 50003, 80, TCP_SYN, 400, 0, &[]))
+        // frame 4: single-address entry in the same list -> dropped
+        .add_frame(&tcp_frame(client, [203, 0, 113, 7], 50004, 80, TCP_SYN, 500, 0, &[]))
+        // frame 5: neighbour of the single address -> passes
+        .add_frame(&tcp_frame(client, [203, 0, 113, 8], 50005, 80, TCP_SYN, 600, 0, &[]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["198.51.100.0/24", "203.0.113.7", "2001:db8::/32"]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains("Drop"))
+        .map(|l| l.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0), frame_idx(2), frame_idx(4)],
+        "unexpected drops: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+// ==========================================================================
+// Test 8a': Config-level TCP ip:port blocklist with a subnet
+// ==========================================================================
+
+#[test]
+fn test_config_tcp_ip_port_subnet_blocklist() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: in subnet, matching port -> dropped
+        .add_frame(&tcp_frame(client, [93, 184, 7, 9], 50000, 443, TCP_SYN, 100, 0, &[]))
+        // frame 1: in subnet, other port -> passes
+        .add_frame(&tcp_frame(client, [93, 184, 7, 9], 50001, 80, TCP_SYN, 200, 0, &[]))
+        // frame 2: outside subnet, matching port -> passes
+        .add_frame(&tcp_frame(client, [93, 185, 0, 1], 50002, 443, TCP_SYN, 300, 0, &[]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.ip_port_blocklist]
+list = ["93.184.0.0/16:443"]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        result.action_lines.len(),
+        1,
+        "expected 1 drop action, got: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(0));
+    assert!(result.action_lines[0].action.contains("Drop"));
+}
+
+// ==========================================================================
+// Test 8a''': Python subnet helpers (rust.subnet / rust.ip_in)
+// ==========================================================================
+
+#[test]
+fn test_python_subnet_helpers() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: dst in 198.51.100.0/24 (precompiled subnet) -> dropped
+        .add_frame(&tcp_frame(client, [198, 51, 100, 9], 50000, 80, TCP_SYN, 100, 0, &[]))
+        // frame 1: dst outside both subnets -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 101, 9], 50001, 80, TCP_SYN, 200, 0, &[]))
+        // frame 2: dst in 203.0.113.0/28 (ip_in) -> dropped
+        .add_frame(&tcp_frame(client, [203, 0, 113, 15], 50002, 80, TCP_SYN, 300, 0, &[]))
+        // frame 3: dst just past the /28 -> passes
+        .add_frame(&tcp_frame(client, [203, 0, 113, 16], 50003, 80, TCP_SYN, 400, 0, &[]))
+        .write_to(&pcap_path);
+
+    write_temp_script(
+        &tmp,
+        "censor.py",
+        r#"from rust import subnet, ip_in
+
+BLOCKED = subnet("198.51.100.0/24")
+
+# Invalid subnets raise ValueError instead of matching nothing
+for bad in ["10.0.0.1/8", "10.0.0.0/33", "nonsense"]:
+    try:
+        subnet(bad)
+        raise Exception("accepted " + bad)
+    except ValueError:
+        pass
+try:
+    BLOCKED.contains("not-an-ip")
+    raise Exception("accepted bad address")
+except ValueError:
+    pass
+assert not BLOCKED.contains("::1")
+assert subnet("2001:db8::/32").contains("2001:db8::1")
+assert str(BLOCKED) == "198.51.100.0/24"
+
+def process(packet):
+    if BLOCKED.contains(packet.ip.dst):
+        return "drop"
+    if ip_in(packet.ip.dst, "203.0.113.0/28"):
+        return "drop"
+"#,
+    );
+    let config_str = r#"
+[execution]
+mode = "Python"
+script = "censor.py"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains("Drop"))
+        .map(|l| l.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0), frame_idx(2)],
+        "unexpected drops: {:?}\nstdout: {}\nstderr: {}",
+        result.action_lines,
+        result.stdout,
+        result.stderr
+    );
+}
+
+// ==========================================================================
+// Test 8a'''': CensorLang subnet directive + DST_IN
+// ==========================================================================
+
+#[test]
+fn test_censorlang_subnet_membership() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+
+    PcapBuilder::new()
+        // frame 0: dst in 198.51.100.0/24 -> terminated
+        .add_frame(&tcp_frame(client, [198, 51, 100, 5], 50000, 80, TCP_SYN, 100, 0, &[]))
+        // frame 1: dst outside -> passes
+        .add_frame(&tcp_frame(client, [198, 51, 101, 5], 50001, 80, TCP_SYN, 200, 0, &[]))
+        .write_to(&pcap_path);
+
+    let cl_script = "subnet \"198.51.100.0/24\"\nDST_IN 0 -> reg:b.0\nif reg:b.0 == True: RETURN terminate\n";
+    let config_str = r#"
+[execution]
+mode = "CensorLang"
+script = "censor.cl"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains("Drop"))
+        .map(|l| l.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0)],
+        "unexpected drops: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+// ==========================================================================
+// Test 8a'': Invalid CIDR in config is rejected at load time
+// ==========================================================================
+
+#[test]
+fn test_config_invalid_cidr_rejected() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    PcapBuilder::new()
+        .add_frame(&tcp_frame([10, 0, 0, 1], [10, 0, 0, 2], 50000, 80, TCP_SYN, 100, 0, &[]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["198.51.100.1/24"]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_ne!(result.exit_code, 0, "config with host bits set should fail to load");
+    assert!(
+        result.stderr.contains("host bits"),
+        "error should mention host bits, stderr: {}",
+        result.stderr
     );
 }
 
@@ -1272,10 +1680,8 @@ if field:transport.payload.entropy > 0.9 : RETURN terminate
 mode = "CensorLang"
 script = "censor.cl"
 
-[execution.program]
+[execution.censorlang]
 num_registers = 16
-
-[execution.env]
 field_default_on_error = true
 "#;
     let config_path = write_temp_config(&tmp, config_str);
@@ -1309,6 +1715,63 @@ field_default_on_error = true
         assert!(
             !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
             "frame {i} should not be dropped (client_b has no flag)"
+        );
+    }
+}
+
+// ==========================================================================
+// Test: CensorLang host registers belong to the connection's client, so
+// packets in both directions of a connection share one bank
+// ==========================================================================
+
+#[test]
+fn test_censorlang_host_registers_keyed_on_client() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let client_b = [10, 0, 0, 2];
+    let server = [93, 184, 216, 34];
+    const TCP_SYN_ACK: u8 = 0x12;
+
+    PcapBuilder::new()
+        // Connection A: the client's 5-byte payload flags the client (frames 0-1)
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_SYN, 100, 0, &[]))
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"hello"))
+        // Connection B from the same client: the server's SYN-ACK must see the
+        // client's flag (frames 2-3)
+        .add_frame(&tcp_frame(client, server, 50001, 80, TCP_SYN, 300, 0, &[]))
+        .add_frame(&tcp_frame(server, client, 80, 50001, TCP_SYN_ACK, 400, 301, &[]))
+        // Connection from client_b: not flagged (frames 4-5)
+        .add_frame(&tcp_frame(client_b, server, 50000, 80, TCP_SYN, 500, 0, &[]))
+        .add_frame(&tcp_frame(server, client_b, 80, 50000, TCP_SYN_ACK, 600, 501, &[]))
+        .write_to(&pcap_path);
+
+    // Only server-sent packets are judged, on the client's host register
+    let cl_script = "\
+if field:tcp.payload.len == 5 : COPY True -> hreg:b.0
+if field:tcp.src != 80 : RETURN allow
+if hreg:b.0 == True : RETURN terminate
+";
+    let config_str = r#"
+[execution]
+mode = "CensorLang"
+script = "censor.cl"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert!(
+        result.action_lines.iter().any(|l| l.packet_index == frame_idx(3) && l.action.contains("Drop")),
+        "server's SYN-ACK to the flagged client should be dropped: {:?}",
+        result.action_lines.iter().map(|l| (l.packet_index, &l.action)).collect::<Vec<_>>()
+    );
+    for i in [0, 1, 2, 4, 5] {
+        assert!(
+            !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
+            "frame {i} should not be dropped"
         );
     }
 }
@@ -1386,7 +1849,7 @@ script = "censor.py"
 /// A TLS application-data record (type 0x17) with `len` bytes of opaque body.
 fn tls_app_record(len: usize) -> Vec<u8> {
     let mut r = vec![0x17, 0x03, 0x03, (len >> 8) as u8, len as u8];
-    r.extend(std::iter::repeat(0xAA).take(len));
+    r.extend(std::iter::repeat_n(0xAA, len));
     r
 }
 
@@ -1419,9 +1882,9 @@ fn test_demo_tspu_ttl_normalization() {
     let result = run_pcap_with_config(&demo_config("tspu_ttl_normalization"), &pcap_path, "10.0.0.1");
     assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
     let act = |n: usize| result.action_lines.iter().find(|l| l.packet_index == frame_idx(n)).map(|l| l.action.clone());
-    assert!(act(3).map_or(false, |a| a.contains("Rewrite") && a.contains("ttl: Some(64)")),
+    assert!(act(3).is_some_and(|a| a.contains("Rewrite") && a.contains("ttl: Some(64)")),
             "fake segment should be TTL-normalized: {:?}\n{}", result.action_lines, result.stdout);
-    assert!(act(4).map_or(false, |a| a.contains("Reset")),
+    assert!(act(4).is_some_and(|a| a.contains("Reset")),
             "real forbidden ClientHello should be reset: {:?}", result.action_lines);
     assert!(act(0).is_none() && act(1).is_none() && act(2).is_none(), "handshake must pass");
 }
@@ -1537,6 +2000,531 @@ fn test_censorlang_direction_field() {
     assert_eq!(dropped, vec![frame_idx(1), frame_idx(2), frame_idx(3)],
                "the connection must be terminated at the first wan->client packet: {:?}\n{}",
                result.action_lines, result.stdout);
+}
+
+// ==========================================================================
+// Tests: broken censor scripts fail loudly
+// ==========================================================================
+
+/// A three-frame TCP handshake + data pcap used by the broken-script tests.
+fn simple_tcp_pcap(tmp: &TempDir) -> PathBuf {
+    let pcap_path = tmp.path().join("test.pcap");
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    PcapBuilder::new()
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_SYN, 100, 0, &[]))
+        .add_frame(&tcp_frame(server, client, 80, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]))
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"hello"))
+        .write_to(&pcap_path);
+    pcap_path
+}
+
+/// Run a Python censor script (with optional extra [execution] lines) over
+/// `simple_tcp_pcap`.
+fn run_python_script(script: &str, extra_execution: &str) -> common::runner::RunResult {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = simple_tcp_pcap(&tmp);
+    let config_str = format!(
+        "[execution]\nmode = \"Python\"\nscript = \"censor.py\"\n{extra_execution}\n"
+    );
+    let config_path = write_temp_config(&tmp, &config_str);
+    write_temp_script(&tmp, "censor.py", script);
+    run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1")
+}
+
+#[test]
+fn test_python_module_error_fails_at_startup() {
+    let result = run_python_script("raise RuntimeError('boom in module body')\n", "");
+    assert_ne!(result.exit_code, 0, "stdout: {}\nstderr: {}", result.stdout, result.stderr);
+    let output = format!("{}{}", result.stdout, result.stderr);
+    assert!(output.contains("boom in module body"), "output: {output}");
+}
+
+#[test]
+fn test_python_missing_process_fails_at_startup() {
+    let result = run_python_script("def proces(packet):\n    return 'drop'\n", "");
+    assert_ne!(result.exit_code, 0, "stdout: {}\nstderr: {}", result.stdout, result.stderr);
+    let output = format!("{}{}", result.stdout, result.stderr);
+    assert!(output.contains("process"), "output: {output}");
+}
+
+#[test]
+fn test_python_non_callable_process_fails_at_startup() {
+    let result = run_python_script("process = 5\n", "");
+    assert_ne!(result.exit_code, 0, "stdout: {}\nstderr: {}", result.stdout, result.stderr);
+}
+
+#[test]
+fn test_python_syntax_error_fails_at_startup() {
+    let result = run_python_script("def process(packet)\n    return 'drop'\n", "");
+    assert_ne!(result.exit_code, 0, "stdout: {}\nstderr: {}", result.stdout, result.stderr);
+}
+
+/// Body that passes startup validation (no `packet` defined there) but raises
+/// when a connection is set up (`packet` is defined).
+const FAILS_PER_CONNECTION: &str = "\
+try:
+    packet
+    raise RuntimeError('boom at connection setup')
+except NameError:
+    pass
+
+def process(packet):
+    return 'drop'
+";
+
+#[test]
+fn test_python_connection_setup_error_is_logged_once() {
+    let result = run_python_script(FAILS_PER_CONNECTION, "");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let output = format!("{}{}", result.stdout, result.stderr);
+    // One connection, three packets: logged exactly once, and fail-open by default
+    assert_eq!(
+        output.matches("RuntimeError: boom at connection setup").count(),
+        1,
+        "output: {output}"
+    );
+    assert!(result.action_lines.is_empty(), "actions: {:?}", result.action_lines);
+}
+
+#[test]
+fn test_python_script_error_policy_drop() {
+    let result = run_python_script(FAILS_PER_CONNECTION, "on_script_error = \"Drop\"");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 3, "actions: {:?}", result.action_lines);
+    assert!(result.action_lines.iter().all(|l| l.action.contains("Drop")));
+}
+
+#[test]
+fn test_python_process_exception_logged_with_connection() {
+    let script = "def process(packet):\n    raise ValueError('boom in process')\n";
+    let result = run_python_script(script, "");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let output = format!("{}{}", result.stdout, result.stderr);
+    assert_eq!(output.matches("ValueError: boom in process").count(), 3, "output: {output}");
+    assert!(output.contains("10.0.0.1"), "connection info missing: {output}");
+    assert!(result.action_lines.is_empty(), "actions: {:?}", result.action_lines);
+}
+
+// ==========================================================================
+// demos/model: ONNX classifier over the first 10 (payload_len, direction)
+// pairs of a connection
+// ==========================================================================
+
+/// Build a TCP flow from `(payload_len, from_client)` pairs.
+fn model_demo_flow(pcap_path: &std::path::Path, shape: &[(usize, bool)]) {
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    let mut b = PcapBuilder::new();
+    for &(len, from_client) in shape {
+        let payload = vec![0x41u8; len];
+        let frame = if from_client {
+            tcp_frame(client, server, 50000, 8388, TCP_ACK, 100, 200, &payload)
+        } else {
+            tcp_frame(server, client, 8388, 50000, TCP_ACK, 200, 100, &payload)
+        };
+        b = b.add_frame(&frame);
+    }
+    b.write_to(pcap_path);
+}
+
+fn assert_model_demo_ran_cleanly(result: &common::runner::RunResult) {
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert!(
+        !result.stderr.contains("Error calling processing function"),
+        "script raised: {}",
+        result.stderr
+    );
+}
+
+#[test]
+fn test_model_demo_flags_connection() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    // Ten empty segments alternating server/client: the bundled model scores
+    // this shape above 0.5, so the 10th packet must be dropped.
+    let shape: Vec<(usize, bool)> = (0..10).map(|i| (0, i % 2 == 1)).collect();
+    model_demo_flow(&pcap_path, &shape);
+
+    let result = run_pcap_with_config(&demo_config("model"), &pcap_path, "10.0.0.1");
+    assert_model_demo_ran_cleanly(&result);
+    let dropped: Vec<usize> = result.action_lines.iter()
+        .filter(|l| l.action.contains("Drop")).map(|l| l.packet_index).collect();
+    assert_eq!(dropped, vec![frame_idx(9)],
+               "the 10th packet must be dropped: {:?}\n{}", result.action_lines, result.stdout);
+}
+
+#[test]
+fn test_model_demo_allows_http_like_connection() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    // handshake, request, response, ACKs: the model scores this ~0
+    let shape = [
+        (0, true), (0, false), (0, true), (97, true), (0, false),
+        (87, false), (0, true), (0, true), (0, false), (0, true),
+    ];
+    model_demo_flow(&pcap_path, &shape);
+
+    let result = run_pcap_with_config(&demo_config("model"), &pcap_path, "10.0.0.1");
+    assert_model_demo_ran_cleanly(&result);
+    assert!(
+        result.action_lines.iter().all(|l| !l.action.contains("Drop")),
+        "benign flow must not be dropped: {:?}",
+        result.action_lines
+    );
+}
+
+// ===========================================================================
+// Exit status: a censor run that fails must exit nonzero so harnesses notice.
+// ===========================================================================
+#[test]
+fn test_pcap_missing_file_exits_nonzero() {
+    let tmp = TempDir::new().unwrap();
+    let missing = tmp.path().join("does_not_exist.pcap");
+    let result = run_pcap_with_config(&demo_config("null"), &missing, "10.0.0.1");
+    assert_ne!(result.exit_code, 0,
+               "pcap mode on a nonexistent file must fail\nstdout: {}\nstderr: {}",
+               result.stdout, result.stderr);
+}
+
+// ==========================================================================
+// Allowlists accept a packet if either endpoint is listed
+// ==========================================================================
+
+#[test]
+fn test_config_tcp_port_allowlist_matches_either_endpoint() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+
+    PcapBuilder::new()
+        // frame 0: ephemeral client port -> 443 (allowlisted) -> passes
+        .add_frame(&tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]))
+        // frame 1: reply 443 -> ephemeral port -> passes
+        .add_frame(&tcp_frame(server, client, 443, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]))
+        // frame 2: ephemeral client port -> 80 (not allowlisted) -> dropped
+        .add_frame(&tcp_frame(client, server, 50001, 80, TCP_SYN, 300, 0, &[]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.port_allowlist]
+list = [443]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        result.action_lines.len(),
+        1,
+        "only the port-80 SYN should be dropped, got: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(2));
+    assert!(result.action_lines[0].action.contains("Drop"));
+}
+
+// ==========================================================================
+// IP-layer rules apply regardless of the transport protocol
+// ==========================================================================
+
+const V6_CLIENT: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+const V6_SERVER: [u8; 16] = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+/// IPv6 next-header values
+const HOP_BY_HOP: u8 = 0;
+const ICMPV6: u8 = 58;
+const TCP: u8 = 6;
+
+/// An 8-byte hop-by-hop options header (PadN) followed by `inner`.
+fn hop_by_hop(next: u8, inner: &[u8]) -> Vec<u8> {
+    let mut v = vec![next, 0, 1, 4, 0, 0, 0, 0];
+    v.extend_from_slice(inner);
+    v
+}
+
+/// Indices of frames that produced an action containing `needle`.
+fn frames_with(result: &common::runner::RunResult, needle: &str) -> Vec<usize> {
+    result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains(needle))
+        .map(|l| l.packet_index)
+        .collect()
+}
+
+#[test]
+fn test_ip_blocklist_applies_to_non_tcp_udp() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let blocked = [8, 8, 8, 8];
+    let allowed = [1, 1, 1, 1];
+
+    PcapBuilder::new()
+        // frame 0: ICMP echo to blocked IP
+        .add_frame(&ipv4_raw_frame(client, blocked, 1, &icmp_echo(8)))
+        // frame 1: GRE to blocked IP
+        .add_frame(&ipv4_raw_frame(client, blocked, 47, &[0; 8]))
+        // frame 2: truncated TCP header to blocked IP
+        .add_frame(&ipv4_raw_frame(client, blocked, 6, &[0; 4]))
+        // frame 3: ICMPv6 behind a hop-by-hop header from a blocked IPv6 address
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP, &hop_by_hop(ICMPV6, &icmp_echo(128))))
+        // frame 4: ICMP echo to an allowed IP -> passes
+        .add_frame(&ipv4_raw_frame(client, allowed, 1, &icmp_echo(8)))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["8.8.8.8", "2001:db8::2"]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(0), frame_idx(1), frame_idx(2), frame_idx(3)],
+        "{:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines.len(), 4, "{:?}", result.action_lines);
+}
+
+#[test]
+fn test_icmp_action_covers_icmpv4_and_icmpv6() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [8, 8, 8, 8];
+
+    PcapBuilder::new()
+        // frame 0: ICMPv4 echo
+        .add_frame(&ipv4_raw_frame(client, server, 1, &icmp_echo(8)))
+        // frame 1: ICMPv6 echo
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, ICMPV6, &icmp_echo(128)))
+        // frame 2: ICMPv6 behind a hop-by-hop header (e.g. MLD)
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP, &hop_by_hop(ICMPV6, &icmp_echo(128))))
+        // frame 3: truncated ICMPv4 header: still ICMP
+        .add_frame(&ipv4_raw_frame(client, server, 1, &[8, 0]))
+        // frame 4: GRE is not ICMP -> ip.unknown (default: continue)
+        .add_frame(&ipv4_raw_frame(client, server, 47, &[0; 8]))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[icmp]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(0), frame_idx(1), frame_idx(2), frame_idx(3)],
+        "{:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines.len(), 4, "{:?}", result.action_lines);
+}
+
+#[test]
+fn test_ip_unknown_applies_to_unknown_protocols_only() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [8, 8, 8, 8];
+
+    PcapBuilder::new()
+        // frame 0: GRE -> unknown
+        .add_frame(&ipv4_raw_frame(client, server, 47, &[0; 8]))
+        // frame 1: ICMP -> icmp.action (default: continue)
+        .add_frame(&ipv4_raw_frame(client, server, 1, &icmp_echo(8)))
+        // frame 2: TCP behind a hop-by-hop header is TCP, not unknown
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP,
+                                   &hop_by_hop(TCP, &raw_tcp_header(50000, 80, TCP_SYN, 1, 0))))
+        // frame 3: GRE over IPv6 behind a hop-by-hop header -> unknown
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP, &hop_by_hop(47, &[0; 8])))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip]
+unknown = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(0), frame_idx(3)],
+        "{:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines.len(), 2, "{:?}", result.action_lines);
+}
+
+#[test]
+fn test_tcp_port_blocklist_sees_through_ipv6_extension_headers() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    PcapBuilder::new()
+        // frame 0: TCP SYN to port 443 behind a hop-by-hop header -> dropped
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP,
+                                   &hop_by_hop(TCP, &raw_tcp_header(50000, 443, TCP_SYN, 1, 0))))
+        // frame 1: TCP SYN to port 80 behind a hop-by-hop header -> passes
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP,
+                                   &hop_by_hop(TCP, &raw_tcp_header(50001, 80, TCP_SYN, 1, 0))))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.port_blocklist]
+list = [443]
+action = "Drop"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "2001:db8::1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(0)],
+        "{:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines.len(), 1, "{:?}", result.action_lines);
+}
+
+// ==========================================================================
+// List-derived Resets must target the triggering connection
+// ==========================================================================
+
+#[test]
+fn test_tcp_port_blocklist_reset_is_populated() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+
+    PcapBuilder::new()
+        // frame 0: data segment to port 443 -> Reset for this connection
+        .add_frame(&tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 1000, 2000, b"hello"))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[tcp]
+ip_port_allowlist = { list = [] }
+
+[tcp.port_blocklist]
+list = [443]
+action = "Reset"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 1, "{:?}", result.action_lines);
+    let action = &result.action_lines[0].action;
+    for needle in [
+        "Reset",
+        "src: Address([10, 0, 0, 1])",
+        "dst: Address([93, 184, 216, 34])",
+        "src_port: 50000",
+        "dst_port: 443",
+        "seq: SeqNumber(1000)",
+        "ack: SeqNumber(2000)",
+        "is_ack: true",
+    ] {
+        assert!(action.contains(needle), "expected {needle:?} in {action}");
+    }
+}
+
+#[test]
+fn test_ip_blocklist_reset_resets_tcp_and_drops_other_traffic() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let blocked = [8, 8, 8, 8];
+
+    PcapBuilder::new()
+        // frame 0: TCP to a blocked IP -> populated Reset
+        .add_frame(&tcp_frame(client, blocked, 50000, 80, TCP_PSH_ACK, 1000, 2000, b"hi"))
+        // frame 1: ICMP to a blocked IP -> no connection to reset, so Drop
+        .add_frame(&ipv4_raw_frame(client, blocked, 1, &icmp_echo(8)))
+        // frame 2: UDP to a blocked IP -> Drop
+        .add_frame(&udp_frame(client, blocked, 50001, 53, &[0; 4]))
+        // frame 3: truncated TCP header to a blocked IP -> Drop
+        .add_frame(&ipv4_raw_frame(client, blocked, 6, &[0; 4]))
+        // frame 4: TCP over IPv6 behind a hop-by-hop header -> populated Reset
+        .add_frame(&ipv6_raw_frame(V6_CLIENT, V6_SERVER, HOP_BY_HOP,
+                                   &hop_by_hop(TCP, &raw_tcp_header(50002, 443, TCP_SYN, 7, 0))))
+        .write_to(&pcap_path);
+
+    let config_str = r#"
+[execution]
+mode = "Python"
+
+[ip.blocklist]
+list = ["8.8.8.8", "2001:db8::2"]
+action = "Reset"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 5, "{:?}", result.action_lines);
+    let reset = &result.action_lines[0].action;
+    for needle in ["Reset", "src_port: 50000", "dst_port: 80", "seq: SeqNumber(1000)"] {
+        assert!(reset.contains(needle), "expected {needle:?} in {reset}");
+    }
+    let reset_v6 = &result.action_lines[4].action;
+    for needle in ["Reset", "src_port: 50002", "dst_port: 443", "seq: SeqNumber(7)"] {
+        assert!(reset_v6.contains(needle), "expected {needle:?} in {reset_v6}");
+    }
+    assert_eq!(
+        frames_with(&result, "Drop"),
+        vec![frame_idx(1), frame_idx(2), frame_idx(3)],
+        "{:?}",
+        result.action_lines
+    );
 }
 
 // ==========================================================================

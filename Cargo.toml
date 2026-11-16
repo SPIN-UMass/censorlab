@@ -10,7 +10,6 @@ bitvec = "1.0"
 byteorder = "1.4"
 clap = { version = "4", features = ["cargo", "derive"] }
 coz = "0.1"
-dns-parser = "0.8.0"
 # epoll = {version = "4.3" }
 fnv = "1.0"
 if-addrs = "0.15"
@@ -37,6 +36,10 @@ tokio-byteorder = "0.3"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter"] }
+aes = "0.8"
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
 
 [build-dependencies]
 lalrpop = "0.21"

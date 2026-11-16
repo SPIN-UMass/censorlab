@@ -18,7 +18,7 @@ pub fn set_promiscuous_mode(
     // Turn interface name into correct form
     let interface_name = CString::new(interface_name)?;
     // Get the interface idx
-    let interface_idx = unsafe { if_nametoindex(interface_name.into_raw()) };
+    let interface_idx = unsafe { if_nametoindex(interface_name.as_ptr()) };
     if interface_idx == 0 {
         Err(io::Error::last_os_error())?;
     }
