@@ -17,6 +17,7 @@
 //! network would change which traffic a censor blocks without any visible
 //! signal in the experiment results.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
@@ -222,19 +223,23 @@ pub type Ipv4Set = RangeSet<u32>;
 pub type Ipv6Set = RangeSet<u128>;
 
 impl Ipv4Set {
-    pub fn from_nets<I: IntoIterator<Item = Ipv4Net>>(nets: I) -> Self {
-        nets.into_iter().map(|n| n.range()).collect()
-    }
     pub fn contains_addr(&self, addr: Ipv4Addr) -> bool {
         self.contains_value(addr.into())
     }
 }
-impl Ipv6Set {
-    pub fn from_nets<I: IntoIterator<Item = Ipv6Net>>(nets: I) -> Self {
+impl FromIterator<Ipv4Net> for Ipv4Set {
+    fn from_iter<I: IntoIterator<Item = Ipv4Net>>(nets: I) -> Self {
         nets.into_iter().map(|n| n.range()).collect()
     }
+}
+impl Ipv6Set {
     pub fn contains_addr(&self, addr: Ipv6Addr) -> bool {
         self.contains_value(addr.into())
+    }
+}
+impl FromIterator<Ipv6Net> for Ipv6Set {
+    fn from_iter<I: IntoIterator<Item = Ipv6Net>>(nets: I) -> Self {
+        nets.into_iter().map(|n| n.range()).collect()
     }
 }
 
@@ -268,9 +273,44 @@ impl FromIterator<IpNet> for IpSet {
             }
         }
         IpSet {
-            v4: Ipv4Set::from_nets(v4),
-            v6: Ipv6Set::from_nets(v6),
+            v4: v4.into_iter().collect(),
+            v6: v6.into_iter().collect(),
         }
+    }
+}
+
+/// Set of (subnet, port) pairs, indexed by port
+#[derive(Clone, Debug, Default)]
+pub struct IpPortSet {
+    by_port: HashMap<u16, IpSet>,
+    entries: usize,
+}
+impl IpPortSet {
+    /// Whether `addr` lies in a subnet configured for `port`
+    pub fn contains_pair(&self, addr: IpAddr, port: u16) -> bool {
+        self.by_port.get(&port).is_some_and(|set| set.contains_addr(addr))
+    }
+    /// Number of configured entries
+    pub fn len(&self) -> usize {
+        self.entries
+    }
+    pub fn is_empty(&self) -> bool {
+        self.entries == 0
+    }
+}
+impl FromIterator<(IpNet, u16)> for IpPortSet {
+    fn from_iter<I: IntoIterator<Item = (IpNet, u16)>>(iter: I) -> Self {
+        let mut grouped: HashMap<u16, Vec<IpNet>> = HashMap::new();
+        let mut entries = 0;
+        for (net, port) in iter {
+            grouped.entry(port).or_default().push(net);
+            entries += 1;
+        }
+        let by_port = grouped
+            .into_iter()
+            .map(|(port, nets)| (port, nets.into_iter().collect()))
+            .collect();
+        Self { by_port, entries }
     }
 }
 

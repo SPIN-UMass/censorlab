@@ -4,7 +4,9 @@
 //! used for MAC, IP, port, and ip-port filtering throughout the censor.
 
 use super::{Action, PortVec};
-use crate::config::List;
+use crate::config::{IpPort, List};
+use crate::subnet::{IpPortSet, Ipv4Set, Ipv6Set};
+use smoltcp::wire::{Ipv4Address, Ipv6Address};
 use std::collections::HashSet;
 use std::hash::Hash;
 
@@ -23,6 +25,21 @@ where
 impl Contains<u16> for PortVec {
     fn contains(&self, value: &u16) -> bool {
         self.get(usize::from(*value)).as_deref() == Some(&true)
+    }
+}
+impl Contains<Ipv4Address> for Ipv4Set {
+    fn contains(&self, value: &Ipv4Address) -> bool {
+        self.contains_value(u32::from_be_bytes(value.0))
+    }
+}
+impl Contains<Ipv6Address> for Ipv6Set {
+    fn contains(&self, value: &Ipv6Address) -> bool {
+        self.contains_value(u128::from_be_bytes(value.0))
+    }
+}
+impl Contains<IpPort> for IpPortSet {
+    fn contains(&self, value: &IpPort) -> bool {
+        self.contains_pair(value.0, value.1)
     }
 }
 
@@ -116,5 +133,76 @@ where
             Some(Action::None) | None => self.allow.recommend(value),
             Some(action) => Some(action),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::IpNetPort;
+    use crate::subnet::IpNet;
+
+    fn nets(entries: &[&str]) -> Vec<IpNet> {
+        entries.iter().map(|s| s.parse().unwrap()).collect()
+    }
+    fn v4_set(entries: &[&str]) -> Ipv4Set {
+        nets(entries)
+            .into_iter()
+            .filter_map(|n| match n {
+                IpNet::V4(n) => Some(n),
+                _ => None,
+            })
+            .collect()
+    }
+    fn v6_set(entries: &[&str]) -> Ipv6Set {
+        nets(entries)
+            .into_iter()
+            .filter_map(|n| match n {
+                IpNet::V6(n) => Some(n),
+                _ => None,
+            })
+            .collect()
+    }
+    fn ip_port_set(entries: &[&str]) -> IpPortSet {
+        #[derive(serde::Deserialize)]
+        struct W {
+            p: IpNetPort,
+        }
+        entries
+            .iter()
+            .map(|s| toml::from_str::<W>(&format!("p = \"{s}\"")).unwrap().p.into_pair())
+            .collect()
+    }
+
+    #[test]
+    fn ipv4_set_blocklist_with_subnet() {
+        let list = BlockList { store: v4_set(&["10.0.0.0/8", "1.1.1.1"]), in_blocklist: Action::Drop };
+        assert_eq!(list.recommend(&Ipv4Address::new(10, 20, 30, 40)), Some(Action::Drop));
+        assert_eq!(list.recommend(&Ipv4Address::new(1, 1, 1, 1)), Some(Action::Drop));
+        assert_eq!(list.recommend(&Ipv4Address::new(1, 1, 1, 2)), None);
+        assert_eq!(list.recommend(&Ipv4Address::new(11, 0, 0, 0)), None);
+    }
+
+    #[test]
+    fn ipv6_set_allowlist_with_subnet() {
+        let allow = AllowList::from(List { list: v6_set(&["2001:db8::/32"]), action: Action::Drop });
+        let inside: Ipv6Address = "2001:db8:1::1".parse::<std::net::Ipv6Addr>().unwrap().into();
+        let outside: Ipv6Address = "2001:db9::1".parse::<std::net::Ipv6Addr>().unwrap().into();
+        assert_eq!(allow.recommend(&inside), None);
+        assert_eq!(allow.recommend(&outside), Some(Action::Drop));
+    }
+
+    #[test]
+    fn ip_port_set_matches_subnet_and_port() {
+        let set = ip_port_set(&["10.0.0.0/8:80", "[2001:db8::/32]:443", "1.2.3.4:53"]);
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        assert!(set.contains(&IpPort(ip("10.1.2.3"), 80)));
+        assert!(!set.contains(&IpPort(ip("10.1.2.3"), 81)));
+        assert!(!set.contains(&IpPort(ip("11.0.0.0"), 80)));
+        assert!(set.contains(&IpPort(ip("2001:db8::9"), 443)));
+        assert!(!set.contains(&IpPort(ip("2001:db8::9"), 80)));
+        assert!(set.contains(&IpPort(ip("1.2.3.4"), 53)));
+        assert!(!set.contains(&IpPort(ip("1.2.3.5"), 53)));
+        assert_eq!(set.len(), 3);
     }
 }
