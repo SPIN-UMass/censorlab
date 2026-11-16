@@ -1538,3 +1538,211 @@ fn test_censorlang_direction_field() {
                "the connection must be terminated at the first wan->client packet: {:?}\n{}",
                result.action_lines, result.stdout);
 }
+
+// ==========================================================================
+// TLS ClientHello TCP reassembly
+// ==========================================================================
+
+/// Frames for one TLS connection whose ClientHello for `sni` is split into
+/// two TCP segments at byte `cut` (frames 0-2 handshake, 3-4 hello halves).
+fn split_hello_flow_at(sni: &str, cut: usize) -> Vec<Vec<u8>> {
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    let hello = tls_client_hello_record(sni);
+    vec![
+        tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]),
+        tcp_frame(server, client, 443, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]),
+        tcp_frame(client, server, 50000, 443, TCP_ACK, 101, 201, &[]),
+        tcp_frame(client, server, 50000, 443, TCP_ACK, 101, 201, &hello[..cut]),
+        tcp_frame(client, server, 50000, 443, TCP_PSH_ACK, 101 + cut as u32, 201, &hello[cut..]),
+    ]
+}
+
+fn write_frames(path: &std::path::Path, frames: &[Vec<u8>]) {
+    let mut builder = PcapBuilder::new();
+    for frame in frames {
+        builder = builder.add_frame(frame);
+    }
+    builder.write_to(path);
+}
+
+fn frames_with_action(result: &common::runner::RunResult, action: &str) -> Vec<usize> {
+    result
+        .action_lines
+        .iter()
+        .filter(|l| l.action.contains(action))
+        .map(|l| l.packet_index)
+        .collect()
+}
+
+fn dropped_frames(result: &common::runner::RunResult) -> Vec<usize> {
+    frames_with_action(result, "Drop")
+}
+
+fn reset_frames(result: &common::runner::RunResult) -> Vec<usize> {
+    frames_with_action(result, "Reset")
+}
+
+/// Offset just inside "example" in a ClientHello for example.com, so that
+/// neither half of a split contains the full name.
+fn cut_inside_sni(hello: &[u8]) -> usize {
+    hello.windows(7).position(|w| w == b"example").unwrap() + 4
+}
+
+#[test]
+fn test_https_blocking_tls_split_hello() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let cut = cut_inside_sni(&tls_client_hello_record("example.com"));
+    write_frames(&pcap_path, &split_hello_flow_at("example.com", cut));
+
+    let result = run_pcap_with_config(&demo_config("https_blocking_tls"), &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        reset_frames(&result),
+        vec![frame_idx(4)],
+        "split hello must be blocked on the completing segment: {:?}\n{}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+#[test]
+fn test_python_tls_hello_state_ambiguous() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    let hello = tls_client_hello_record("example.com");
+    let mut forged = hello.clone();
+    let pos = forged.windows(7).position(|w| w == b"example").unwrap();
+    forged[pos..pos + 7].copy_from_slice(b"allowed");
+    write_frames(
+        &pcap_path,
+        &[
+            tcp_frame(client, server, 50000, 443, TCP_SYN, 100, 0, &[]),
+            // Tail first, then two different copies of the SNI region.
+            tcp_frame(client, server, 50000, 443, TCP_ACK, 101 + pos as u32 + 7, 201, &hello[pos + 7..]),
+            tcp_frame(client, server, 50000, 443, TCP_ACK, 101 + pos as u32, 201, &forged[pos..pos + 7]),
+            tcp_frame(client, server, 50000, 443, TCP_ACK, 101, 201, &hello[..pos + 7]),
+        ],
+    );
+    let script = r#"
+def process(packet):
+    if packet.tls_hello_state == "ambiguous":
+        return "drop"
+    if packet.tls_client_hello is not None:
+        return "reset"
+"#;
+    let config_path = write_temp_config(
+        &tmp,
+        "[execution]\nmode = \"Python\"\nscript = \"censor.py\"\n",
+    );
+    write_temp_script(&tmp, "censor.py", script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        dropped_frames(&result),
+        vec![frame_idx(3)],
+        "conflicting overlap must be reported as ambiguous: {:?}\n{}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+#[test]
+fn test_python_tls_client_hello_attributes() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    write_frames(&pcap_path, &split_hello_flow_at("split.example", 30));
+    // Drop only if every reported attribute matches expectations.
+    let script = r#"
+def process(packet):
+    h = packet.tls_client_hello
+    if h is None:
+        if packet.payload_len > 0 and packet.tls_hello_state != "pending":
+            return "reset"
+        return None
+    if (h.sni == b"split.example" and h.sni_list == [b"split.example"]
+            and not h.sni_invalid_utf8 and h.tcp_segments == 2
+            and h.record_count == 1 and h.reassembled
+            and packet.tls_hello_state == "complete"
+            and packet.tls_hello_error is None):
+        return "drop"
+    return "reset"
+"#;
+    let config_path = write_temp_config(
+        &tmp,
+        "[execution]\nmode = \"Python\"\nscript = \"censor.py\"\n",
+    );
+    write_temp_script(&tmp, "censor.py", script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        dropped_frames(&result),
+        vec![frame_idx(4)],
+        "{:?}\n{}",
+        result.action_lines,
+        result.stdout
+    );
+    assert!(
+        !result.action_lines.iter().any(|l| l.action.contains("Reset")),
+        "{:?}",
+        result.action_lines
+    );
+}
+
+#[test]
+fn test_censorlang_regex_sni_split_hello() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let cut = cut_inside_sni(&tls_client_hello_record("example.com"));
+    write_frames(&pcap_path, &split_hello_flow_at("example.com", cut));
+    let cl_script = "regex \"^example\\.com$\"\n\
+                     REGEX_SNI 0 -> reg:b.0\n\
+                     if reg:b.0 == True: RETURN terminate\n";
+    let config_path = write_temp_config(
+        &tmp,
+        "[execution]\nmode = \"CensorLang\"\nscript = \"censor.cl\"\n",
+    );
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        dropped_frames(&result),
+        vec![frame_idx(4)],
+        "{:?}\n{}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+#[test]
+fn test_censorlang_tls_hello_fields() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    write_frames(&pcap_path, &split_hello_flow_at("split.example", 30));
+    let cl_script = "if field:tls.hello.complete == False: RETURN allow\n\
+                     if field:tls.hello.state != 2: RETURN allow\n\
+                     if field:tls.hello.tcp_segments != 2: RETURN allow\n\
+                     if field:tls.hello.record_count != 1: RETURN allow\n\
+                     if field:tls.hello.sni_count != 1: RETURN allow\n\
+                     if field:tls.hello.sni_invalid_utf8 == True: RETURN allow\n\
+                     if field:tls.hello.duplicate_extensions == True: RETURN allow\n\
+                     if field:tls.hello.malformed_extensions != 0: RETURN allow\n\
+                     RETURN terminate\n";
+    let config_path = write_temp_config(
+        &tmp,
+        "[execution]\nmode = \"CensorLang\"\nscript = \"censor.cl\"\n",
+    );
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        dropped_frames(&result),
+        vec![frame_idx(4)],
+        "{:?}\n{}",
+        result.action_lines,
+        result.stdout
+    );
+}

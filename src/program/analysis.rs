@@ -163,7 +163,7 @@ fn analyse_line(line: &Line, counts: &mut OperationCounts, fields: &mut BTreeSet
             count_input(rhs, counts, fields, conn, host);
             count_output(out, counts, conn, host);
         }
-        Regex { out, .. } => {
+        Regex { out, .. } | RegexSni { out, .. } => {
             counts.regex += 1;
             count_output(out, counts, conn, host);
         }

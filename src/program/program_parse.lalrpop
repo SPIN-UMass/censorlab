@@ -1,7 +1,7 @@
 use crate::program::program::{
     field::{
         env::Field as EnvField, ip::Field as IpField, ip::V4Field as Ipv4Field,
-        ip::V6Field as Ipv6Field, tcp::Field as TcpField, tcp::Flag as TcpFlag,
+        ip::V6Field as Ipv6Field, tcp::Field as TcpField, tcp::Flag as TcpFlag, tls::Field as TlsField,
         udp::Field as UdpField, Field,
     },
     Action, ComparisonOperator, Condition, Input, Line, LogicOperator, ModelSlot, Operation,
@@ -98,6 +98,14 @@ pub Field: Field = {
   "transport.payload.entropy" => Field::PayloadEntropy,
   "transport.payload.avg_popcount" => Field::PayloadAveragePopcount,
   "transport.payload.printable_fraction" => Field::PayloadPrintableFraction,
+  "tls.hello.state" => Field::Tls(TlsField::State),
+  "tls.hello.complete" => Field::Tls(TlsField::Complete),
+  "tls.hello.sni_count" => Field::Tls(TlsField::SniCount),
+  "tls.hello.sni_invalid_utf8" => Field::Tls(TlsField::SniInvalidUtf8),
+  "tls.hello.duplicate_extensions" => Field::Tls(TlsField::DuplicateExtensions),
+  "tls.hello.malformed_extensions" => Field::Tls(TlsField::MalformedExtensions),
+  "tls.hello.record_count" => Field::Tls(TlsField::RecordCount),
+  "tls.hello.tcp_segments" => Field::Tls(TlsField::TcpSegments),
 }
 
 Float : f64 = {
@@ -154,6 +162,7 @@ Operation: Operation = {
   "OR"     <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Or{ lhs, rhs, out},
   "XOR"    <lhs: Input> "," <rhs: Input> "->" <out: Register> => Operation::Xor{lhs, rhs, out},
   "REGEX"  <index: Usize> "->" <out: Register> => Operation::Regex{index, out},
+  "REGEX_SNI"  <index: Usize> "->" <out: Register> => Operation::RegexSni{index, out},
   "RETURN" <action: Action> => Operation::Return(action),
   "NOOP" => Operation::Noop,
   "MODEL"  <name: Ident> => Operation::Model{name},

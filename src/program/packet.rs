@@ -22,10 +22,10 @@ pub struct Packet {
     /// Using `Rc<[u8]>` was considered but provides no benefit since Packet is never
     /// cloned in production and the Python VM requires owned bytes.
     pub payload: Vec<u8>,
-    /// The connection's TLS ClientHello, once reassembled from the client's first segments.
-    ///
-    /// Set by connection tracking on the packet that completes it and every packet after.
-    pub tls_client_hello: Option<crate::application::tls::ClientHelloInfo>,
+    /// Connection-level TLS ClientHello reassembly state for this packet,
+    /// filled in by connection tracking (default: idle, no hello).  The
+    /// ClientHello is set on the packet that completes it and every packet after.
+    pub tls: crate::application::tls_stream::TlsHelloObservation,
 }
 impl Packet {
     /// Record the traffic direction relative to the configured client.
@@ -92,7 +92,7 @@ impl Packet {
             direction: 0,
             transport: transport_metadata,
             payload,
-            tls_client_hello: None,
+            tls: Default::default(),
         };
         Ok(packet)
     }
@@ -514,10 +514,22 @@ pub mod rust_packet {
             self.0.payload_printable_fraction()
         }
         /// The connection's TLS ClientHello once it has been fully received, even if it was
-        /// split across several TCP segments or TLS records, otherwise None
+        /// split across several TCP segments or TLS records, otherwise None.  Set on the
+        /// packet that completes it and every later packet of the connection.
         #[pygetset]
         fn tls_client_hello(&self) -> Option<super::rust_tls::ClientHelloInfo> {
-            self.0.tls_client_hello.clone().map(Into::into)
+            self.0.tls.hello.as_ref().map(|h| (**h).clone().into())
+        }
+        /// ClientHello reassembly status after this packet: "idle", "pending",
+        /// "complete", "failed" or "ambiguous" (conflicting TCP overlap).
+        #[pygetset]
+        fn tls_hello_state(&self) -> String {
+            self.0.tls.status.name().to_owned()
+        }
+        /// Reason recognition failed (when tls_hello_state == "failed"), else None.
+        #[pygetset]
+        fn tls_hello_error(&self) -> Option<String> {
+            self.0.tls.error.as_ref().map(|e| e.to_string())
         }
         #[pymethod]
         fn __str__(&self) -> String {
@@ -1763,7 +1775,6 @@ mod tests {
     fn popcount_all_zeros() {
         let p = Packet {
             timestamp: None,
-            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 40,
@@ -1794,6 +1805,7 @@ mod tests {
                 }),
             },
             payload: vec![0x00; 10],
+            tls: Default::default(),
         };
         assert_eq!(p.payload_average_popcount(), 0.0);
     }
@@ -1802,7 +1814,6 @@ mod tests {
     fn popcount_all_ones() {
         let p = Packet {
             timestamp: None,
-            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 40,
@@ -1833,6 +1844,7 @@ mod tests {
                 }),
             },
             payload: vec![0xFF; 10],
+            tls: Default::default(),
         };
         assert_eq!(p.payload_average_popcount(), 8.0);
     }

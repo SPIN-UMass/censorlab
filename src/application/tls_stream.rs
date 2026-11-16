@@ -2,8 +2,9 @@
 //!
 //! Only the *handshake prefix* of the client→server byte stream is
 //! reassembled, and only until the ClientHello has been recognised (or
-//! recognition has failed).  Afterwards the tracker is inert and holds no
-//! buffers.
+//! recognition has failed).  Afterwards the tracker holds no buffers; it keeps
+//! only the recognised ClientHello, which is reported on the completing packet
+//! and every later packet of the connection.
 //!
 //! # Stream model
 //! * The client is the sender of a SYN without ACK (or the receiver of a
@@ -78,7 +79,8 @@ impl HelloStatus {
 pub struct TlsHelloObservation {
     /// Status after processing this packet.
     pub status: HelloStatus,
-    /// The ClientHello, present only on the packet that completed it.
+    /// The ClientHello, present on the packet that completed it and on every
+    /// later packet of the connection.
     pub hello: Option<Arc<ClientHelloInfo>>,
     /// Why recognition failed, when `status` is `Failed`.
     pub error: Option<TlsParseError>,
@@ -108,8 +110,12 @@ enum Phase {
         base: Option<TcpSeqNumber>,
     },
     Buffering(Box<Buffer>),
-    /// Terminal: Complete, Failed or Ambiguous.
-    Finished(HelloStatus, Option<TlsParseError>),
+    /// Terminal: the ClientHello was recognised.
+    Complete(Arc<ClientHelloInfo>),
+    /// Terminal: the client's first flight is not a valid ClientHello.
+    Failed(TlsParseError),
+    /// Terminal: conflicting overlapping data was seen.
+    Ambiguous,
 }
 
 #[derive(Debug)]
@@ -168,26 +174,36 @@ impl ClientHelloTracker {
 
     /// Feed one TCP segment.
     pub fn observe(&mut self, seg: Segment<'_>) -> TlsHelloObservation {
-        let phase = std::mem::replace(&mut self.phase, Phase::Finished(HelloStatus::Failed, None));
-        let (phase, hello) = step(phase, &seg);
-        let obs = match &phase {
-            Phase::Await { .. } => TlsHelloObservation::default(),
-            Phase::Buffering(_) => TlsHelloObservation {
-                status: HelloStatus::Pending,
-                ..Default::default()
-            },
-            Phase::Finished(status, error) => TlsHelloObservation {
-                status: *status,
-                hello,
-                error: error.clone(),
-            },
+        let phase = std::mem::replace(&mut self.phase, Phase::Ambiguous);
+        self.phase = step(phase, &seg);
+        self.observation()
+    }
+
+    /// The current state as reported on a packet.
+    pub fn observation(&self) -> TlsHelloObservation {
+        let status = |status| TlsHelloObservation {
+            status,
+            ..Default::default()
         };
-        self.phase = phase;
-        obs
+        match &self.phase {
+            Phase::Await { .. } => status(HelloStatus::Idle),
+            Phase::Buffering(_) => status(HelloStatus::Pending),
+            Phase::Complete(hello) => TlsHelloObservation {
+                status: HelloStatus::Complete,
+                hello: Some(Arc::clone(hello)),
+                error: None,
+            },
+            Phase::Failed(error) => TlsHelloObservation {
+                status: HelloStatus::Failed,
+                hello: None,
+                error: Some(error.clone()),
+            },
+            Phase::Ambiguous => status(HelloStatus::Ambiguous),
+        }
     }
 }
 
-fn step(phase: Phase, seg: &Segment<'_>) -> (Phase, Option<Arc<ClientHelloInfo>>) {
+fn step(phase: Phase, seg: &Segment<'_>) -> Phase {
     // Sequence number of the first payload byte (SYN occupies one).
     let data_seq = if seg.syn { seg.seq + 1 } else { seg.seq };
     match phase {
@@ -200,12 +216,12 @@ fn step(phase: Phase, seg: &Segment<'_>) -> (Phase, Option<Arc<ClientHelloInfo>>
                 base = Some(seg.ack_number);
             }
             if seg.payload.is_empty() {
-                return (Phase::Await { client, base }, None);
+                return Phase::Await { client, base };
             }
             let client = match client {
                 Some(c) if c == seg.src => c,
-                Some(_) => return (Phase::Await { client, base }, None),
-                None if seg.from_wan => return (Phase::Await { client, base }, None),
+                Some(_) => return Phase::Await { client, base },
+                None if seg.from_wan => return Phase::Await { client, base },
                 None => seg.src,
             };
             let buffer = Box::new(Buffer {
@@ -221,12 +237,12 @@ fn step(phase: Phase, seg: &Segment<'_>) -> (Phase, Option<Arc<ClientHelloInfo>>
         }
         Phase::Buffering(buffer) => {
             if seg.src != buffer.client || seg.payload.is_empty() {
-                (Phase::Buffering(buffer), None)
+                Phase::Buffering(buffer)
             } else {
                 insert(buffer, data_seq, seg.payload)
             }
         }
-        finished @ Phase::Finished(..) => (finished, None),
+        finished @ (Phase::Complete(_) | Phase::Failed(_) | Phase::Ambiguous) => finished,
     }
 }
 
@@ -236,7 +252,7 @@ fn insert(
     mut buf: Box<Buffer>,
     seq: TcpSeqNumber,
     payload: &[u8],
-) -> (Phase, Option<Arc<ClientHelloInfo>>) {
+) -> Phase {
     // Offset of the payload relative to the stream start, trimming any
     // bytes that precede it.
     let (offset, bytes) = if seq >= buf.base {
@@ -244,12 +260,12 @@ fn insert(
     } else {
         let skip = buf.base - seq;
         if skip >= payload.len() {
-            return (Phase::Buffering(buf), None);
+            return Phase::Buffering(buf);
         }
         (0, &payload[skip..])
     };
     if offset >= STREAM_WINDOW {
-        return (Phase::Buffering(buf), None);
+        return Phase::Buffering(buf);
     }
     let end = (offset + bytes.len()).min(STREAM_WINDOW);
     let bytes = &bytes[..end - offset];
@@ -258,7 +274,7 @@ fn insert(
     let held_end = end.min(buf.have.len());
     for pos in offset..held_end {
         if buf.have[pos] && buf.data[pos] != bytes[pos - offset] {
-            return (Phase::Finished(HelloStatus::Ambiguous, None), None);
+            return Phase::Ambiguous;
         }
     }
     if buf.data.len() < end {
@@ -279,7 +295,7 @@ fn insert(
 
     let contiguous = buf.fed + buf.have[buf.fed..].iter().take_while(|h| **h).count();
     if contiguous == buf.fed {
-        return (Phase::Buffering(buf), None);
+        return Phase::Buffering(buf);
     }
     let Buffer {
         client,
@@ -293,28 +309,21 @@ fn insert(
     match defrag.push(&data[fed..contiguous]) {
         DefragStep::Done(Ok(mut info)) => {
             info.tcp_segments = segments;
-            (
-                Phase::Finished(HelloStatus::Complete, None),
-                Some(Arc::new(info)),
-            )
+            Phase::Complete(Arc::new(info))
         }
-        DefragStep::Done(Err(e)) => (Phase::Finished(HelloStatus::Failed, Some(e)), None),
-        DefragStep::NeedMore(_) if contiguous >= STREAM_WINDOW => (
-            Phase::Finished(HelloStatus::Failed, Some(TlsParseError::BufferLimit)),
-            None,
-        ),
-        DefragStep::NeedMore(defrag) => (
-            Phase::Buffering(Box::new(Buffer {
-                client,
-                base,
-                data,
-                have,
-                fed: contiguous,
-                segments,
-                defrag,
-            })),
-            None,
-        ),
+        DefragStep::Done(Err(e)) => Phase::Failed(e),
+        DefragStep::NeedMore(_) if contiguous >= STREAM_WINDOW => {
+            Phase::Failed(TlsParseError::BufferLimit)
+        }
+        DefragStep::NeedMore(defrag) => Phase::Buffering(Box::new(Buffer {
+            client,
+            base,
+            data,
+            have,
+            fed: contiguous,
+            segments,
+            defrag,
+        })),
     }
 }
 
@@ -401,10 +410,52 @@ mod tests {
         assert_eq!(hello.sni_str(), Some("one.example"));
         assert_eq!(hello.tcp_segments, 1);
         assert!(!hello.reassembled());
-        // Later packets report the status but no hello.
+        // Later packets (either direction) keep reporting the same hello.
         let obs = t.observe(client_seg(1001 + stream.len() as u32, b"\x17\x03\x03\x00\x01x"));
         assert_eq!(obs.status, HelloStatus::Complete);
-        assert!(obs.hello.is_none());
+        assert!(Arc::ptr_eq(&obs.hello.unwrap(), &hello));
+        let server = Segment {
+            src: SERVER,
+            dst: CLIENT,
+            from_wan: true,
+            ..client_seg(5000, b"\x16\x03\x03\x00\x01\x02")
+        };
+        assert_eq!(t.observe(server).hello.unwrap().sni_str(), Some("one.example"));
+    }
+
+    #[test]
+    fn data_on_syn() {
+        // TCP Fast Open: the ClientHello rides on the SYN.
+        let stream = records(&hello_msg("tfo.example", 0), 1 << 14);
+        let mut t = ClientHelloTracker::new();
+        let obs = t.observe(Segment {
+            syn: true,
+            ack: false,
+            ..client_seg(1000, &stream)
+        });
+        assert_eq!(obs.hello.unwrap().sni_str(), Some("tfo.example"));
+    }
+
+    #[test]
+    fn one_byte_segments() {
+        let stream = records(&hello_msg("tiny.example", 0), 1 << 14);
+        let mut t = tracker_with_syn(1000);
+        let mut obs = TlsHelloObservation::default();
+        for (i, b) in stream.iter().enumerate() {
+            obs = t.observe(client_seg(1001 + i as u32, std::slice::from_ref(b)));
+            assert_eq!(obs.status == HelloStatus::Complete, i == stream.len() - 1);
+        }
+        assert_eq!(obs.hello.unwrap().tcp_segments, stream.len());
+    }
+
+    #[test]
+    fn later_syn_ignored() {
+        let stream = records(&hello_msg("resyn.example", 0), 1 << 14);
+        let mut t = tracker_with_syn(1000);
+        t.observe(client_seg(1001, &stream[..20]));
+        t.observe(syn(9999));
+        let obs = t.observe(client_seg(1021, &stream[20..]));
+        assert_eq!(obs.hello.unwrap().sni_str(), Some("resyn.example"));
     }
 
     #[test]

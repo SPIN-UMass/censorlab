@@ -1,4 +1,4 @@
-use crate::application::tls::ClientHelloAssembler;
+use crate::application::tls_stream::ClientHelloTracker;
 use crate::censor::{Action, Direction, IpPair};
 use crate::model::ModelThreadMessage;
 use crate::program::config::Config as ProgramConfig;
@@ -105,8 +105,8 @@ pub struct TransportState {
 pub struct ConnectionInfo {
     env: ExecutionEnvironment,
     is_first: bool,
-    /// Reassembles the client's TLS ClientHello across segments
-    client_hello: ClientHelloAssembler,
+    /// Reassembles the client's TLS ClientHello (see application::tls_stream)
+    tls_hello: ClientHelloTracker,
 }
 
 #[derive(Debug, Error)]
@@ -392,7 +392,7 @@ impl TransportState {
         &mut self,
         ips: IpPair,
         direction: Direction,
-        mut packet: Packet,
+        packet: Packet,
     ) -> Result<Action, SmoltcpError> {
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.
@@ -407,11 +407,7 @@ impl TransportState {
         );
         let new_key = key.clone();
         // Get a reference to the tracker's packet list
-        let ConnectionInfo {
-            is_first,
-            env,
-            client_hello,
-        } =
+        let ConnectionInfo { is_first, env, tls_hello } =
             self.connections.entry(new_key).or_insert_with(|| {
                 // Initialize the per-connection state
                 ConnectionInfo {
@@ -438,22 +434,13 @@ impl TransportState {
                         }
                     },
                     is_first: true,
-                    client_hello: ClientHelloAssembler::new(),
+                    tls_hello: ClientHelloTracker::new(),
                 }
             });
-        // Track the client's ClientHello across segments so programs see it once complete
-        if let TransportMetadataExtra::Tcp(tcp) = packet.transport.extra {
-            client_hello.observe(
-                (ips.src(), packet.transport.src),
-                tcp.seq.0 as u32,
-                tcp.flags.syn,
-                tcp.flags.ack,
-                &packet.payload,
-            );
-            packet.tls_client_hello = client_hello.client_hello().cloned();
-        }
         // Copy of is_first for the execution
         let is_first_cl = *is_first;
+        // Track the TLS ClientHello across segments; the result rides on the packet.
+        packet.tls = tls_hello.observe_packet(&packet);
 
         // Update per-host state for the source IP
         let src_ip = ips.src();

@@ -232,7 +232,8 @@ impl Program {
                 | And { ref out, .. }
                 | Or { ref out, .. }
                 | Xor { ref out, .. }
-                | Regex { ref out, .. } => {
+                | Regex { ref out, .. }
+                | RegexSni { ref out, .. } => {
                     regs.push(if out.host { None } else { Some(out.index) });
                 }
                 _ => {
@@ -449,7 +450,8 @@ impl Line {
             | And { ref out, .. }
             | Or { ref out, .. }
             | Xor { ref out, .. }
-            | Regex { ref out, .. } => Some(out.clone()),
+            | Regex { ref out, .. }
+            | RegexSni { ref out, .. } => Some(out.clone()),
             _ => None,
         }
     }
@@ -586,6 +588,17 @@ impl Line {
                         .get(*index)
                         .ok_or(LineExecutionError::RegexIndex(*index))?;
                     let matched = re.is_match(&packet.payload);
+                    registers.set(out, &Value::Bool(matched))?;
+                }
+                RegexSni { index, out } => {
+                    let re = regexes
+                        .get(*index)
+                        .ok_or(LineExecutionError::RegexIndex(*index))?;
+                    let matched = packet
+                        .tls
+                        .hello
+                        .as_ref()
+                        .is_some_and(|h| h.sni_list.iter().any(|name| re.is_match(name)));
                     registers.set(out, &Value::Bool(matched))?;
                 }
                 Return(action) => {
@@ -865,6 +878,8 @@ pub mod field {
         /// Average popcount (bits per byte) of the transport-layer payload
         PayloadAveragePopcount,
         PayloadPrintableFraction,
+        /// A field describing the connection's reassembled TLS ClientHello
+        Tls(tls::Field),
     }
     impl Field {
         pub fn eval(
@@ -896,6 +911,7 @@ pub mod field {
                 Field::PayloadEntropy => Ok(Value::Float(packet.payload_entropy())),
                 Field::PayloadAveragePopcount => Ok(Value::Float(packet.payload_average_popcount())),
                 Field::PayloadPrintableFraction => Ok(Value::Float(packet.payload_printable_fraction())),
+                Field::Tls(field) => field.eval(packet, default_on_error).map_err(FieldError::Tls),
             }
         }
         pub fn all() -> Vec<Field> {
@@ -913,6 +929,9 @@ pub mod field {
             fields.push(Field::PayloadEntropy);
             fields.push(Field::PayloadAveragePopcount);
             fields.push(Field::PayloadPrintableFraction);
+            for field in tls::Field::all() {
+                fields.push(Field::Tls(field));
+            }
             fields
         }
     }
@@ -934,6 +953,8 @@ pub mod field {
         Tcp(tcp::FieldError),
         #[error("Error getting a UDP field: {0}")]
         Udp(udp::FieldError),
+        #[error("Error getting a TLS field: {0}")]
+        Tls(tls::FieldError),
     }
     pub mod env {
         use super::{EnvFields, Value};
@@ -1085,6 +1106,81 @@ pub mod field {
             IntConvert(#[from] TryFromIntError),
             #[error("Tried to extract a special field from traffic with the wrong IP version")]
             WrongIpVersion,
+        }
+    }
+    /// Fields describing the connection's TCP-reassembled TLS ClientHello.
+    ///
+    /// `tls.hello.state` and `tls.hello.complete` are defined for every
+    /// packet.  The remaining fields describe the ClientHello and exist once it
+    /// has been recognised (`tls.hello.complete == True`: the completing packet
+    /// and every later packet of the connection); before that they are an error, or 0/False with
+    /// `field_default_on_error`.
+    pub mod tls {
+        use super::{Packet, Value};
+
+        #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+        pub enum Field {
+            /// 0 idle, 1 pending, 2 complete, 3 failed, 4 ambiguous
+            State,
+            /// True once the ClientHello has been recognised
+            Complete,
+            SniCount,
+            SniInvalidUtf8,
+            DuplicateExtensions,
+            MalformedExtensions,
+            RecordCount,
+            TcpSegments,
+        }
+        impl Field {
+            pub fn eval(
+                &self,
+                packet: &Packet,
+                default_on_error: bool,
+            ) -> Result<Value, FieldError> {
+                use Field::*;
+                let hello = packet.tls.hello.as_deref();
+                let int = |f: fn(&crate::application::tls::ClientHelloInfo) -> usize| {
+                    hello
+                        .map(|h| Value::Int(i64::try_from(f(h)).unwrap_or(i64::MAX)))
+                        .ok_or(FieldError::NoClientHello)
+                };
+                let flag = |f: fn(&crate::application::tls::ClientHelloInfo) -> bool| {
+                    hello.map(|h| Value::Bool(f(h))).ok_or(FieldError::NoClientHello)
+                };
+                let (result, default) = match self {
+                    State => (Ok(Value::Int(packet.tls.status.code())), Value::Int(0)),
+                    Complete => (Ok(Value::Bool(hello.is_some())), Value::Bool(false)),
+                    SniCount => (int(|h| h.sni_count()), Value::Int(0)),
+                    SniInvalidUtf8 => (flag(|h| h.sni_invalid_utf8), Value::Bool(false)),
+                    DuplicateExtensions => (flag(|h| h.duplicate_extensions), Value::Bool(false)),
+                    MalformedExtensions => (int(|h| h.malformed_extensions.len()), Value::Int(0)),
+                    RecordCount => (int(|h| h.record_count), Value::Int(0)),
+                    TcpSegments => (int(|h| h.tcp_segments), Value::Int(0)),
+                };
+                if default_on_error {
+                    Ok(result.unwrap_or(default))
+                } else {
+                    result
+                }
+            }
+            pub fn all() -> Vec<Field> {
+                use Field::*;
+                vec![
+                    State,
+                    Complete,
+                    SniCount,
+                    SniInvalidUtf8,
+                    DuplicateExtensions,
+                    MalformedExtensions,
+                    RecordCount,
+                    TcpSegments,
+                ]
+            }
+        }
+        #[derive(Debug, thiserror::Error)]
+        pub enum FieldError {
+            #[error("No ClientHello has been recognised on this connection yet")]
+            NoClientHello,
         }
     }
     pub mod tcp {
@@ -1642,6 +1738,12 @@ pub enum Operation {
         index: usize,
         out: Register,
     },
+    /// True if any SNI host_name of the connection's recognised ClientHello
+    /// matches regex `index` (False until a ClientHello has been recognised).
+    RegexSni {
+        index: usize,
+        out: Register,
+    },
     Return(Action),
     Noop,
     Model {
@@ -1729,6 +1831,7 @@ impl fmt::Display for Operation {
                 write!(f, "{name} {lhs},{rhs}->{out}")
             }
             Regex { index, out } => write!(f, "REGEX {index}->{out}"),
+            RegexSni { index, out } => write!(f, "REGEX_SNI {index}->{out}"),
             Return(action) => write!(f, "RETURN {action}"),
             Noop => write!(f, "NOOP"),
             Model { ref name } => write!(f, "MODEL {name}"),
@@ -1994,7 +2097,6 @@ mod tests {
     fn make_tcp_packet(payload: &[u8]) -> Packet {
         Packet {
             timestamp: Some(0.0),
-            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 40 + payload.len(),
@@ -2036,6 +2138,7 @@ mod tests {
                 }),
             },
             payload: payload.to_vec(),
+            tls: Default::default(),
         }
     }
 
@@ -2050,7 +2153,6 @@ mod tests {
     fn make_udp_packet(payload: &[u8]) -> Packet {
         Packet {
             timestamp: Some(0.0),
-            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 28 + payload.len(),
@@ -2078,6 +2180,7 @@ mod tests {
                 }),
             },
             payload: payload.to_vec(),
+            tls: Default::default(),
         }
     }
 
