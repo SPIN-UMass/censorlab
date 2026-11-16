@@ -107,6 +107,8 @@
                     (f: builtins.elem f.name [ "censor.py" "censor.toml" "model.onnx" ])
                     ./experiments)
                   ./experiments/07_benchmarks/censors
+                  # Shipped CensorLang programs are checked by tests/censorlang_programs.rs
+                  (pkgs.lib.fileset.fileFilter (f: f.name == "censor.cl" || f.name == "censor_lang.toml") ./experiments)
                 ];
               };
               checkArgs = common_args // {

@@ -3,6 +3,7 @@ use crate::censor::{Action, Direction, IpPair};
 use crate::config::conntrack::Config as ConntrackConfig;
 use crate::expiring_map::ExpiringMap;
 use crate::model::ModelThreadMessage;
+use crate::program::check::ModelSignatures;
 use crate::program::config::Config as ProgramConfig;
 use crate::program::env::{ProgramEnv, Registers};
 use crate::program::packet::rust_dns;
@@ -170,6 +171,10 @@ pub struct ConnectionInfo {
     client_hello: ClientHelloAssembler,
     /// Only meaningful for TCP
     tcp: TcpLifecycle,
+    /// The connection's client: the sender of the first packet seen on it
+    /// (the SYN sender for TCP connections observed from the start).
+    /// CensorLang host registers (`hreg`) are this host's.
+    client_ip: IpAddress,
 }
 
 #[derive(Debug, Error)]
@@ -567,7 +572,7 @@ pub(crate) fn new_python_interpreter(hash_seed: u32) -> vm::Interpreter {
 
 impl TransportState {
     pub fn new(
-        _model_config: HashMap<String, crate::config::model::Model>,
+        model_config: HashMap<String, crate::config::model::Model>,
         _decision_log_path: Option<PathBuf>,
         execution_config: crate::config::execution::Config,
         conntrack: ConntrackConfig,
@@ -610,9 +615,18 @@ impl TransportState {
         let censorlang_program = match execution_config.mode {
             ExecutionMode::CensorLang => {
                 if let Some(ref script_path) = execution_config.script {
-                    Some(
-                        Program::load(script_path.clone())?,
-                    )
+                    // Models the program may reference.  Their input lengths
+                    // are only known once the model thread has loaded them,
+                    // so indices are bounded by check::MAX_MODEL_INPUTS.
+                    let models: ModelSignatures =
+                        model_config.keys().map(|name| (name.clone(), None)).collect();
+                    // Rejects (at startup) any program that is malformed or
+                    // exceeds the configured limits
+                    Some(Program::load(
+                        script_path.clone(),
+                        &execution_config.censorlang,
+                        Some(&models),
+                    )?)
                 } else {
                     Some(Program::default())
                 }
@@ -631,7 +645,7 @@ impl TransportState {
             on_script_error: execution_config.on_script_error,
             model_sender,
             censorlang_program,
-            censorlang_config: ProgramConfig::default(),
+            censorlang_config: execution_config.censorlang,
         })
     }
     /// Processes the tcp packet based on its metadata and our internal state
@@ -694,6 +708,7 @@ impl TransportState {
                 env,
                 is_first: true,
                 tcp: TcpLifecycle::default(),
+                client_ip: ips.src(),
                 client_hello: ClientHelloAssembler::new(),
             };
             // The real deadline is set once the packet has been processed
@@ -710,7 +725,7 @@ impl TransportState {
                 .client_hello;
             client_hello.observe(
                 (ips.src(), packet.transport.src),
-                tcp.seq.0 as u32,
+                tcp.seq_number(),
                 tcp.flags.syn,
                 tcp.flags.ack,
                 &packet.payload,
@@ -742,7 +757,7 @@ impl TransportState {
             ExecutionMode::CensorLang => None,
         };
 
-        let ConnectionInfo { env, .. } = self
+        let ConnectionInfo { env, client_ip, .. } = self
             .connections
             .get_mut(&key)
             .expect("connection was inserted above");
@@ -839,10 +854,14 @@ impl TransportState {
                 // Get the program (should always exist in CensorLang mode)
                 if let Some(ref program) = self.censorlang_program {
                     let field_default_on_error = self.censorlang_config.env.field_default_on_error;
+                    // Host registers are keyed on the connection's client, so both
+                    // directions of a connection share one bank (the counters
+                    // above stay keyed on the packet's sender, like PyCL's `host`).
+                    // Both endpoints' host states were touched above.
                     let host = self
                         .hosts
-                        .get_mut(&src_ip)
-                        .expect("source host was touched above");
+                        .get_mut(&*client_ip)
+                        .expect("both endpoint hosts were touched above");
                     let program_action = env.process(
                         &packet,
                         program,

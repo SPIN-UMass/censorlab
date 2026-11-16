@@ -395,6 +395,17 @@ pub struct TcpMetadata {
     pub window_len: u16,
     pub flags: TcpFlags,
 }
+impl TcpMetadata {
+    /// Sequence number as the unsigned 32-bit value carried on the wire
+    /// (smoltcp stores it as an `i32` for wrapping comparisons)
+    pub fn seq_number(&self) -> u32 {
+        self.seq.0 as u32
+    }
+    /// Acknowledgement number as the unsigned 32-bit value carried on the wire
+    pub fn ack_number(&self) -> u32 {
+        self.ack.0 as u32
+    }
+}
 #[derive(Clone, Copy, Debug)]
 pub struct TcpFlags {
     pub fin: bool,
@@ -772,12 +783,12 @@ pub mod rust_packet {
             self.src == port || self.dst == port
         }
         #[pygetset]
-        fn seq(&self) -> i32 {
-            self.data.seq.0
+        fn seq(&self) -> u32 {
+            self.data.seq_number()
         }
         #[pygetset]
-        fn ack(&self) -> i32 {
-            self.data.ack.0
+        fn ack(&self) -> u32 {
+            self.data.ack_number()
         }
         #[pygetset]
         fn header_len(&self) -> u8 {
@@ -2061,6 +2072,23 @@ mod tests {
         let tm2 = tm; // Copy, not move
         assert_eq!(tm.src, tm2.src);
         assert_eq!(tm.dst, tm2.dst);
+    }
+
+    #[test]
+    fn tcp_seq_ack_are_unsigned() {
+        let md = TcpMetadata {
+            seq: TcpSeqNumber(-1),
+            ack: TcpSeqNumber(i32::MIN),
+            header_len: 20,
+            flags: TcpFlags {
+                fin: false, syn: false, rst: false, psh: false,
+                ack: true, urg: false, ece: false, cwr: false, ns: false,
+            },
+            window_len: 0,
+            urgent_at: 0,
+        };
+        assert_eq!(md.seq_number(), u32::MAX);
+        assert_eq!(md.ack_number(), 1u32 << 31);
     }
 
     // ---- IP layer recognition (IPv6 extension headers, fragments) ----

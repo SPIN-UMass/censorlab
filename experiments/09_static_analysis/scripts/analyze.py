@@ -53,11 +53,16 @@ def main():
             "conn_regs_float": len(a["connection_registers"]["float"]),
             "conn_regs_int": len(a["connection_registers"]["int"]),
             "conn_regs_bool": len(a["connection_registers"]["bool"]),
+            "num_registers": a["num_registers"],
             "per_connection_register_bytes": a["per_connection_register_bytes"],
+            "per_connection_allocated_register_bytes": a["per_connection_allocated_register_bytes"],
+            "per_connection_model_io_bytes": a["per_connection_model_io_bytes"],
+            "per_connection_touched_bytes": a["per_connection_touched_bytes"],
             "per_connection_bytes": a["per_connection_bytes"],
             "host_regs": (len(a["host_registers"]["float"]) + len(a["host_registers"]["int"])
                           + len(a["host_registers"]["bool"])),
             "per_host_register_bytes": a["per_host_register_bytes"],
+            "per_host_allocated_register_bytes": a["per_host_allocated_register_bytes"],
             "conditions": pp["conditions"],
             "reads": pp["reads"],
             "writes": pp["writes"],
@@ -81,13 +86,13 @@ def main():
     with open(os.path.join(RESULTS, "static_analysis.json"), "w") as f:
         json.dump({"experiment": "09_static_analysis", "rows": rows}, f, indent=2)
 
-    print(f"{'program':<18} {'lines':>5} {'regex':>5} {'conn B':>6} {'host B':>6} "
+    print(f"{'program':<18} {'lines':>5} {'regex':>5} {'conn B':>6} {'touched':>7} {'host B':>6} "
           f"{'ops/pkt':>7} {'regex/pkt':>9} {'model/pkt':>9}")
-    print("-" * 76)
+    print("-" * 84)
     for r in rows:
         print(f"{r['program']:<18} {r['lines']:>5} {r['regexes']:>5} {r['per_connection_bytes']:>6} "
-              f"{r['per_host_register_bytes']:>6} {r['constant_ops']:>7} {r['regex_evaluations']:>9} "
-              f"{r['model_calls']:>9}")
+              f"{r['per_connection_touched_bytes']:>7} {r['per_host_allocated_register_bytes']:>6} "
+              f"{r['constant_ops']:>7} {r['regex_evaluations']:>9} {r['model_calls']:>9}")
     print(f"\nwrote {os.path.join(RESULTS, 'static_analysis.csv')}")
 
 
