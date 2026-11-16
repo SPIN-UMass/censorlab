@@ -141,6 +141,7 @@ pub fn output_type(operation: &Operation) -> Option<(RegisterType, &Register)> {
         | Or { out, .. }
         | Xor { out, .. }
         | Regex { out, .. }
+        | RegexSni { out, .. }
         | SubnetIn { out, .. } => {
             Some((RegisterType::Bool, out))
         }
@@ -168,7 +169,7 @@ fn line_inputs(line: &Line) -> Vec<&Input> {
             inputs.push(lhs);
             inputs.push(rhs);
         }
-        Regex { .. } | SubnetIn { .. } | Return(_) | Noop | Model { .. } => {}
+        Regex { .. } | RegexSni { .. } | SubnetIn { .. } | Return(_) | Noop | Model { .. } => {}
     }
     inputs
 }
@@ -230,7 +231,7 @@ fn check_line(
     }
     use Operation::*;
     match &line.operation {
-        Regex { index, .. } if *index >= regexes => {
+        Regex { index, .. } | RegexSni { index, .. } if *index >= regexes => {
             errors.push(CheckErrorKind::RegexIndex {
                 index: *index,
                 declared: regexes,

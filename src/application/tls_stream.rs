@@ -208,10 +208,10 @@ fn step(phase: Phase, seg: &Segment<'_>) -> Phase {
     let data_seq = if seg.syn { seg.seq + 1 } else { seg.seq };
     match phase {
         Phase::Await { mut client, mut base } => {
-            if seg.syn && !seg.ack && client.map_or(true, |c| c == seg.src) {
+            if seg.syn && !seg.ack && client.is_none_or(|c| c == seg.src) {
                 client = Some(seg.src);
                 base = Some(data_seq);
-            } else if seg.syn && seg.ack && client.map_or(true, |c| c == seg.dst) {
+            } else if seg.syn && seg.ack && client.is_none_or(|c| c == seg.dst) {
                 client = Some(seg.dst);
                 base = Some(seg.ack_number);
             }
@@ -349,7 +349,7 @@ mod tests {
         exts.extend_from_slice(&[0x00, 0x10, 0x00, 0x05, 0x00, 0x03, 0x02, b'h', b'2']);
         exts.extend_from_slice(&[0x00, 0x15]);
         exts.extend_from_slice(&(pad as u16).to_be_bytes());
-        exts.extend(std::iter::repeat(0).take(pad));
+        exts.extend(std::iter::repeat_n(0, pad));
         let mut body = vec![0x03, 0x03];
         body.extend_from_slice(&[0x22; 32]);
         body.extend_from_slice(&[0, 0x00, 0x02, 0x13, 0x01, 0x01, 0x00]);

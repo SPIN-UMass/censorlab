@@ -1030,6 +1030,7 @@ pub mod field {
                 Field::Ip(field) => field.ty(),
                 Field::Tcp(field) => field.ty(),
                 Field::Udp(field) => field.ty(),
+                Field::Tls(field) => field.ty(),
             }
         }
         pub fn all() -> Vec<Field> {
@@ -1111,6 +1112,7 @@ pub mod field {
                 Field::PayloadEntropy => "transport.payload.entropy",
                 Field::PayloadAveragePopcount => "transport.payload.avg_popcount",
                 Field::PayloadPrintableFraction => "transport.payload.printable_fraction",
+                Field::Tls(field) => field.name(),
             }
         }
     }
@@ -1308,7 +1310,7 @@ pub mod field {
     /// and every later packet of the connection); before that they are an error, or 0/False with
     /// `field_default_on_error`.
     pub mod tls {
-        use super::{Packet, Value};
+        use super::{Packet, RegisterType, Value};
 
         #[derive(Clone, Debug, Eq, Hash, PartialEq)]
         pub enum Field {
@@ -1353,6 +1355,30 @@ pub mod field {
                     Ok(result.unwrap_or(default))
                 } else {
                     result
+                }
+            }
+            /// Static type of the field (also the type of its default)
+            pub fn ty(&self) -> RegisterType {
+                use Field::*;
+                match self {
+                    Complete | SniInvalidUtf8 | DuplicateExtensions => RegisterType::Bool,
+                    State | SniCount | MalformedExtensions | RecordCount | TcpSegments => {
+                        RegisterType::Int
+                    }
+                }
+            }
+            /// The field's name in CensorLang source
+            pub fn name(&self) -> &'static str {
+                use Field::*;
+                match self {
+                    State => "tls.hello.state",
+                    Complete => "tls.hello.complete",
+                    SniCount => "tls.hello.sni_count",
+                    SniInvalidUtf8 => "tls.hello.sni_invalid_utf8",
+                    DuplicateExtensions => "tls.hello.duplicate_extensions",
+                    MalformedExtensions => "tls.hello.malformed_extensions",
+                    RecordCount => "tls.hello.record_count",
+                    TcpSegments => "tls.hello.tcp_segments",
                 }
             }
             pub fn all() -> Vec<Field> {

@@ -658,7 +658,7 @@ impl TransportState {
         &mut self,
         ips: IpPair,
         direction: Direction,
-        packet: Packet,
+        mut packet: Packet,
     ) -> Result<Action, SmoltcpError> {
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.

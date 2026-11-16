@@ -825,7 +825,7 @@ mod tests {
         assert_eq!(info.dcid, unhex(RFC_DCID));
         assert!(info.scid.is_empty());
         assert_eq!(info.sni(), Some("example.com"));
-        assert_eq!(info.client_hello.as_ref().unwrap().alpn, vec!["alpn".to_string()]);
+        assert_eq!(info.client_hello.as_ref().unwrap().alpn, vec![b"alpn".to_vec()]);
     }
 
     #[test]
