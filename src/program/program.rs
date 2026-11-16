@@ -1,3 +1,5 @@
+use crate::program::check::{check, CheckErrors, ModelSignatures};
+use crate::program::config::Config as ProgramEnvConfig;
 use crate::program::env::{EnvFields, RegisterBanks, RegisterWriteError};
 use crate::program::packet::Packet;
 use crate::program::packet::{IpVersionMetadata, TcpFlags, TransportMetadataExtra};
@@ -49,6 +51,8 @@ pub enum ProgramLoadError {
     Read(#[from] std::io::Error),
     #[error("Failed to parse program: {0}")]
     Parse(String),
+    #[error("Program rejected: {0}")]
+    Check(#[from] CheckErrors),
 }
 
 // Load in the parsing module
@@ -67,12 +71,64 @@ pub struct Program {
     pub regexes: Vec<BytesRegex>,
 }
 impl Program {
-    /// Loads a program
-    pub fn load(program_path: PathBuf) -> Result<Self, ProgramLoadError> {
-        // Load the program
-        let program = fs::read_to_string(program_path)?;
-        let program = program.parse().map_err(ProgramLoadError::Parse)?;
+    /// Loads a program for execution: parse, check against the configuration
+    /// (see [`crate::program::check`]) and optimise.
+    pub fn load(
+        program_path: PathBuf,
+        config: &ProgramEnvConfig,
+        models: Option<&ModelSignatures>,
+    ) -> Result<Self, ProgramLoadError> {
+        let source = fs::read_to_string(program_path)?;
+        Self::from_source_checked(&source, config, models)
+    }
+    /// Parse, check and optimise a program held in memory
+    pub fn from_source_checked(
+        source: &str,
+        config: &ProgramEnvConfig,
+        models: Option<&ModelSignatures>,
+    ) -> Result<Self, ProgramLoadError> {
+        let (mut program, line_numbers) =
+            Self::parse_numbered(source).map_err(ProgramLoadError::Parse)?;
+        check(&program, Some(&line_numbers), config, models)?;
+        program.optimise();
         Ok(program)
+    }
+    /// Parse a program without checking or optimising it, also returning the
+    /// 1-based source line number of each parsed line
+    pub fn parse_numbered(s: &str) -> Result<(Self, Vec<usize>), String> {
+        let mut lines = Vec::new();
+        let mut line_numbers = Vec::new();
+        let mut regexes = Vec::new();
+        for (number, line) in s.lines().enumerate() {
+            let number = number + 1;
+            let trimmed = line.trim();
+            // Skip blank lines and comments
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            // Parse regex directives: regex "pattern"
+            if let Some(rest) = trimmed.strip_prefix("regex ") {
+                let rest = rest.trim();
+                if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
+                    let pattern = &rest[1..rest.len() - 1];
+                    let re = BytesRegex::new(pattern).map_err(|e| {
+                        format!("line {number}: invalid regex pattern \"{pattern}\": {e}")
+                    })?;
+                    regexes.push(re);
+                } else {
+                    return Err(format!(
+                        "line {number}: invalid regex directive, expected regex \"pattern\", got: {trimmed}"
+                    ));
+                }
+                continue;
+            }
+            let line = program_parse::LineParser::new()
+                .parse(trimmed)
+                .map_err(|e| format!("line {number}: {e}"))?;
+            lines.push(line);
+            line_numbers.push(number);
+        }
+        Ok((Program { lines, regexes }, line_numbers))
     }
 }
 impl fmt::Display for Program {
@@ -341,36 +397,10 @@ impl Program {
 }
 impl FromStr for Program {
     type Err = String;
+    /// Parse only: the program is neither checked nor optimised (use
+    /// [`Program::from_source_checked`] / [`Program::load`] for execution)
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut lines = Vec::new();
-        let mut regexes = Vec::new();
-        for line in s.lines() {
-            let trimmed = line.trim();
-            // Skip blank lines and comments
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            // Parse regex directives: regex "pattern"
-            if let Some(rest) = trimmed.strip_prefix("regex ") {
-                let rest = rest.trim();
-                if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                    let pattern = &rest[1..rest.len() - 1];
-                    let re = BytesRegex::new(pattern)
-                        .map_err(|e| format!("Invalid regex pattern \"{pattern}\": {e}"))?;
-                    regexes.push(re);
-                } else {
-                    return Err(format!(
-                        "Invalid regex directive, expected regex \"pattern\", got: {trimmed}"
-                    ));
-                }
-                continue;
-            }
-            let line = program_parse::LineParser::new()
-                .parse(trimmed)
-                .map_err(|e| e.to_string())?;
-            lines.push(line);
-        }
-        Ok(Program { lines, regexes })
+        Self::parse_numbered(s).map(|(program, _)| program)
     }
 }
 
@@ -3178,6 +3208,26 @@ mod tests {
     fn math_float_division_by_zero_is_zero() {
         let v = MathOperator::Numeric(MathOperatorNumeric::Div).call(&Value::Float(1.0), &Value::Float(0.0));
         assert!(matches!(v, Value::Float(f) if f == 0.0));
+    }
+
+    // --- Loading for execution checks and optimises ---
+
+    #[test]
+    fn from_source_checked_rejects_ill_typed_program() {
+        let config = ProgramEnvConfig::default();
+        let err = Program::from_source_checked("DIV field:tcp.payload.len, 2 -> reg:f.0", &config, None)
+            .unwrap_err();
+        assert!(matches!(err, ProgramLoadError::Check(_)), "{err}");
+        let err = Program::from_source_checked("COPY 1 -> reg:i.0\nNOPE", &config, None).unwrap_err();
+        assert!(err.to_string().contains("line 2"), "{err}");
+    }
+
+    #[test]
+    fn from_source_checked_optimises() {
+        let config = ProgramEnvConfig::default();
+        let prog = Program::from_source_checked("NOOP\nADD 2, 3 -> reg:i.0\nif reg:i.0 == 5: RETURN terminate\nRETURN allow\nRETURN reset", &config, None)
+            .unwrap();
+        assert_eq!(prog.to_string(), "COPY 5 -> reg:i.0\nif reg:i.0 == 5: RETURN terminate\nRETURN allow\n");
     }
 
     // --- Display is the inverse of parsing ---

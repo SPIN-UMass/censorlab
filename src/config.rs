@@ -179,6 +179,9 @@ pub mod execution {
         /// Number of times to repeat sending a TCP RST packet (default: 5)
         #[serde(default = "default_reset_repeat")]
         pub reset_repeat: usize,
+        /// CensorLang settings and limits (`[execution.censorlang]`)
+        #[serde(default)]
+        pub censorlang: crate::program::config::Config,
     }
 
     fn default_hash_seed() -> u32 {
@@ -382,6 +385,25 @@ mode = "Python"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(config.models.is_empty());
+    }
+
+    #[test]
+    fn deserialize_censorlang_settings() {
+        let toml_str = r#"
+[execution]
+mode = "CensorLang"
+[execution.censorlang]
+relax_register_types = true
+field_default_on_error = false
+num_registers = 32
+num_lines = 64
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let cl = &config.execution.censorlang;
+        assert!(cl.env.relax_register_types);
+        assert!(!cl.env.field_default_on_error);
+        assert_eq!(cl.program.num_registers, 32);
+        assert_eq!(cl.program.num_lines, 64);
     }
 
     #[test]

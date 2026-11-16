@@ -99,6 +99,8 @@
                   (pkgs.lib.fileset.fileFilter (f: f.hasExt "lalrpop") ./src)
                   ./tests
                   ./demos
+                  # Shipped CensorLang programs are checked by tests/censorlang_programs.rs
+                  (pkgs.lib.fileset.fileFilter (f: f.name == "censor.cl" || f.name == "censor_lang.toml") ./experiments)
                 ];
               };
               checkArgs = common_args // {

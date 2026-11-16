@@ -1,6 +1,7 @@
 use crate::application::tls::ClientHelloAssembler;
 use crate::censor::{Action, Direction, IpPair};
 use crate::model::ModelThreadMessage;
+use crate::program::check::ModelSignatures;
 use crate::program::config::Config as ProgramConfig;
 use crate::program::env::{ProgramEnv, Registers};
 use crate::program::packet::rust_dns;
@@ -277,7 +278,7 @@ fn action_from_python(
 
 impl TransportState {
     pub fn new(
-        _model_config: HashMap<String, crate::config::model::Model>,
+        model_config: HashMap<String, crate::config::model::Model>,
         _decision_log_path: Option<PathBuf>,
         execution_config: crate::config::execution::Config,
         model_sender: mpsc::SyncSender<ModelThreadMessage>,
@@ -359,9 +360,18 @@ impl TransportState {
         let censorlang_program = match execution_config.mode {
             ExecutionMode::CensorLang => {
                 if let Some(ref script_path) = execution_config.script {
-                    Some(
-                        Program::load(script_path.clone())?,
-                    )
+                    // Models the program may reference.  Their input lengths
+                    // are only known once the model thread has loaded them,
+                    // so indices are bounded by check::MAX_MODEL_INPUTS.
+                    let models: ModelSignatures =
+                        model_config.keys().map(|name| (name.clone(), None)).collect();
+                    // Rejects (at startup) any program that is malformed or
+                    // exceeds the configured limits
+                    Some(Program::load(
+                        script_path.clone(),
+                        &execution_config.censorlang,
+                        Some(&models),
+                    )?)
                 } else {
                     Some(Program::default())
                 }
@@ -379,7 +389,7 @@ impl TransportState {
             process,
             model_sender,
             censorlang_program,
-            censorlang_config: ProgramConfig::default(),
+            censorlang_config: execution_config.censorlang,
         })
     }
     /// Processes the tcp packet based on its metadata and our internal state

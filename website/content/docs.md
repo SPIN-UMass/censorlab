@@ -750,12 +750,39 @@ mode = "CensorLang"
 script = "censor.cl"
 ```
 
-CensorLang programs also respect these environment settings (from the internal program config):
+CensorLang settings and limits are set in an optional `[execution.censorlang]` table (unknown keys are rejected):
 
-| Setting                | Default | Description |
-|------------------------|---------|-------------|
-| `field_default_on_error` | `true`  | Return 0/false instead of erroring when accessing a field from the wrong protocol |
-| `relax_register_types`   | `false` | Allow writing values into register banks of a different type |
+```toml
+[execution.censorlang]
+field_default_on_error = true      # default
+relax_register_types = false       # default
+num_registers = 16                 # default
+num_lines = 256                    # default
+# operators = ["<", "==", "&&"]    # default: all operators
+# actions = ["allow", "terminate"] # default: all actions
+```
+
+| Setting                  | Default | Description |
+|--------------------------|---------|-------------|
+| `field_default_on_error` | `true`  | Return the field type's zero value (`0`, `0.0` or `False`) instead of erroring when a field is absent from the packet (e.g. a TCP field of a UDP packet) |
+| `relax_register_types`   | `false` | Allow writing values into register banks of a different type (the value is stored in the bank of its own type) |
+| `num_registers`          | `16`    | Registers per bank (`reg:x.0` .. `reg:x.<num_registers - 1>`, same for `hreg`) |
+| `num_lines`              | `256`   | Maximum number of program lines (comments, blank lines and `regex` directives do not count) |
+| `operators`              | all     | Condition operators the program may use |
+| `actions`                | all     | `RETURN` actions the program may use |
+
+### Load-time checking
+
+Programs are checked once, when CensorLab starts, and rejected with a list of every problem (with source line numbers) if any check fails:
+
+- the program has at most `num_lines` lines;
+- every register index is below `num_registers`;
+- every operation writes a value of its destination register's type (unless `relax_register_types` is set). Result types are static: `COPY` keeps the source's type; `ADD`/`SUB`/`MUL`/`DIV`/`MOD` produce a float if either operand is a float and an int otherwise (so `DIV field:tcp.payload.len, 2 -> reg:f.0` is rejected, while `DIV field:tcp.payload.len, 2.0 -> reg:f.0` is accepted); `AND`/`OR`/`XOR`/`REGEX` produce a bool;
+- every `REGEX <n>` refers to a declared `regex` directive;
+- only the configured operators and actions are used;
+- every model referenced (`MODEL`, `model:<name>:in/out:<n>`) is configured in `[models]`, and model input indices are below 4096.
+
+After checking, the program is optimised (see Compiler Optimizations below); the optimised program is what runs.
 
 ## Syntax
 
@@ -868,7 +895,7 @@ Registers are per-connection persistent storage, organized into three typed bank
 | `reg:i.N`| int   | `0`           |
 | `reg:b.N`| bool  | `false`       |
 
-The default bank size is 16 registers per type. Writing a value to a register of the wrong type is an error unless `relax_register_types` is enabled.
+The default bank size is 16 registers per type (`num_registers`). Writing a value to a register of the wrong type, or using an index outside the bank, is rejected when the program is loaded (type mismatches are allowed if `relax_register_types` is enabled).
 
 ## Fields
 
