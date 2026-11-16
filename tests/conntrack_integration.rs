@@ -2,6 +2,10 @@
 //!
 //! These exercise teardown of per-connection state (FIN/RST, idle timeout,
 //! table size caps) and bounding of per-host state.
+#![allow(clippy::too_many_arguments, clippy::vec_init_then_push)]
+
+// Not every builder is used by every test crate.
+#[allow(dead_code)]
 mod common;
 
 use common::packet_builder::{

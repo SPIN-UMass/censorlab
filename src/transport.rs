@@ -477,7 +477,7 @@ impl TransportState {
         &mut self,
         ips: IpPair,
         direction: Direction,
-        packet: Packet,
+        mut packet: Packet,
     ) -> Result<Action, SmoltcpError> {
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.
@@ -1037,7 +1037,7 @@ mod tests {
             src: Ipv4Address::new(127, 0, 0, 1),
             dst: Ipv4Address::new(127, 0, 0, 1),
         };
-        let key_fwd = ConnectionKey::new(ips.clone(), 50000, 80, TransportProtocol::Tcp);
+        let key_fwd = ConnectionKey::new(ips, 50000, 80, TransportProtocol::Tcp);
         let key_rev = ConnectionKey::new(ips, 80, 50000, TransportProtocol::Tcp);
         assert_eq!(key_fwd, key_rev);
     }
