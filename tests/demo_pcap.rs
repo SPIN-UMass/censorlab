@@ -203,20 +203,19 @@ fn long_flow(cport: u16, payload: &[u8]) -> Vec<Vec<u8>> {
     frames
 }
 
-/// Regression test pinning the poisoned model's current verdicts: the script
-/// consults the model exactly once, at a connection's 30th packet, and resets
-/// when P(circumvention) < 0.5.  Of these synthetic flows only the one with
-/// all-empty payloads scores below 0.5; the random-looking and plaintext
-/// flows are let through.
+/// The script classifies each connection at its 30th packet and, if the model
+/// says "circumvention", resets that packet and the rest of the connection.
+/// Fully-encrypted-looking flows must be reset; plaintext and low-entropy
+/// flows must be left alone.
 #[test]
 fn test_demo_shadowsocks_poisoned_model() {
     const FLOW_LEN: usize = 40;
-    let flows: [&[u8]; 5] = [
-        &high_entropy_payload(256),
-        b"GET / HTTP/1.1\r\nHost: a\r\n\r\n",
-        &[],
-        &high_entropy_payload(1400),
-        &[b'A'; 1400],
+    const WINDOW: usize = 30;
+    let flows: [&[u8]; 4] = [
+        &high_entropy_payload(256),                  // 0: circumvention
+        b"GET / HTTP/1.1\r\nHost: a\r\n\r\n",        // 1: benign
+        &high_entropy_payload(1400),                 // 2: circumvention
+        &[b'A'; 1400],                               // 3: benign
     ];
     let mut frames = Vec::new();
     for (k, payload) in flows.iter().enumerate() {
@@ -230,14 +229,18 @@ fn test_demo_shadowsocks_poisoned_model() {
         !combined.contains("ERROR") && !combined.contains("Traceback"),
         "model evaluation must not error:\n{combined}"
     );
-    // Flow 2 (empty payloads), packet 30 of that connection.
+    // Packets WINDOW-1.. (0-based) of flows 0 and 2, and nothing else.
+    let expected: Vec<usize> = [0, 2]
+        .iter()
+        .flat_map(|k| (k * FLOW_LEN + WINDOW - 1)..((k + 1) * FLOW_LEN))
+        .collect();
     assert_eq!(
         frames_with(&result, "Reset"),
-        vec![2 * FLOW_LEN + 29],
-        "{:?}",
+        expected,
+        "{:?}\n{combined}",
         result.action_lines
     );
-    assert_eq!(result.action_lines.len(), 1, "{:?}", result.action_lines);
+    assert_eq!(result.action_lines.len(), expected.len(), "{:?}", result.action_lines);
 }
 
 // ==========================================================================
