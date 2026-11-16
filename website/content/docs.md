@@ -110,7 +110,7 @@ censorlab -c censor.toml nfq [OPTIONS] [INTERFACE]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--client-ip <IP>` | *(auto-detected)* | IP address considered the "client" for direction calculation |
+| `--client-ip <IP>[,<IP>...]` | *(all addresses of the interface)* | Address(es) considered the "client" for direction calculation; repeat or comma-separate to give both an IPv4 and an IPv6 address |
 | `--no-dir-action <ACTION>` | `ignore` | Action for traffic without a determinable direction |
 | `--iptables-table <TABLE>` | `raw` | iptables table to intercept at |
 | `--iptables-chain-in <CHAIN>` | `PREROUTING` | iptables chain for inbound packets |
@@ -118,7 +118,7 @@ censorlab -c censor.toml nfq [OPTIONS] [INTERFACE]
 | `--queue-num-in <NUM>` | `0` | NFQUEUE number for inbound packets |
 | `--queue-num-out <NUM>` | `1` | NFQUEUE number for outbound packets |
 | `--force-iptables` | | Force rule insertion even if conflicting NFQUEUE rules exist |
-| `[INTERFACE]` | *(auto-detected)* | Network interface to use for sending packets |
+| `[INTERFACE]` | *(interface of the default route)* | Interface whose addresses are the default client addresses. Injected RSTs/responses are sent via raw IP sockets and routed by the kernel |
 
 CensorLab determines packet direction by comparing source/destination addresses against the client IP. Traffic from the client IP is considered client-to-WAN; traffic to it is WAN-to-client.
 
@@ -133,11 +133,11 @@ censorlab -c censor.toml pcap <PCAP_PATH> <CLIENT_IP>
 | Argument | Description |
 |----------|-------------|
 | `<PCAP_PATH>` | Path to the `.pcap` file to analyze |
-| `<CLIENT_IP>` | Client IP address for direction calculation |
+| `<CLIENT_IP>` | Client IP address(es) for direction calculation (comma-separated, e.g. `10.0.0.1,2001:db8::1`) |
 
 ### Wire Mode
 
-In wire mode, CensorLab sits between two network interfaces (WAN and client) and forwards packets between them. It can drop, delay, or modify packets inline. This mode requires the `wire` feature flag at build time.
+In wire mode, CensorLab is a transparent bridge between two network interfaces (WAN and client), which it puts in promiscuous mode. It can drop, reset (RSTs out of both interfaces), inject forged UDP responses, or rewrite packets inline; delay is not supported. This mode requires the `wire` feature flag at build time.
 
 ```bash
 cargo build --release --features wire
