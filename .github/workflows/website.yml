@@ -1,6 +1,9 @@
 name: Deploy Website
 on:
   push:
+      # Only deploy from main; the github-pages environment rejects other branches anyway
+      branches:
+        - main
       paths:
         - website/**
         - .github/workflows/website.yml

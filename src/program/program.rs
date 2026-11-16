@@ -1994,6 +1994,7 @@ mod tests {
     fn make_tcp_packet(payload: &[u8]) -> Packet {
         Packet {
             timestamp: Some(0.0),
+            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 40 + payload.len(),
@@ -2049,6 +2050,7 @@ mod tests {
     fn make_udp_packet(payload: &[u8]) -> Packet {
         Packet {
             timestamp: Some(0.0),
+            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 28 + payload.len(),

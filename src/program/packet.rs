@@ -22,6 +22,10 @@ pub struct Packet {
     /// Using `Rc<[u8]>` was considered but provides no benefit since Packet is never
     /// cloned in production and the Python VM requires owned bytes.
     pub payload: Vec<u8>,
+    /// The connection's TLS ClientHello, once reassembled from the client's first segments.
+    ///
+    /// Set by connection tracking on the packet that completes it and every packet after.
+    pub tls_client_hello: Option<crate::application::tls::ClientHelloInfo>,
 }
 impl Packet {
     /// Record the traffic direction relative to the configured client.
@@ -88,6 +92,7 @@ impl Packet {
             direction: 0,
             transport: transport_metadata,
             payload,
+            tls_client_hello: None,
         };
         Ok(packet)
     }
@@ -507,6 +512,12 @@ pub mod rust_packet {
         #[pygetset]
         fn payload_printable_fraction(&self) -> f64 {
             self.0.payload_printable_fraction()
+        }
+        /// The connection's TLS ClientHello once it has been fully received, even if it was
+        /// split across several TCP segments or TLS records, otherwise None
+        #[pygetset]
+        fn tls_client_hello(&self) -> Option<super::rust_tls::ClientHelloInfo> {
+            self.0.tls_client_hello.clone().map(Into::into)
         }
         #[pymethod]
         fn __str__(&self) -> String {
@@ -1280,6 +1291,11 @@ pub mod rust_tls {
     pub struct ClientHelloInfo {
         inner: tls::ClientHelloInfo,
     }
+    impl From<tls::ClientHelloInfo> for ClientHelloInfo {
+        fn from(inner: tls::ClientHelloInfo) -> Self {
+            Self { inner }
+        }
+    }
     #[pyclass]
     impl ClientHelloInfo {
         /// Server Name Indication, or None
@@ -1681,6 +1697,7 @@ mod tests {
     fn popcount_all_zeros() {
         let p = Packet {
             timestamp: None,
+            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 40,
@@ -1719,6 +1736,7 @@ mod tests {
     fn popcount_all_ones() {
         let p = Packet {
             timestamp: None,
+            tls_client_hello: None,
             ip: IpMetadata {
                 header_len: 20,
                 total_len: 40,

@@ -103,6 +103,7 @@ The interfaces that may be accessed to read metadata from each packet are:
  * `packet.payload_len` - payload length, regardless of transport protocol
  * `packet.payload_entropy` - payload entropy regardless of transport protocol
  * `packet.payload_avg_popcount` - payload average popcount, regardless of transport protocol
+ * `packet.tls_client_hello` - the connection's TLS ClientHello (see the `tls` module), reassembled across TCP segments and TLS records; `None` until it has fully arrived
 
 ## model
  * global variable

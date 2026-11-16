@@ -1,3 +1,4 @@
+use smoltcp::wire::IpAddress;
 use thiserror::Error;
 use tls_parser::{
     parse_tls_client_hello_extensions, parse_tls_plaintext, TlsExtension, TlsMessage,
@@ -77,6 +78,227 @@ pub fn parse_client_hello_message(data: &[u8]) -> Result<ClientHelloInfo, TlsPar
     record.extend_from_slice(data);
 
     parse_client_hello_record(&record)
+}
+
+/// Most bytes of client stream the assembler will buffer looking for a ClientHello.
+///
+/// A ClientHello can't exceed one maximum-size TLS record (2^14 bytes) when parsed, so this
+/// leaves room for record headers if the client splits it across many small records.
+pub const MAX_CLIENT_HELLO_STREAM: usize = 1 << 15;
+/// Largest TLS record body allowed by RFC 8446 for plaintext records.
+const MAX_RECORD_LEN: usize = 1 << 14;
+
+/// A TCP endpoint
+pub type Endpoint = (IpAddress, u16);
+
+/// Reassembles the client's first TLS handshake message from TCP segments.
+///
+/// One of these lives on each TCP connection. It only ever buffers the start of the
+/// client→server byte stream, bounded by [`MAX_CLIENT_HELLO_STREAM`], and frees the buffer as
+/// soon as it has either found a ClientHello or decided the stream doesn't start with one.
+///
+/// Policies:
+/// * The client is the sender of the first SYN (without ACK); the stream starts at ISN+1. If the
+///   connection was picked up mid-stream (no SYN seen), the first payload-carrying packet anchors
+///   the stream instead, which can't handle the first segment arriving out of order.
+/// * Segments are placed by sequence number, so duplicates and out-of-order segments within the
+///   window are handled.
+/// * Where segments overlap with different contents, the first bytes received win.
+/// * Later SYNs (e.g. with a different ISN) are ignored.
+#[derive(Debug, Default)]
+pub struct ClientHelloAssembler {
+    state: AssemblerState,
+}
+
+#[derive(Debug, Default)]
+enum AssemblerState {
+    /// Haven't seen the start of the client stream yet
+    #[default]
+    AwaitStream,
+    /// Buffering the client stream, whose first byte has sequence number `base`
+    Buffering {
+        client: Endpoint,
+        base: u32,
+        /// Bytes received so far, indexed by offset from `base`
+        buf: Vec<u8>,
+        /// Which bytes of `buf` have been received
+        filled: Vec<bool>,
+        /// Length of the contiguous received prefix of `buf`
+        contiguous: usize,
+        /// Don't rescan until the contiguous prefix is at least this long
+        need: usize,
+    },
+    /// Finished: either the ClientHello, or None if the stream doesn't start with one
+    Done(Option<ClientHelloInfo>),
+}
+
+impl ClientHelloAssembler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feed a TCP segment from either direction of the connection
+    pub fn observe(&mut self, src: Endpoint, seq: u32, syn: bool, ack: bool, payload: &[u8]) {
+        match self.state {
+            AssemblerState::AwaitStream => {
+                // The SYN consumes one sequence number, so the stream starts after it
+                let base = if syn && !ack {
+                    seq.wrapping_add(1)
+                } else if !syn && !payload.is_empty() {
+                    seq
+                } else {
+                    return;
+                };
+                self.state = AssemblerState::Buffering {
+                    client: src,
+                    base,
+                    buf: Vec::new(),
+                    filled: Vec::new(),
+                    contiguous: 0,
+                    need: 1,
+                };
+                // Data on the SYN (TCP Fast Open) is part of the stream
+                self.insert(base, payload);
+            }
+            AssemblerState::Buffering { client, .. } => {
+                if src == client && !syn {
+                    self.insert(seq, payload);
+                }
+            }
+            AssemblerState::Done(_) => {}
+        }
+    }
+
+    /// Place a client segment in the buffer and check whether the ClientHello is complete
+    fn insert(&mut self, seq: u32, mut payload: &[u8]) {
+        let AssemblerState::Buffering {
+            base,
+            buf,
+            filled,
+            contiguous,
+            need,
+            ..
+        } = &mut self.state
+        else {
+            return;
+        };
+        let mut offset = seq.wrapping_sub(*base);
+        // A segment starting before the stream (only possible when picked up mid-stream)
+        // contributes whatever part of it lies after the start
+        if offset > u32::MAX / 2 {
+            let skip = offset.wrapping_neg() as usize;
+            if skip >= payload.len() {
+                return;
+            }
+            payload = &payload[skip..];
+            offset = 0;
+        }
+        let offset = offset as usize;
+        if payload.is_empty() {
+            return;
+        }
+        // The client has sent more than a ClientHello could need, without completing one
+        if offset >= MAX_CLIENT_HELLO_STREAM {
+            self.state = AssemblerState::Done(None);
+            return;
+        }
+        let end = (offset + payload.len()).min(MAX_CLIENT_HELLO_STREAM);
+        if buf.len() < end {
+            buf.resize(end, 0);
+            filled.resize(end, false);
+        }
+        // First bytes received win
+        for (i, byte) in (offset..end).zip(payload) {
+            if !filled[i] {
+                buf[i] = *byte;
+                filled[i] = true;
+            }
+        }
+        while *contiguous < filled.len() && filled[*contiguous] {
+            *contiguous += 1;
+        }
+        if *contiguous < *need {
+            return;
+        }
+        match scan_client_hello(&buf[..*contiguous]) {
+            Scan::NeedMore(n) if n <= MAX_CLIENT_HELLO_STREAM => *need = n,
+            Scan::NeedMore(_) | Scan::NotClientHello => self.state = AssemblerState::Done(None),
+            Scan::Found(info) => self.state = AssemblerState::Done(Some(info)),
+        }
+    }
+
+    /// The reassembled ClientHello, once found
+    pub fn client_hello(&self) -> Option<&ClientHelloInfo> {
+        match &self.state {
+            AssemblerState::Done(info) => info.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Whether the assembler has stopped looking (found a ClientHello or gave up)
+    pub fn is_done(&self) -> bool {
+        matches!(self.state, AssemblerState::Done(_))
+    }
+}
+
+/// Outcome of scanning the start of a client stream for a ClientHello
+enum Scan {
+    /// Not enough data yet; the stream must be at least this long before rescanning
+    NeedMore(usize),
+    /// The stream doesn't start with a well-formed ClientHello
+    NotClientHello,
+    Found(ClientHelloInfo),
+}
+
+/// Recognize a ClientHello at the start of a client stream, possibly split over several
+/// handshake records
+fn scan_client_hello(stream: &[u8]) -> Scan {
+    let mut handshake = Vec::new();
+    let mut pos = 0;
+    loop {
+        // Once the handshake header is in, we know how much handshake data to wait for
+        if handshake.len() >= 4 {
+            if handshake[0] != 0x01 {
+                return Scan::NotClientHello;
+            }
+            let len = 4 + u32::from_be_bytes([0, handshake[1], handshake[2], handshake[3]]) as usize;
+            // parse_client_hello_message re-wraps the message in a single record
+            if len > MAX_RECORD_LEN {
+                return Scan::NotClientHello;
+            }
+            if handshake.len() >= len {
+                return match parse_client_hello_message(&handshake[..len]) {
+                    Ok(info) => Scan::Found(info),
+                    Err(_) => Scan::NotClientHello,
+                };
+            }
+        }
+        // Each handshake byte still missing needs at least one more stream byte
+        let missing = if handshake.len() >= 4 {
+            4 + u32::from_be_bytes([0, handshake[1], handshake[2], handshake[3]]) as usize - handshake.len()
+        } else {
+            4 - handshake.len()
+        };
+        // The stream ends partway through the current record
+        if pos > stream.len() {
+            return Scan::NeedMore(stream.len() + missing);
+        }
+        // Validate whatever part of the next record header has arrived
+        let header = &stream[pos..(pos + 5).min(stream.len())];
+        if header.first().is_some_and(|t| *t != 0x16) || header.get(1).is_some_and(|v| *v != 0x03) {
+            return Scan::NotClientHello;
+        }
+        if header.len() < 5 {
+            return Scan::NeedMore((pos + 5).max(stream.len() + missing));
+        }
+        let record_len = u16::from_be_bytes([header[3], header[4]]) as usize;
+        if record_len == 0 || record_len > MAX_RECORD_LEN {
+            return Scan::NotClientHello;
+        }
+        let body = pos + 5;
+        handshake.extend_from_slice(&stream[body..(body + record_len).min(stream.len())]);
+        pos = body + record_len;
+    }
 }
 
 /// Extract ClientHelloInfo from a parsed TlsClientHelloContents.
@@ -219,6 +441,222 @@ mod tests {
         buf.push((handshake.len() & 0xff) as u8);
         buf.extend_from_slice(handshake);
         buf
+    }
+
+    /// A ClientHello message about as large as one with a post-quantum key share,
+    /// using a padding extension to stand in for X25519MLKEM768
+    fn build_large_client_hello_message(sni: &str) -> Vec<u8> {
+        let mut msg = build_client_hello_message(Some(sni), None);
+        let pad = 1500;
+        msg.extend_from_slice(&[0x00, 0x15, (pad >> 8) as u8, (pad & 0xff) as u8]);
+        msg.extend(std::iter::repeat(0u8).take(pad));
+        // Fix up the handshake length and extensions length
+        let hs_len = msg.len() - 4;
+        msg[1..4].copy_from_slice(&(hs_len as u32).to_be_bytes()[1..]);
+        let ext_len = u16::from_be_bytes([msg[45], msg[46]]) as usize + 4 + pad;
+        msg[45..47].copy_from_slice(&(ext_len as u16).to_be_bytes());
+        msg
+    }
+
+    /// Split a handshake message across several TLS records of at most `chunk` bytes
+    fn wrap_in_records(handshake: &[u8], chunk: usize) -> Vec<u8> {
+        handshake.chunks(chunk).flat_map(wrap_in_record).collect()
+    }
+
+    const CLIENT: Endpoint = (IpAddress::Ipv4(smoltcp::wire::Ipv4Address::new(10, 0, 0, 1)), 40000);
+    const SERVER: Endpoint = (IpAddress::Ipv4(smoltcp::wire::Ipv4Address::new(10, 0, 0, 2)), 443);
+    const ISN: u32 = 1000;
+
+    /// Assembler that has seen the client's SYN
+    fn after_syn(isn: u32) -> ClientHelloAssembler {
+        let mut asm = ClientHelloAssembler::new();
+        asm.observe(CLIENT, isn, true, false, &[]);
+        asm.observe(SERVER, 5000, true, true, &[]);
+        asm
+    }
+
+    fn sni(asm: &ClientHelloAssembler) -> Option<&str> {
+        asm.client_hello().and_then(|ch| ch.sni.as_deref())
+    }
+
+    #[test]
+    fn assembler_single_segment() {
+        let stream = wrap_in_record(&build_client_hello_message(Some("example.com"), None));
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &stream);
+        assert_eq!(sni(&asm), Some("example.com"));
+        assert!(asm.is_done());
+    }
+
+    #[test]
+    fn assembler_split_across_segments() {
+        let stream = wrap_in_record(&build_large_client_hello_message("example.com"));
+        assert!(stream.len() > 1460);
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &stream[..1460]);
+        assert_eq!(asm.client_hello().map(|_| ()), None);
+        assert!(!asm.is_done());
+        asm.observe(CLIENT, ISN + 1 + 1460, false, true, &stream[1460..]);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_ignores_server_data() {
+        let stream = wrap_in_record(&build_large_client_hello_message("example.com"));
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &stream[..1460]);
+        asm.observe(SERVER, 5001, false, true, b"not part of the client stream");
+        asm.observe(CLIENT, ISN + 1 + 1460, false, true, &stream[1460..]);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_duplicate_segment() {
+        let stream = wrap_in_record(&build_large_client_hello_message("example.com"));
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &stream[..1460]);
+        asm.observe(CLIENT, ISN + 1, false, true, &stream[..1460]);
+        asm.observe(CLIENT, ISN + 1 + 1460, false, true, &stream[1460..]);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_out_of_order() {
+        let stream = wrap_in_record(&build_large_client_hello_message("example.com"));
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1 + 1460, false, true, &stream[1460..]);
+        assert!(!asm.is_done());
+        asm.observe(CLIENT, ISN + 1, false, true, &stream[..1460]);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_tiny_segments() {
+        let stream = wrap_in_record(&build_client_hello_message(Some("example.com"), None));
+        let mut asm = after_syn(ISN);
+        for (i, byte) in stream.iter().enumerate() {
+            asm.observe(CLIENT, ISN + 1 + i as u32, false, true, std::slice::from_ref(byte));
+        }
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_overlap_first_wins() {
+        let stream = wrap_in_record(&build_client_hello_message(Some("example.com"), None));
+        let sni_at = stream.windows(11).position(|w| w == b"example.com").unwrap();
+        let split = sni_at + 4;
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &stream[..split]);
+        // Retransmission overlapping the first segment, with different bytes in the overlap
+        let mut second = stream[sni_at..].to_vec();
+        second[..4].copy_from_slice(b"xxxx");
+        asm.observe(CLIENT, ISN + 1 + sni_at as u32, false, true, &second);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_split_across_records() {
+        let stream = wrap_in_records(&build_large_client_hello_message("example.com"), 100);
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &stream);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_split_across_records_and_segments() {
+        let stream = wrap_in_records(&build_large_client_hello_message("example.com"), 7);
+        let mut asm = after_syn(ISN);
+        for (i, chunk) in stream.chunks(500).enumerate() {
+            asm.observe(CLIENT, ISN + 1 + (i * 500) as u32, false, true, chunk);
+        }
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_seq_wraparound() {
+        let stream = wrap_in_record(&build_large_client_hello_message("example.com"));
+        let isn = u32::MAX - 100;
+        let mut asm = after_syn(isn);
+        asm.observe(CLIENT, isn.wrapping_add(1), false, true, &stream[..1460]);
+        asm.observe(CLIENT, isn.wrapping_add(1 + 1460), false, true, &stream[1460..]);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_data_on_syn() {
+        // TCP Fast Open: the ClientHello rides on the SYN
+        let stream = wrap_in_record(&build_client_hello_message(Some("example.com"), None));
+        let mut asm = ClientHelloAssembler::new();
+        asm.observe(CLIENT, ISN, true, false, &stream);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_mid_stream_without_syn() {
+        let stream = wrap_in_record(&build_large_client_hello_message("example.com"));
+        let mut asm = ClientHelloAssembler::new();
+        asm.observe(CLIENT, ISN + 1, false, true, &stream[..1460]);
+        asm.observe(CLIENT, ISN + 1 + 1460, false, true, &stream[1460..]);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_later_syn_ignored() {
+        let stream = wrap_in_record(&build_large_client_hello_message("example.com"));
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &stream[..1460]);
+        asm.observe(CLIENT, 9999, true, false, &[]);
+        asm.observe(CLIENT, ISN + 1 + 1460, false, true, &stream[1460..]);
+        assert_eq!(sni(&asm), Some("example.com"));
+    }
+
+    #[test]
+    fn assembler_gives_up_on_non_tls() {
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n");
+        assert!(asm.is_done());
+        assert!(asm.client_hello().is_none());
+    }
+
+    #[test]
+    fn assembler_gives_up_on_non_client_hello() {
+        // A handshake record holding a ServerHello (type 2)
+        let mut msg = build_client_hello_message(Some("example.com"), None);
+        msg[0] = 0x02;
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &wrap_in_record(&msg)[..20]);
+        assert!(asm.is_done());
+    }
+
+    #[test]
+    fn assembler_gives_up_on_bad_record_header() {
+        for header in [
+            [0x16, 0x02, 0x00, 0x00, 0x10], // not version 3.x
+            [0x16, 0x03, 0x01, 0x00, 0x00], // empty record
+            [0x16, 0x03, 0x01, 0x40, 0x01], // record longer than 2^14
+        ] {
+            let mut asm = after_syn(ISN);
+            asm.observe(CLIENT, ISN + 1, false, true, &header);
+            assert!(asm.is_done(), "header {:?}", header);
+        }
+    }
+
+    #[test]
+    fn assembler_gives_up_on_oversized_hello() {
+        // Handshake header claiming a ClientHello far larger than the buffer cap
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1, false, true, &[0x16, 0x03, 0x01, 0x00, 0x04, 0x01, 0x10, 0x00, 0x00]);
+        assert!(asm.is_done());
+    }
+
+    #[test]
+    fn assembler_gives_up_on_stream_past_window() {
+        let stream = wrap_in_record(&build_large_client_hello_message("example.com"));
+        let mut asm = after_syn(ISN);
+        asm.observe(CLIENT, ISN + 1 + 1460, false, true, &stream[1460..]);
+        asm.observe(CLIENT, ISN + 1 + MAX_CLIENT_HELLO_STREAM as u32, false, true, b"later data");
+        assert!(asm.is_done());
+        assert!(asm.client_hello().is_none());
     }
 
     #[test]

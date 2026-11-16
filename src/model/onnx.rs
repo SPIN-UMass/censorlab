@@ -14,8 +14,21 @@ pub const ENV_NAME: &str = "censorlab";
 #[derive(Debug)]
 pub struct Model {
     pub session: Session,
-    pub input_dims: Vec<usize>,
+    /// Input dimensions as reported by ONNX, where dynamic dimensions are -1
+    pub input_dims: Vec<i64>,
     pub prob_index: usize,
+}
+
+/// Resolves a 2D ONNX input shape for a single sample of `data_len` features
+///
+/// A dynamic batch dimension resolves to 1 and a dynamic feature dimension to `data_len`.
+/// Returns None if the input isn't 2D
+pub fn input_shape(dims: &[i64], data_len: usize) -> Option<(usize, usize)> {
+    let resolve = |dim: i64, dynamic: usize| usize::try_from(dim).ok().filter(|d| *d > 0).unwrap_or(dynamic);
+    match *dims {
+        [batch, features] => Some((resolve(batch, 1), resolve(features, data_len))),
+        _ => None,
+    }
 }
 
 /// Represents the metadata of the model.
@@ -202,6 +215,28 @@ pub enum WatermarkModelLoadError {
 mod tests {
     use super::*;
     use std::str::FromStr;
+
+    #[test]
+    fn input_shape_static() {
+        assert_eq!(input_shape(&[1, 20], 20), Some((1, 20)));
+    }
+
+    #[test]
+    fn input_shape_dynamic_batch() {
+        // torch.onnx.export with dynamic_axes reports the batch dim as -1
+        assert_eq!(input_shape(&[-1, 20], 20), Some((1, 20)));
+    }
+
+    #[test]
+    fn input_shape_dynamic_features() {
+        assert_eq!(input_shape(&[1, -1], 7), Some((1, 7)));
+    }
+
+    #[test]
+    fn input_shape_rejects_non_2d() {
+        assert_eq!(input_shape(&[20], 20), None);
+        assert_eq!(input_shape(&[1, 10, 2], 20), None);
+    }
 
     #[test]
     fn feature_parse_valid_size() {

@@ -392,6 +392,7 @@ The `packet` object is passed to `process()` and provides read-only access to pa
 | `packet.payload_len`    | `int`           | Length of the payload in bytes |
 | `packet.payload_entropy`| `float`         | Shannon entropy of the payload, scaled 0.0–1.0 |
 | `packet.payload_avg_popcount` | `float`   | Average number of set bits per byte (0.0–8.0) |
+| `packet.tls_client_hello` | `ClientHelloInfo` or `None` | The connection's TLS ClientHello, reassembled across TCP segments and TLS records. `None` until it has fully arrived (see [TLS Module](#tls-module)) |
 | `packet.ip`             | `IpPacket`      | IP layer metadata |
 | `packet.tcp`            | `TcpPacket` or `None` | TCP metadata (None if not TCP) |
 | `packet.udp`            | `UdpPacket` or `None` | UDP metadata (None if not UDP) |
@@ -569,21 +570,18 @@ The `.data` attribute returns a tuple whose first element is the record type str
 
 ## TLS Module
 
-Parse TLS ClientHello messages from TCP payload.
+The simplest way to get a connection's ClientHello is `packet.tls_client_hello`. CensorLab reassembles the start of the client's TCP stream by sequence number, so this works even when the ClientHello is split across several TCP segments or TLS records. Modern clients split it by default: a post-quantum key share (X25519MLKEM768, default since OpenSSL 3.5) makes the ClientHello ~1.6 KB. It is `None` until the whole ClientHello has arrived, then set on that packet and every later packet of the connection.
 
 ```python
-from tls import parse_client_hello
-
 def process(packet):
-    tcp = packet.tcp
-    if tcp and tcp.dst == 443 and packet.payload_len > 0:
-        try:
-            hello = parse_client_hello(packet.payload)
-            if hello.sni and "blocked.com" in hello.sni:
-                return "reset"
-        except:
-            pass
+    hello = packet.tls_client_hello
+    if hello and hello.sni and b"blocked.com" in hello.sni:
+        return "reset"
 ```
+
+Reassembly details: the client is the sender of the first SYN, and the stream starts after it (if no SYN was seen, the first packet carrying data starts it). Duplicate and out-of-order segments are handled, and where overlapping segments disagree the first bytes received win. At most 32 KiB is buffered per connection, and only until a ClientHello is found or the stream turns out not to start with one.
+
+The functions below parse a single buffer, such as one packet's payload, and only see a ClientHello that fits entirely in it.
 
 ### Functions
 
@@ -687,7 +685,6 @@ Returns a list of floats from the model's probability output.
 ```python
 from rust import Packet, Model, regex
 from dns import parse as parse_dns
-from tls import parse_client_hello
 
 blocked_domains = ["example.com", "blocked.org"]
 http_re = regex(rb"Host:\s+blocked\.org")
@@ -707,18 +704,14 @@ def process(packet):
         return
 
     # Block TLS connections to blocked domains
-    tcp = packet.tcp
-    if tcp and tcp.dst == 443 and tcp.flags.syn == False and packet.payload_len > 0:
-        try:
-            hello = parse_client_hello(packet.payload)
-            if hello.sni:
-                for domain in blocked_domains:
-                    if domain in hello.sni:
-                        return "reset"
-        except:
-            pass
+    hello = packet.tls_client_hello
+    if hello and hello.sni:
+        for domain in blocked_domains:
+            if domain.encode() in hello.sni:
+                return "reset"
 
     # Block HTTP by Host header
+    tcp = packet.tcp
     if tcp and tcp.uses_port(80):
         if http_re.is_match(packet.payload):
             return "reset"

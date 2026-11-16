@@ -2,7 +2,8 @@ mod common;
 
 use common::packet_builder::{
     dns_query, high_entropy_payload, http_get, quic_initial_packet, ssh_banner, tcp_frame,
-    tls_client_hello_record, udp_frame, TCP_ACK, TCP_PSH_ACK, TCP_SYN,
+    tls_client_hello_record, tls_client_hello_record_padded, udp_frame, TCP_ACK, TCP_PSH_ACK,
+    TCP_SYN,
 };
 use common::pcap_builder::PcapBuilder;
 use common::runner::run_pcap_with_config;
@@ -276,8 +277,8 @@ fn test_https_blocking_tls_parsed() {
         result
             .action_lines
             .iter()
-            .any(|l| l.action.contains("Drop") && l.packet_index <= flow1_max_idx),
-        "expected Drop for example.com via TLS parsing in flow 1, got: {:?}\nstdout: {}",
+            .any(|l| l.action.contains("Reset") && l.packet_index <= flow1_max_idx),
+        "expected Reset for example.com via TLS parsing in flow 1, got: {:?}\nstdout: {}",
         result.action_lines,
         result.stdout
     );
@@ -290,6 +291,85 @@ fn test_https_blocking_tls_parsed() {
             );
         }
     }
+}
+
+// ==========================================================================
+// Test 5b: HTTPS blocking with a ClientHello split across TCP segments
+// ==========================================================================
+
+/// Client sends a post-quantum-sized ClientHello in two segments: 1460 bytes, then the rest
+fn split_hello_flow(
+    client: [u8; 4],
+    server: [u8; 4],
+    port: u16,
+    isn: u32,
+    sni: &str,
+    out_of_order: bool,
+) -> Vec<Vec<u8>> {
+    let hello = tls_client_hello_record_padded(sni, 1500);
+    assert!(hello.len() > 1460);
+    let (first, second) = hello.split_at(1460);
+    let seg1 = tcp_frame(client, server, port, 443, TCP_ACK, isn + 1, 1001, first);
+    let seg2 = tcp_frame(client, server, port, 443, TCP_PSH_ACK, isn + 1 + 1460, 1001, second);
+    let mut frames = vec![
+        tcp_frame(client, server, port, 443, TCP_SYN, isn, 0, &[]),
+        tcp_frame(server, client, 443, port, TCP_SYN | TCP_ACK, 1000, isn + 1, &[]),
+        tcp_frame(client, server, port, 443, TCP_ACK, isn + 1, 1001, &[]),
+    ];
+    if out_of_order {
+        frames.extend([seg2, seg1]);
+    } else {
+        frames.extend([seg1, seg2]);
+    }
+    frames
+}
+
+fn check_split_hello_blocking(out_of_order: bool) {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let f1 = split_hello_flow(client, [93, 184, 216, 34], 50000, 100, "example.com", out_of_order);
+    let f2 = split_hello_flow(client, [142, 250, 80, 46], 50001, 300, "google.com", out_of_order);
+
+    let mut builder = PcapBuilder::new();
+    for frame in f1.iter().chain(f2.iter()) {
+        builder = builder.add_frame(frame);
+    }
+    builder.write_to(&pcap_path);
+
+    let config = demo_config("https_blocking_tls");
+    let result = run_pcap_with_config(&config, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    // The ClientHello completes on the last segment of flow 1
+    assert!(
+        result
+            .action_lines
+            .iter()
+            .any(|l| l.action.contains("Reset") && l.packet_index == frame_idx(4)),
+        "expected Reset when the split ClientHello for example.com completes, got: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    for line in &result.action_lines {
+        if line.packet_index >= frame_idx(f1.len()) {
+            panic!(
+                "unexpected action for google.com flow (pkt {}): {}",
+                line.packet_index, line.action
+            );
+        }
+    }
+}
+
+#[test]
+fn test_https_blocking_tls_split_client_hello() {
+    check_split_hello_blocking(false);
+}
+
+#[test]
+fn test_https_blocking_tls_split_client_hello_out_of_order() {
+    check_split_hello_blocking(true);
 }
 
 // ==========================================================================
