@@ -89,7 +89,7 @@
             ];
           };
           devShells.website = import ./website/devshell.nix { inherit pkgs; };
-          # Censorlab package
+          # Test and lint checks (run by .github/workflows/rust.yml)
           # Build-artifact-free test/lint runs: `nix build .#checks.<system>.tests`
           checks =
             let
@@ -111,7 +111,7 @@
             {
               tests = craneLib.cargoTest checkArgs;
               tests-wire = craneLib.cargoTest (checkArgs // { cargoTestExtraArgs = "--features wire"; });
-              clippy = craneLib.cargoClippy (checkArgs // { cargoClippyExtraArgs = "--all-targets --all-features"; });
+              clippy = craneLib.cargoClippy (checkArgs // { cargoClippyExtraArgs = "--all-targets --all-features -- --deny warnings"; });
             };
           packages = rec {
             default = censorlab;
@@ -170,7 +170,8 @@
               };
               # Dependencies
               inherit cargoArtifacts;
-              # Integration tests reference demo scripts not in the clean source
+              # Tests run in checks.<system>.{tests,tests-wire} instead: the integration
+              # tests need demos/ and tests/, which this clean source excludes
               doCheck = false;
             });
           } // (if builtins.pathExists ./vm/packages.nix

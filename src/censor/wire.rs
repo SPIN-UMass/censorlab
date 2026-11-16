@@ -185,8 +185,6 @@ impl Censor {
                                         // Return an error indicating what happened
                                         Ok(ForwardFramesResult::TxFull(source_rx_buf.len()))
                                     }
-                                    // Pass along any other errors
-                                    Err(err) => Err(err),
                                 }
                             } else {
                                 // If we were unable to get a handle on the
@@ -217,7 +215,6 @@ impl Censor {
                                         retry[..source_rx_buf.len()].copy_from_slice(source_rx_buf);
                                         Ok(ForwardFramesResult::TxFull(source_rx_buf.len()))
                                     }
-                                    Err(err) => Err(err),
                                 }
                             } else {
                                 Err(SmoltcpError)
@@ -247,7 +244,6 @@ impl Censor {
                                         retry[..source_rx_buf.len()].copy_from_slice(source_rx_buf);
                                         Ok(ForwardFramesResult::TxFull(source_rx_buf.len()))
                                     }
-                                    Err(err) => Err(err),
                                 }
                             } else {
                                 Err(SmoltcpError)

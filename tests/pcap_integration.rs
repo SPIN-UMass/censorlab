@@ -1,3 +1,7 @@
+// Test packet builders mirror wire formats: many header-field arguments and
+// byte-by-byte pushes are clearer than the alternatives here.
+#![allow(clippy::too_many_arguments, clippy::vec_init_then_push)]
+
 mod common;
 
 use common::packet_builder::{
@@ -1386,7 +1390,7 @@ script = "censor.py"
 /// A TLS application-data record (type 0x17) with `len` bytes of opaque body.
 fn tls_app_record(len: usize) -> Vec<u8> {
     let mut r = vec![0x17, 0x03, 0x03, (len >> 8) as u8, len as u8];
-    r.extend(std::iter::repeat(0xAA).take(len));
+    r.extend(std::iter::repeat_n(0xAA, len));
     r
 }
 
@@ -1419,9 +1423,9 @@ fn test_demo_tspu_ttl_normalization() {
     let result = run_pcap_with_config(&demo_config("tspu_ttl_normalization"), &pcap_path, "10.0.0.1");
     assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
     let act = |n: usize| result.action_lines.iter().find(|l| l.packet_index == frame_idx(n)).map(|l| l.action.clone());
-    assert!(act(3).map_or(false, |a| a.contains("Rewrite") && a.contains("ttl: Some(64)")),
+    assert!(act(3).is_some_and(|a| a.contains("Rewrite") && a.contains("ttl: Some(64)")),
             "fake segment should be TTL-normalized: {:?}\n{}", result.action_lines, result.stdout);
-    assert!(act(4).map_or(false, |a| a.contains("Reset")),
+    assert!(act(4).is_some_and(|a| a.contains("Reset")),
             "real forbidden ClientHello should be reset: {:?}", result.action_lines);
     assert!(act(0).is_none() && act(1).is_none() && act(2).is_none(), "handshake must pass");
 }

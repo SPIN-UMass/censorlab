@@ -843,7 +843,7 @@ mod tests {
             src: Ipv4Address::new(10, 0, 0, 1),
             dst: Ipv4Address::new(10, 0, 0, 2),
         };
-        let key_a = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_a = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Tcp);
         let key_b = ConnectionKey::new(ips, 1234, 443, TransportProtocol::Tcp);
         assert_ne!(key_a, key_b);
     }
@@ -854,7 +854,7 @@ mod tests {
             src: Ipv4Address::new(10, 0, 0, 1),
             dst: Ipv4Address::new(10, 0, 0, 2),
         };
-        let key_tcp = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_tcp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Tcp);
         let key_udp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Udp);
         assert_ne!(key_tcp, key_udp);
     }

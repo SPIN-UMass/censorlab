@@ -582,7 +582,7 @@ pub mod rust_packet {
                 Some(TcpPacket {
                     src: self.0.transport.src,
                     dst: self.0.transport.dst,
-                    data: metadata.clone(),
+                    data: *metadata,
                 })
             } else {
                 None
@@ -594,7 +594,7 @@ pub mod rust_packet {
                 Some(UdpPacket {
                     src: self.0.transport.src,
                     dst: self.0.transport.dst,
-                    data: metadata.clone(),
+                    data: *metadata,
                 })
             } else {
                 None
@@ -787,7 +787,7 @@ pub mod rust_packet {
         }
         #[pygetset]
         fn flags(&self) -> TcpFlags {
-            TcpFlags(self.data.flags.clone())
+            TcpFlags(self.data.flags)
         }
     }
     #[pyattr]
@@ -1041,7 +1041,7 @@ pub mod rust_dns {
                 .into_iter()
                 .map(ResourceRecord::from)
                 .collect(),
-            opt: dns.opt.map(|o| Record::from(o)),
+            opt: dns.opt.map(Record::from),
         })
     }
     #[pyattr]
