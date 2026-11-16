@@ -10,7 +10,7 @@
 # * Drop   - This means the packet is immediately Dropped without further analysis. Only allowed in wire mode
 # * Reset  - Sends a TCP RST in both directions. The original content of the packet is not forwarded in wire mode.
 #            Only allowed in IP and TCP sections. If specified in an IP section and the underlying traffic is not TCP, this has
-#            the same behavior as "None"
+#            the same behavior as "Drop"
 [execution]
 # Python or CensorLang
 mode = "Python"

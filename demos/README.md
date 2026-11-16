@@ -14,7 +14,7 @@ Paths in censor.toml are relative to the TOML file itself, including for the Cen
 | `http_blocking` | HTTP keyword / Host filtering | reset |
 | `https_blocking`, `https_blocking_tls` | TLS SNI filtering | reset |
 | `quic_blocking` | QUIC Initial SNI filtering | drop |
-| `ip_blocking` | IP blocklist | reset |
+| `ip_blocking` | IP blocklist (addresses or CIDR subnets, e.g. `"198.51.100.0/24"`) | reset |
 | `shadowsocks_gfw` | Fully-encrypted-traffic heuristics (Wu et al. 2023) | drop |
 | `shadowsocks_poisoned` | ML classifier with poisoned model | drop |
 | `model` | ONNX model inference | drop |
