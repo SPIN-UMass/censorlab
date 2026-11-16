@@ -149,10 +149,11 @@ pub struct TransportState {
     execution_mode: ExecutionMode,
     /// Interpreter used for executing all python code
     vm: vm::Interpreter,
-    /// Code that is run by interpreter on the first packet
-    code: PyRef<PyCode>,
-    /// Code that is run by interpreter on each packet
-    process: PyRef<PyCode>,
+    /// Compiled censor script, run once per connection on its first packet
+    /// (None in CensorLang mode or when no Python script is configured)
+    code: Option<PyRef<PyCode>>,
+    /// What to do with a packet when the censor script fails
+    on_script_error: ScriptErrorPolicy,
     /// Sender used to make requests of the model executor
     model_sender: mpsc::SyncSender<ModelThreadMessage>,
     /// CensorLang program (when in CensorLang mode)
@@ -173,8 +174,8 @@ pub struct ConnectionInfo {
 
 #[derive(Debug, Error)]
 pub enum TransportStateInitError {
-    #[error("Failed to initialize Python environment: {0:?}")]
-    PythonInit(PyBaseExceptionRef),
+    #[error("Invalid censor script {}:\n{msg}", path.display())]
+    InvalidScript { path: PathBuf, msg: String },
     #[error("Failed to do something with ONNX: {0}")]
     OnnxError(#[from] OrtError),
     #[error("Could not find input named float_input with dimensions 1xN for model {name}")]
@@ -203,11 +204,111 @@ pub enum ExecutionMode {
     CensorLang,
 }
 
+/// What to do with a packet when the Python censor script fails on it
+/// (`process()` raised, or the script failed to initialize for its connection).
+/// Every such failure is logged either way.
+#[derive(Debug, Default, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptErrorPolicy {
+    /// Fail open: let the packet through
+    #[default]
+    Allow,
+    /// Fail closed: drop the packet
+    Drop,
+}
+impl ScriptErrorPolicy {
+    fn action(self) -> Action {
+        match self {
+            ScriptErrorPolicy::Allow => Action::None,
+            ScriptErrorPolicy::Drop => Action::Drop,
+        }
+    }
+}
+
 /// Execution environment
 #[derive(Debug)]
 pub enum ExecutionEnvironment {
-    Python { scope: Scope },
+    Python { scope: Scope, state: PythonConnState },
     CensorLang { env: ProgramEnv },
+}
+
+/// Lifecycle of one connection's Python script environment
+#[derive(Debug)]
+pub enum PythonConnState {
+    /// The module body has not run for this connection yet
+    Uninitialized,
+    /// The module body ran; this is the script's callable `process`
+    Ready(PyObjectRef),
+    /// The module body raised or left no callable `process` (already logged)
+    Failed,
+}
+
+/// Human-readable connection label for log messages
+struct ConnectionLabel {
+    proto: TransportProtocol,
+    ips: IpPair,
+    src_port: u16,
+    dst_port: u16,
+}
+impl ConnectionLabel {
+    fn of(ips: IpPair, packet: &Packet) -> Self {
+        Self {
+            proto: packet.transport_proto(),
+            ips,
+            src_port: packet.transport.src,
+            dst_port: packet.transport.dst,
+        }
+    }
+}
+impl std::fmt::Display for ConnectionLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:?} {}:{} -> {}:{}",
+            self.proto,
+            self.ips.src(),
+            self.src_port,
+            self.ips.dst(),
+            self.dst_port
+        )
+    }
+}
+
+/// Render a Python exception (with traceback) as a string for logging
+fn format_exception(vm: &vm::VirtualMachine, exc: &PyBaseExceptionRef) -> String {
+    let mut out = String::new();
+    if vm.write_exception(&mut out, exc).is_err() {
+        out = format!("{exc:?}");
+    }
+    out.trim_end().to_owned()
+}
+
+/// Run the censor script's module body in `scope` (with `model` defined) and
+/// return its `process` function, which must exist and be callable.
+fn init_python_scope(
+    vm: &vm::VirtualMachine,
+    code: PyRef<PyCode>,
+    scope: &Scope,
+    model_sender: mpsc::SyncSender<ModelThreadMessage>,
+) -> Result<PyObjectRef, String> {
+    let model = PythonModel::new(model_sender).to_pyobject(vm);
+    scope
+        .globals
+        .set_item(MODEL, model, vm)
+        .map_err(|err| format_exception(vm, &err))?;
+    vm.run_code_obj(code, scope.clone())
+        .map_err(|err| format_exception(vm, &err))?;
+    let process = scope
+        .globals
+        .get_item_opt(PROCESS, vm)
+        .map_err(|err| format_exception(vm, &err))?
+        .ok_or_else(|| "script does not define a `process(packet)` function".to_owned())?;
+    if !process.is_callable() {
+        return Err(format!(
+            "`process` must be callable, but it is a {}",
+            process.class().name()
+        ));
+    }
+    Ok(process)
 }
 
 /// Build the Reset action for the TCP connection a packet belongs to.
@@ -358,6 +459,112 @@ fn action_from_python(
     Action::None
 }
 
+/// The only modules a censor script may import: CensorLab's native modules
+const ALLOWED_IMPORTS: &[&str] = &["rust", "dns", "tls", "quic"];
+
+/// Native stdlib modules the interpreter itself imports while initializing
+/// (stdio, importlib, codecs). They are not importable by scripts.
+const INTERPRETER_INIT_MODULES: &[&str] = &[
+    "_typing", "_signal", "_ast", "_io", "_thread", "_warnings", "_weakref", "_imp", "_codecs",
+];
+
+/// `builtins.__import__` replacement: only absolute imports of
+/// [`ALLOWED_IMPORTS`] reach the real import machinery.
+fn sandboxed_import(args: vm::function::FuncArgs, vm: &vm::VirtualMachine) -> vm::PyResult {
+    use rustpython_vm::builtins::PyStr;
+    let name = args.args.first().and_then(|n| n.payload::<PyStr>()).map(|n| n.as_str().to_owned());
+    // __import__(name, globals=None, locals=None, fromlist=(), level=0)
+    let level = args
+        .args
+        .get(4)
+        .or_else(|| args.kwargs.get("level"))
+        .map(|level| level.try_to_value::<usize>(vm))
+        .transpose()?
+        .unwrap_or(0);
+    match name {
+        Some(name) if level == 0 && ALLOWED_IMPORTS.contains(&name.as_str()) => {
+            vm.import_func.call(args, vm)
+        }
+        name => {
+            let shown = name.unwrap_or_else(|| "<non-string>".to_owned());
+            Err(vm.new_import_error(
+                format!(
+                    "censor scripts may only import {}; '{shown}' is not available",
+                    ALLOWED_IMPORTS.join(", ")
+                ),
+                vm.ctx.new_str(shown),
+            ))
+        }
+    }
+}
+
+/// Build the RustPython interpreter that censor scripts run in.
+///
+/// Scripts run inside the censor process, which holds CAP_NET_ADMIN/CAP_NET_RAW,
+/// so the interpreter is restricted to what censor scripts need:
+/// - Only the native modules required to initialize the interpreter are
+///   registered, plus CensorLab's own `rust`, `dns`, `tls` and `quic`; there is
+///   no `posix`/`os`, `time`, `pwd`, ... and no filesystem import path.
+/// - `__import__` only admits [`ALLOWED_IMPORTS`], and `sys.modules` is
+///   emptied of the interpreter's own modules so they can't be re-imported
+///   from the cache.
+/// - `open` is removed from builtins.
+///
+/// This is a Python-level restriction, not an OS-level sandbox: objects that
+/// exist in the interpreter (e.g. `_io` classes reachable through
+/// `object.__subclasses__()`) are still reachable by introspection.
+pub(crate) fn new_python_interpreter(hash_seed: u32) -> vm::Interpreter {
+    // Initialize interpreter settings
+    let mut settings: Settings = Default::default();
+    // Ignore PYTHON* environment variables and user site-packages
+    settings.isolated = true;
+    settings.ignore_environment = true;
+    // No filesystem-based imports (also keeps importlib from loading posix)
+    settings.allow_external_library = false;
+    settings.path_list = Vec::new();
+    // Don't have the python subprograms implement sigint
+    settings.install_signal_handlers = false;
+    settings.hash_seed = Some(hash_seed);
+    // Want to make sure nothing is passed
+    settings.argv = Vec::new();
+    // settings.stdio_unbuffered = true;
+    // -OO optimization
+    settings.optimize = 2;
+    // Initialize the interpreter
+    let interpreter = vm::Interpreter::with_init(settings, |vm| {
+        // Register only the native modules the interpreter needs to start
+        vm::common::rc::PyRc::get_mut(&mut vm.state)
+            .expect("interpreter state is not shared during initialization")
+            .module_inits
+            .retain(|name, _| INTERPRETER_INIT_MODULES.contains(&name.as_ref()));
+        // Import the native rust module used to define the packet interface
+        vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
+        // Import the native rust module used for dns parsing
+        vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
+        // Import the native rust module used for TLS ClientHello parsing
+        vm.add_native_module("tls".to_owned(), Box::new(rust_tls::make_module));
+        // Import the native rust module used for QUIC Initial parsing
+        vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
+    });
+    interpreter
+        .enter(|vm| {
+            // Gate imports
+            let import = vm.new_function("__import__", sandboxed_import);
+            vm.builtins.set_attr("__import__", import, vm)?;
+            // Drop the interpreter's own modules from the import cache, which
+            // `import x` consults before calling __import__
+            vm.sys_module.set_attr("modules", vm.ctx.new_dict(), vm)?;
+            // No file access
+            vm.builtins.dict().del_item("open", vm)?;
+            Ok::<_, PyBaseExceptionRef>(())
+        })
+        .unwrap_or_else(|err| {
+            interpreter.enter(|vm| vm.print_exception(err));
+            panic!("failed to restrict the censor-script interpreter");
+        });
+    interpreter
+}
+
 impl TransportState {
     pub fn new(
         _model_config: HashMap<String, crate::config::model::Model>,
@@ -366,78 +573,38 @@ impl TransportState {
         conntrack: ConntrackConfig,
         model_sender: mpsc::SyncSender<ModelThreadMessage>,
     ) -> Result<Self, TransportStateInitError> {
-        // Initialize interpreter settings
-        let mut settings: Settings = Default::default();
-        //settings.isolated = true;
-        // Don't have the python subprograms implement sigint
-        settings.install_signal_handlers = false;
-        settings.hash_seed = Some(execution_config.hash_seed);
-        // Want to make sure nothing is passed
-        settings.argv = Vec::new();
-        // settings.stdio_unbuffered = true;
-        // -OO optimization
-        settings.optimize = 2;
-        // Initialize the interpreter
-        let vm = vm::Interpreter::with_init(settings, |vm| {
-            // Import the native rust module used to define the packet interface
-            vm.add_native_module("rust".to_owned(), Box::new(rust_packet::make_module));
-            // Import the native rust module used for dns parsing
-            vm.add_native_module("dns".to_owned(), Box::new(rust_dns::make_module));
-            // Import the native rust module used for TLS ClientHello parsing
-            vm.add_native_module("tls".to_owned(), Box::new(rust_tls::make_module));
-            // Import the native rust module used for QUIC Initial parsing
-            vm.add_native_module("quic".to_owned(), Box::new(rust_quic::make_module));
-        });
+        let vm = new_python_interpreter(execution_config.hash_seed);
         // Only compile the script as Python if we're in Python mode
         let python_script = match execution_config.mode {
             ExecutionMode::Python => execution_config.script.as_ref(),
             ExecutionMode::CensorLang => None,
         };
-        let (code, process) = if let Some(script_path) = python_script {
+        let code = if let Some(script_path) = python_script {
             let source = std::fs::read_to_string(script_path)
                 .map_err(TransportStateInitError::ReadScript)?;
-            // Do some initialization tasks, eventually returning the compiled code object
-            vm.enter(move |vm| {
-                // Import the native module so types work
-                vm.import("rust", 0)?;
-                vm.import("tls", 0)?;
-                let source = &source;
-                // Compile the given source code
+            let filename = script_path.display().to_string();
+            // Compile the script, then validate it once up front by running its
+            // module body in a throwaway scope: a broken script (exception in
+            // the module body, no callable `process`) fails here, at startup,
+            // instead of silently on every connection.
+            let validated = vm.enter(|vm| {
+                // Import the native modules so their types (Model, Packet,
+                // ClientHello, ...) are initialized before we construct any of them
+                vm.import("rust", 0).map_err(|err| format_exception(vm, &err))?;
+                vm.import("tls", 0).map_err(|err| format_exception(vm, &err))?;
                 let code = vm
-                    .compile(source, vm::compiler::Mode::Exec, "<embedded>".to_owned())
-                    .map_err(|err| vm.new_syntax_error(&err, Some(source)))?;
-                let process_source = "process(packet)";
-                let process = vm
-                    .compile(
-                        process_source,
-                        vm::compiler::Mode::Exec,
-                        "<embedded>".to_owned(),
-                    )
-                    .map_err(|err| vm.new_syntax_error(&err, Some(process_source)))?;
-                Ok((code, process))
-            })
-            .map_err(TransportStateInitError::PythonInit)?
+                    .compile(&source, vm::compiler::Mode::Exec, filename)
+                    .map_err(|err| format_exception(vm, &vm.new_syntax_error(&err, Some(&source))))?;
+                let scope = vm.new_scope_with_builtins();
+                init_python_scope(vm, code.clone(), &scope, model_sender.clone())?;
+                Ok::<_, String>(code)
+            });
+            Some(validated.map_err(|msg| TransportStateInitError::InvalidScript {
+                path: script_path.clone(),
+                msg,
+            })?)
         } else {
-            vm.enter(move |vm| {
-                // Import the native module so types work
-                vm.import("rust", 0)?;
-                vm.import("tls", 0)?;
-                let source = "";
-                // Compile the given source code
-                let code = vm
-                    .compile(source, vm::compiler::Mode::Exec, "<embedded>".to_owned())
-                    .map_err(|err| vm.new_syntax_error(&err, Some(source)))?;
-                let process_source = "";
-                let process = vm
-                    .compile(
-                        process_source,
-                        vm::compiler::Mode::Exec,
-                        "<embedded>".to_owned(),
-                    )
-                    .map_err(|err| vm.new_syntax_error(&err, Some(process_source)))?;
-                Ok((code, process))
-            })
-            .map_err(TransportStateInitError::PythonInit)?
+            None
         };
         // Load CensorLang program if in CensorLang mode
         let censorlang_program = match execution_config.mode {
@@ -461,7 +628,7 @@ impl TransportState {
             execution_mode: execution_config.mode,
             vm,
             code,
-            process,
+            on_script_error: execution_config.on_script_error,
             model_sender,
             censorlang_program,
             censorlang_config: ProgramConfig::default(),
@@ -509,16 +676,11 @@ impl TransportState {
             let env = match self.execution_mode {
                 ExecutionMode::Python => {
                     // New connection means we should initialize a new Python scope
-                    let scope = self
-                        .vm
-                        .enter(|vm| {
-                            // Initialize the scope
-                            let scope = vm.new_scope_with_builtins();
-                            // Return the scope
-                            Ok::<Scope, PyBaseExceptionRef>(scope)
-                        })
-                        .unwrap();
-                    ExecutionEnvironment::Python { scope }
+                    let scope = self.vm.enter(|vm| vm.new_scope_with_builtins());
+                    ExecutionEnvironment::Python {
+                        scope,
+                        state: PythonConnState::Uninitialized,
+                    }
                 }
                 ExecutionMode::CensorLang => {
                     let env = ProgramEnv::new(
@@ -586,10 +748,14 @@ impl TransportState {
             .expect("connection was inserted above");
         // If the connection is set up for a Python environment, use that
         let action = match env {
-            ExecutionEnvironment::Python { scope } => {
+            // Python mode without a script: nothing to run
+            ExecutionEnvironment::Python { .. } if self.code.is_none() => Action::None,
+            ExecutionEnvironment::Python { scope, state } => {
                 // Copy the code references
-                let code = self.code.clone();
-                let _process = self.process.clone();
+                let code = self.code.clone().expect("checked above");
+                let on_script_error = self.on_script_error;
+                let conn = ConnectionLabel::of(ips, &packet);
+                let conn_ref = &conn;
                 // Create a python-objectified version of the Packet struct
                 let transport = packet.transport;
                 let len = packet.payload.len();
@@ -621,46 +787,51 @@ impl TransportState {
                     // Add in the current packet as an object
                     let pkt = packet.to_pyobject(vm);
                     scope.locals.set_item(PACKET, pkt, vm)?;
-                    // Execute our censor program initialization
-                    if is_first_cl {
-                        if let Err(err) = vm.run_code_obj(code, scope.clone()) {
-                            error!("Error initializing environment: {:?}", err);
-                            vm.print_exception(err);
-                            return Ok(Action::None);
-                        }
-                        let model = PythonModel::new(sender);
-                        let model = model.to_pyobject(vm);
-                        scope.locals.set_item(MODEL, model, vm)?;
+                    // On the connection's first packet, run the module body and
+                    // look up `process`.  A failure is logged here, once; the
+                    // connection then gets the script-error policy on every packet.
+                    if let PythonConnState::Uninitialized = state {
+                        *state = match init_python_scope(vm, code, scope, sender) {
+                            Ok(process) => PythonConnState::Ready(process),
+                            Err(msg) => {
+                                error!(
+                                    "{conn_ref}: censor script failed to initialize; applying \
+                                     on_script_error = {on_script_error:?} to the whole connection:\n{msg}"
+                                );
+                                PythonConnState::Failed
+                            }
+                        };
                     }
                     // Run the per-packet code
-                    let action = if let Ok(process_function) = scope.locals.get_item(PROCESS, vm) {
-                        if let Some(process_callable) = process_function.to_callable() {
-                            if let Ok(pkt) = scope.locals.get_item(PACKET, vm) {
-                                match process_callable.invoke((pkt,), vm) {
-                                    Ok(result) => action_from_python(result, vm, ips, &transport, len),
-                                    Err(err) => {
-                                        error!("Error calling processing function: {:?}", err);
-                                        vm.print_exception(err);
-                                        Action::None
-                                    }
+                    let action = match state {
+                        PythonConnState::Ready(process) => {
+                            let pkt = scope.locals.get_item(PACKET, vm)?;
+                            match process.call((pkt,), vm) {
+                                Ok(result) => action_from_python(result, vm, ips, &transport, len),
+                                Err(err) => {
+                                    error!(
+                                        "{conn_ref}: process() raised; applying on_script_error = \
+                                         {on_script_error:?}:\n{}",
+                                        format_exception(vm, &err)
+                                    );
+                                    on_script_error.action()
                                 }
-                            } else {
-                                Action::None
                             }
-                        } else {
-                            Action::None
                         }
-                    } else {
-                        Action::None
+                        PythonConnState::Failed => on_script_error.action(),
+                        PythonConnState::Uninitialized => unreachable!("initialized above"),
                     };
-                    //let result = vm.run_code_obj(process, scope.clone())?;
                     // Finally, return that everything went fine
                     Ok::<_, PyBaseExceptionRef>(action)
                 }) {
                     Ok(action) => action,
                     Err(err) => {
-                        self.vm.enter(|vm| vm.print_exception(err));
-                        Action::None
+                        let msg = self.vm.enter(|vm| format_exception(vm, &err));
+                        error!(
+                            "{conn}: failed to set up the Python environment for this packet; \
+                             applying on_script_error = {on_script_error:?}:\n{msg}"
+                        );
+                        on_script_error.action()
                     }
                 }
             }
@@ -835,7 +1006,7 @@ impl TransportState {
         }
         self.vm.enter(|_vm| {
             for env in envs {
-                if let ExecutionEnvironment::Python { scope } = env {
+                if let ExecutionEnvironment::Python { scope, .. } = env {
                     scope.globals.clear();
                 }
             }
@@ -1011,6 +1182,65 @@ fn fill_udp(
 mod tests {
     use super::*;
     use smoltcp::wire::{EthernetAddress, Ipv4Address, Ipv6Address, TcpSeqNumber};
+
+    // --- Python environment tests ---
+
+    /// Run `source` in a fresh censor-script interpreter and return the
+    /// value of the global `result` (which the source must set to a bool).
+    fn run_python_bool(source: &str) -> bool {
+        let interp = new_python_interpreter(1337);
+        interp.enter(|vm| {
+            let scope = vm.new_scope_with_builtins();
+            if let Err(err) = vm.run_code_string(scope.clone(), source, "<test>".to_owned()) {
+                vm.print_exception(err);
+                panic!("test script raised");
+            }
+            let result = scope.globals.get_item("result", vm).expect("result not set");
+            result.try_to_bool(vm).expect("result not a bool")
+        })
+    }
+
+    #[test]
+    fn python_invalid_regex_raises_value_error() {
+        assert!(run_python_bool(
+            "from rust import regex\n\
+             try:\n    regex('(')\n    result = False\n\
+             except ValueError:\n    result = True\n"
+        ));
+    }
+
+    #[test]
+    fn python_model_errors_instead_of_hanging_when_model_thread_dies() {
+        // A "model thread" that takes one request and dies without replying
+        let (model_tx, model_rx) = mpsc::sync_channel::<ModelThreadMessage>(1);
+        std::thread::spawn(move || {
+            let _request = model_rx.recv();
+        });
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let interp = new_python_interpreter(1337);
+            let raised = interp.enter(|vm| {
+                vm.import("rust", 0).unwrap();
+                let scope = vm.new_scope_with_builtins();
+                let model = PythonModel::new(model_tx).to_pyobject(vm);
+                scope.globals.set_item(MODEL, model, vm).unwrap();
+                vm.run_code_string(scope, "model.evaluate('m', [1.0])", "<test>".to_owned())
+                    .is_err()
+            });
+            let _ = done_tx.send(raised);
+        });
+        let raised = done_rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("model.evaluate() hung after the model thread died");
+        assert!(raised, "model.evaluate() should raise when the model thread dies");
+    }
+
+    #[test]
+    fn python_valid_regex_matches() {
+        assert!(run_python_bool(
+            "from rust import regex\nresult = regex('^ab+c').is_match(b'abbbc')\n"
+        ));
+    }
 
     // --- ConnectionKey tests ---
 

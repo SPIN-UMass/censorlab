@@ -2788,6 +2788,24 @@ mod tests {
     }
 
     #[test]
+    fn empty_payload_features_are_zero_not_nan() {
+        // Entropy, popcount and printable fraction must all be 0.0 for an
+        // empty payload; NaN would silently poison comparisons and model inputs.
+        let pkt = make_tcp_packet(&[]);
+        for field in [
+            field::Field::PayloadEntropy,
+            field::Field::PayloadAveragePopcount,
+            field::Field::PayloadPrintableFraction,
+        ] {
+            let result = field.eval(&pkt, &default_env_fields(), false).unwrap();
+            assert!(
+                matches!(result, Value::Float(f) if f == 0.0),
+                "{field:?} on empty payload gave {result:?}"
+            );
+        }
+    }
+
+    #[test]
     fn field_payload_average_popcount_all_ones() {
         let pkt = make_tcp_packet(&[0xFF, 0xFF, 0xFF]);
         let field = field::Field::PayloadAveragePopcount;

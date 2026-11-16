@@ -1794,6 +1794,110 @@ fn test_censorlang_direction_field() {
 }
 
 // ==========================================================================
+// Tests: broken censor scripts fail loudly
+// ==========================================================================
+
+/// A three-frame TCP handshake + data pcap used by the broken-script tests.
+fn simple_tcp_pcap(tmp: &TempDir) -> PathBuf {
+    let pcap_path = tmp.path().join("test.pcap");
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    PcapBuilder::new()
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_SYN, 100, 0, &[]))
+        .add_frame(&tcp_frame(server, client, 80, 50000, TCP_SYN | TCP_ACK, 200, 101, &[]))
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"hello"))
+        .write_to(&pcap_path);
+    pcap_path
+}
+
+/// Run a Python censor script (with optional extra [execution] lines) over
+/// `simple_tcp_pcap`.
+fn run_python_script(script: &str, extra_execution: &str) -> common::runner::RunResult {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = simple_tcp_pcap(&tmp);
+    let config_str = format!(
+        "[execution]\nmode = \"Python\"\nscript = \"censor.py\"\n{extra_execution}\n"
+    );
+    let config_path = write_temp_config(&tmp, &config_str);
+    write_temp_script(&tmp, "censor.py", script);
+    run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1")
+}
+
+#[test]
+fn test_python_module_error_fails_at_startup() {
+    let result = run_python_script("raise RuntimeError('boom in module body')\n", "");
+    assert_ne!(result.exit_code, 0, "stdout: {}\nstderr: {}", result.stdout, result.stderr);
+    let output = format!("{}{}", result.stdout, result.stderr);
+    assert!(output.contains("boom in module body"), "output: {output}");
+}
+
+#[test]
+fn test_python_missing_process_fails_at_startup() {
+    let result = run_python_script("def proces(packet):\n    return 'drop'\n", "");
+    assert_ne!(result.exit_code, 0, "stdout: {}\nstderr: {}", result.stdout, result.stderr);
+    let output = format!("{}{}", result.stdout, result.stderr);
+    assert!(output.contains("process"), "output: {output}");
+}
+
+#[test]
+fn test_python_non_callable_process_fails_at_startup() {
+    let result = run_python_script("process = 5\n", "");
+    assert_ne!(result.exit_code, 0, "stdout: {}\nstderr: {}", result.stdout, result.stderr);
+}
+
+#[test]
+fn test_python_syntax_error_fails_at_startup() {
+    let result = run_python_script("def process(packet)\n    return 'drop'\n", "");
+    assert_ne!(result.exit_code, 0, "stdout: {}\nstderr: {}", result.stdout, result.stderr);
+}
+
+/// Body that passes startup validation (no `packet` defined there) but raises
+/// when a connection is set up (`packet` is defined).
+const FAILS_PER_CONNECTION: &str = "\
+try:
+    packet
+    raise RuntimeError('boom at connection setup')
+except NameError:
+    pass
+
+def process(packet):
+    return 'drop'
+";
+
+#[test]
+fn test_python_connection_setup_error_is_logged_once() {
+    let result = run_python_script(FAILS_PER_CONNECTION, "");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let output = format!("{}{}", result.stdout, result.stderr);
+    // One connection, three packets: logged exactly once, and fail-open by default
+    assert_eq!(
+        output.matches("RuntimeError: boom at connection setup").count(),
+        1,
+        "output: {output}"
+    );
+    assert!(result.action_lines.is_empty(), "actions: {:?}", result.action_lines);
+}
+
+#[test]
+fn test_python_script_error_policy_drop() {
+    let result = run_python_script(FAILS_PER_CONNECTION, "on_script_error = \"Drop\"");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 3, "actions: {:?}", result.action_lines);
+    assert!(result.action_lines.iter().all(|l| l.action.contains("Drop")));
+}
+
+#[test]
+fn test_python_process_exception_logged_with_connection() {
+    let script = "def process(packet):\n    raise ValueError('boom in process')\n";
+    let result = run_python_script(script, "");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let output = format!("{}{}", result.stdout, result.stderr);
+    assert_eq!(output.matches("ValueError: boom in process").count(), 3, "output: {output}");
+    assert!(output.contains("10.0.0.1"), "connection info missing: {output}");
+    assert!(result.action_lines.is_empty(), "actions: {:?}", result.action_lines);
+}
+
+// ==========================================================================
 // demos/model: ONNX classifier over the first 10 (payload_len, direction)
 // pairs of a connection
 // ==========================================================================

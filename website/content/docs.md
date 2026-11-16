@@ -226,6 +226,7 @@ Controls which scripting engine to use and global execution parameters. The whol
 | `script`        | string   | *(none)*   | Path to the censor script (relative to config file) |
 | `hash_seed`     | integer  | `1337`     | Hash seed for Python VM reproducibility |
 | `reset_repeat`  | integer  | `5`        | Number of times to repeat sending a TCP RST packet |
+| `on_script_error` | string | `"Allow"` | Python mode: what to do with a packet when the script raises (`"Allow"` or `"Drop"`). Failures are always logged; a script whose module body raises or that lacks a callable `process` is rejected at startup |
 
 ## Layer Filtering
 

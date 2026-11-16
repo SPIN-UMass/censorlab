@@ -2,7 +2,7 @@ use censorlab::censor::args::SubCmd;
 use censorlab::censor::{Censor, CensorError, CensorInitError};
 use censorlab::config::{Config, ConfigLoadError};
 use censorlab::ipc::IPC_DEFAULT_PORT;
-use censorlab::model::{start_model_thread, ModelThreadMessage};
+use censorlab::model::{start_model_thread, ModelLoadError, ModelThreadMessage};
 use censorlab::program::analysis::ProgramAnalysis;
 use censorlab::program::program::Program;
 use clap::Parser;
@@ -115,6 +115,8 @@ enum CensorlabError {
     Config(#[from] ConfigLoadError),
     #[error("Failed to do something with ONNX: {0}")]
     EnvironmentBuild(#[from] OrtError),
+    #[error("Failed to load models: {0}")]
+    ModelLoad(#[from] ModelLoadError),
     #[error("Failed to initialize censor: {0}")]
     CensorInit(#[from] CensorInitError),
     #[error("Failed to analyse program: {0}")]
