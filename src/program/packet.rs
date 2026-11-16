@@ -789,17 +789,10 @@ pub mod rust_packet {
     #[derive(Debug, PyPayload)]
     pub struct Model {
         sender: mpsc::SyncSender<ModelThreadMessage>,
-        return_recv: mpsc::Receiver<Result<Vec<f64>, ModelThreadError>>,
-        return_sender: mpsc::SyncSender<Result<Vec<f64>, ModelThreadError>>,
     }
     impl Model {
         pub fn new(sender: mpsc::SyncSender<ModelThreadMessage>) -> Self {
-            let (return_sender, return_recv) = mpsc::sync_channel(1);
-            Self {
-                sender,
-                return_recv,
-                return_sender,
-            }
+            Self { sender }
         }
     }
     #[pyclass]
@@ -811,8 +804,10 @@ pub mod rust_packet {
             data: Vec<f32>,
             vm: &VirtualMachine,
         ) -> PyResult<PyListRef> {
-            // Clone the return channel
-            let response_channel = self.return_sender.clone();
+            // A fresh reply channel per request: we hold no sender for it, so
+            // if the model thread dies, recv() sees the disconnect and errors
+            // instead of blocking forever
+            let (response_channel, return_recv) = mpsc::sync_channel::<Result<Vec<f64>, ModelThreadError>>(1);
             // Send the data over the channel, along with a return address
             self.sender
                 .send(ModelThreadMessage::Request {
@@ -822,8 +817,7 @@ pub mod rust_packet {
                 })
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
             // Receive a new value
-            let out = self
-                .return_recv
+            let out = return_recv
                 .recv()
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;

@@ -91,7 +91,9 @@
           # Build-artifact-free test/lint runs: `nix build .#checks.<system>.tests`
           checks =
             let
-              # Integration tests load demo configs, so include demos/ and tests/
+              # Integration tests load demo configs, so include demos/ and tests/,
+              # plus the experiments' censor scripts/configs/models (tests check
+              # they load in the sandboxed interpreter)
               testSrc = pkgs.lib.fileset.toSource {
                 root = ./.;
                 fileset = pkgs.lib.fileset.unions [
@@ -99,6 +101,10 @@
                   (pkgs.lib.fileset.fileFilter (f: f.hasExt "lalrpop") ./src)
                   ./tests
                   ./demos
+                  (pkgs.lib.fileset.fileFilter
+                    (f: builtins.elem f.name [ "censor.py" "censor.toml" "model.onnx" ])
+                    ./experiments)
+                  ./experiments/07_benchmarks/censors
                 ];
               };
               checkArgs = common_args // {

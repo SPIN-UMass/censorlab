@@ -919,6 +919,32 @@ mod tests {
     }
 
     #[test]
+    fn python_model_errors_instead_of_hanging_when_model_thread_dies() {
+        // A "model thread" that takes one request and dies without replying
+        let (model_tx, model_rx) = mpsc::sync_channel::<ModelThreadMessage>(1);
+        std::thread::spawn(move || {
+            let _request = model_rx.recv();
+        });
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let interp = new_python_interpreter(1337);
+            let raised = interp.enter(|vm| {
+                vm.import("rust", 0).unwrap();
+                let scope = vm.new_scope_with_builtins();
+                let model = PythonModel::new(model_tx).to_pyobject(vm);
+                scope.globals.set_item(MODEL, model, vm).unwrap();
+                vm.run_code_string(scope, "model.evaluate('m', [1.0])", "<test>".to_owned())
+                    .is_err()
+            });
+            let _ = done_tx.send(raised);
+        });
+        let raised = done_rx
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("model.evaluate() hung after the model thread died");
+        assert!(raised, "model.evaluate() should raise when the model thread dies");
+    }
+
+    #[test]
     fn python_valid_regex_matches() {
         assert!(run_python_bool(
             "from rust import regex\nresult = regex('^ab+c').is_match(b'abbbc')\n"
