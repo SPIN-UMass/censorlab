@@ -1356,14 +1356,51 @@ pub mod rust_quic {
         VirtualMachine,
     };
     use std::io;
+    use std::sync::Mutex;
 
-    /// Parse a QUIC Initial packet from raw UDP payload.
+    /// Parse a QUIC Initial packet from raw UDP payload (single datagram).
     #[pyfunction]
     fn parse_initial(bytes: PyBytesRef, vm: &VirtualMachine) -> PyResult<QuicInitialInfo> {
         let bytes = bytes.as_ref();
         let info = quic::parse_quic_initial(bytes)
             .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
         Ok(QuicInitialInfo { inner: info })
+    }
+
+    /// Create a QUIC client Initial reassembler. Keep one per connection
+    /// (e.g. a module-level variable in the censor script, which is
+    /// per-connection) to recover ClientHellos that span several datagrams.
+    #[pyfunction]
+    fn new_reassembler() -> InitialReassembler {
+        InitialReassembler {
+            inner: Mutex::new(quic::ClientInitialReassembler::new()),
+        }
+    }
+
+    #[pyattr]
+    #[pyclass(module = "quic", name = "InitialReassembler")]
+    #[derive(PyPayload)]
+    pub struct InitialReassembler {
+        inner: Mutex<quic::ClientInitialReassembler>,
+    }
+    impl std::fmt::Debug for InitialReassembler {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("InitialReassembler")
+        }
+    }
+    #[pyclass]
+    impl InitialReassembler {
+        /// Feed one UDP payload. Returns the connection info (with `sni` set
+        /// once the full ClientHello has been seen); raises on anything that
+        /// is not a valid client Initial, leaving the state unchanged.
+        #[pymethod]
+        fn feed(&self, bytes: PyBytesRef, vm: &VirtualMachine) -> PyResult<QuicInitialInfo> {
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            let info = inner
+                .feed(bytes.as_ref())
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
+            Ok(QuicInitialInfo { inner: info })
+        }
     }
 
     #[pyattr]
