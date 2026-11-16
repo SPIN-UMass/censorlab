@@ -152,6 +152,14 @@ censorlab -c censor.toml wire <WAN_INTERFACE> <CLIENT_INTERFACE> [OPTIONS]
 | `--wan-packets <NUM>` | `1` | Max packets from WAN before polling client |
 | `--client-packets <NUM>` | `1` | Max packets from client before polling WAN |
 
+### Analyze (static analysis)
+
+Statically analyzes a CensorLang program and reports its per-connection/per-host memory and worst-case per-packet operation counts. No traffic is processed and no config is needed.
+
+```bash
+censorlab analyze <PROGRAM.cl> [--json]
+```
+
 ## Packet Processing Pipeline
 
 Packets flow through a layered processing pipeline. Each layer can allow, drop, reset, or ignore packets before they reach the censor script:
@@ -210,7 +218,7 @@ CensorLab is configured via TOML files, passed with the `-c` flag. Paths to scri
 
 ## `[execution]`
 
-Controls which scripting engine to use and global execution parameters.
+Controls which scripting engine to use and global execution parameters. The whole section is optional: a config containing only allow/blocklists is valid.
 
 | Key             | Type     | Default    | Description |
 |-----------------|----------|------------|-------------|
@@ -296,9 +304,9 @@ Actions control what happens to a packet at a given processing layer.
 | `"None"`   | Continue processing through subsequent layers |
 | `"Ignore"` | Forward the packet immediately, skip further processing |
 | `"Drop"`   | Silently drop the packet |
-| `"Reset"`  | Send TCP RST packets in both directions (only valid for TCP-layer lists) |
+| `"Reset"`  | Send TCP RST packets in both directions (only meaningful for TCP-layer lists) |
 
-`"Reset"` is only valid on `[tcp]` lists. Using it on `[ethernet]`, `[arp]`, `[ip]`, or `[icmp]` sections will produce a validation error.
+`"Reset"` is only meaningful on `[tcp]` lists. On `[ip]` lists it is accepted but downgraded to `"Drop"` at runtime (with a warning). Using it on `[ethernet]`, `[arp]`, or `[icmp]` sections produces a validation error.
 
 ## Example Configuration
 
@@ -374,6 +382,8 @@ The `process()` function should return one of:
 | `"drop"`       | Drop the packet silently |
 | `"reset"`      | Send TCP RST in both directions (falls back to `"drop"` for non-TCP) |
 | `bytes`        | Inject a forged UDP response (e.g., DNS poisoning) while allowing the original packet through |
+| `("delay", seconds)` | Hold the packet for `seconds` (non-negative number) before releasing it. NFQ mode only; PCAP mode reports the decision, wire mode forwards the packet unchanged |
+| `("rewrite", {"ttl": n})` | Forward a copy of the packet with the IP TTL / hop limit set to `n` (0–255) |
 
 Returning raw `bytes` triggers packet injection — CensorLab constructs a UDP response packet with the returned bytes as payload and sends it back to the client, while the original packet is forwarded normally. This is used for techniques like DNS poisoning where the censor races a forged response against the legitimate one. See `dns.craft_response()` below.
 
@@ -394,6 +404,7 @@ The `packet` object is passed to `process()` and provides read-only access to pa
 | `packet.payload_entropy`| `float`         | Shannon entropy of the payload, scaled 0.0–1.0 |
 | `packet.payload_avg_popcount` | `float`   | Average number of set bits per byte (0.0–8.0) |
 | `packet.tls_client_hello` | `ClientHelloInfo` or `None` | The connection's TLS ClientHello, reassembled across TCP segments and TLS records. `None` until it has fully arrived (see [TLS Module](#tls-module)) |
+| `packet.payload_printable_fraction` | `float` | Fraction of payload bytes that are printable ASCII (0x20–0x7e) |
 | `packet.ip`             | `IpPacket`      | IP layer metadata |
 | `packet.tcp`            | `TcpPacket` or `None` | TCP metadata (None if not TCP) |
 | `packet.udp`            | `UdpPacket` or `None` | UDP metadata (None if not UDP) |
