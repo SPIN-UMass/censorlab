@@ -1272,10 +1272,8 @@ if field:transport.payload.entropy > 0.9 : RETURN terminate
 mode = "CensorLang"
 script = "censor.cl"
 
-[execution.program]
+[execution.censorlang]
 num_registers = 16
-
-[execution.env]
 field_default_on_error = true
 "#;
     let config_path = write_temp_config(&tmp, config_str);
@@ -1309,6 +1307,63 @@ field_default_on_error = true
         assert!(
             !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
             "frame {i} should not be dropped (client_b has no flag)"
+        );
+    }
+}
+
+// ==========================================================================
+// Test: CensorLang host registers belong to the connection's client, so
+// packets in both directions of a connection share one bank
+// ==========================================================================
+
+#[test]
+fn test_censorlang_host_registers_keyed_on_client() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let client_b = [10, 0, 0, 2];
+    let server = [93, 184, 216, 34];
+    const TCP_SYN_ACK: u8 = 0x12;
+
+    PcapBuilder::new()
+        // Connection A: the client's 5-byte payload flags the client (frames 0-1)
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_SYN, 100, 0, &[]))
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_PSH_ACK, 101, 201, b"hello"))
+        // Connection B from the same client: the server's SYN-ACK must see the
+        // client's flag (frames 2-3)
+        .add_frame(&tcp_frame(client, server, 50001, 80, TCP_SYN, 300, 0, &[]))
+        .add_frame(&tcp_frame(server, client, 80, 50001, TCP_SYN_ACK, 400, 301, &[]))
+        // Connection from client_b: not flagged (frames 4-5)
+        .add_frame(&tcp_frame(client_b, server, 50000, 80, TCP_SYN, 500, 0, &[]))
+        .add_frame(&tcp_frame(server, client_b, 80, 50000, TCP_SYN_ACK, 600, 501, &[]))
+        .write_to(&pcap_path);
+
+    // Only server-sent packets are judged, on the client's host register
+    let cl_script = "\
+if field:tcp.payload.len == 5 : COPY True -> hreg:b.0
+if field:tcp.src != 80 : RETURN allow
+if hreg:b.0 == True : RETURN terminate
+";
+    let config_str = r#"
+[execution]
+mode = "CensorLang"
+script = "censor.cl"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.cl", cl_script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert!(
+        result.action_lines.iter().any(|l| l.packet_index == frame_idx(3) && l.action.contains("Drop")),
+        "server's SYN-ACK to the flagged client should be dropped: {:?}",
+        result.action_lines.iter().map(|l| (l.packet_index, &l.action)).collect::<Vec<_>>()
+    );
+    for i in [0, 1, 2, 4, 5] {
+        assert!(
+            !result.action_lines.iter().any(|l| l.packet_index == frame_idx(i)),
+            "frame {i} should not be dropped"
         );
     }
 }

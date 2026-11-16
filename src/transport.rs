@@ -108,6 +108,10 @@ pub struct ConnectionInfo {
     is_first: bool,
     /// Reassembles the client's TLS ClientHello across segments
     client_hello: ClientHelloAssembler,
+    /// The connection's client: the sender of the first packet seen on it
+    /// (the SYN sender for TCP connections observed from the start).
+    /// CensorLang host registers (`hreg`) are this host's.
+    client_ip: IpAddress,
 }
 
 #[derive(Debug, Error)]
@@ -417,10 +421,12 @@ impl TransportState {
         );
         let new_key = key.clone();
         // Get a reference to the tracker's packet list
+        let first_sender = ips.src();
         let ConnectionInfo {
             is_first,
             env,
             client_hello,
+            client_ip,
         } =
             self.connections.entry(new_key).or_insert_with(|| {
                 // Initialize the per-connection state
@@ -449,13 +455,14 @@ impl TransportState {
                     },
                     is_first: true,
                     client_hello: ClientHelloAssembler::new(),
+                    client_ip: first_sender,
                 }
             });
         // Track the client's ClientHello across segments so programs see it once complete
         if let TransportMetadataExtra::Tcp(tcp) = packet.transport.extra {
             client_hello.observe(
                 (ips.src(), packet.transport.src),
-                tcp.seq.0 as u32,
+                tcp.seq_number(),
                 tcp.flags.syn,
                 tcp.flags.ack,
                 &packet.payload,
@@ -593,7 +600,11 @@ impl TransportState {
                 // Get the program (should always exist in CensorLang mode)
                 if let Some(ref program) = self.censorlang_program {
                     let field_default_on_error = self.censorlang_config.env.field_default_on_error;
-                    let host = self.host_states.get_mut(&src_ip).unwrap();
+                    // Host registers are keyed on the connection's client, so both
+                    // directions of a connection share one bank (the counters
+                    // above stay keyed on the packet's sender, like PyCL's `host`).
+                    // Both endpoints' host states were ensured above.
+                    let host = self.host_states.get_mut(&*client_ip).unwrap();
                     let program_action = env.process(
                         &packet,
                         program,

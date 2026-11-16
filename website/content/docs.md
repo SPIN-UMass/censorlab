@@ -895,6 +895,8 @@ Registers are per-connection persistent storage, organized into three typed bank
 | `reg:i.N`| int   | `0`           |
 | `reg:b.N`| bool  | `false`       |
 
+Host registers (`hreg:f.N`, `hreg:i.N`, `hreg:b.N`) have the same three banks but are shared by every connection of a host and persist across connections. They belong to the connection's *client* (the sender of the first packet seen on the connection, i.e. the SYN sender for TCP), so packets in both directions of a connection read and write the client's bank. (The `host.*`/`dst_host.*` counter fields, like PyCL's `host`/`dst_host`, instead refer to the packet's sender and receiver.)
+
 The default bank size is 16 registers per type (`num_registers`). Writing a value to a register of the wrong type, or using an index outside the bank, is rejected when the program is loaded (type mismatches are allowed if `relax_register_types` is enabled).
 
 ## Fields
