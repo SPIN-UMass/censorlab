@@ -639,6 +639,9 @@ const IPV4_HEADER_LEN: u8 = 20;
 const IPV6_HEADER_LEN: u8 = 40;
 const TCP_HEADER_LEN: u8 = 20;
 const UDP_HEADER_LEN: u8 = 8;
+/// IPv6 hop limit for injected packets (matches the IPv4 TTL of 64; a zero
+/// hop limit is discarded by the first router).
+const INJECTED_HOP_LIMIT: u8 = 64;
 
 pub fn construct_reset(
     src_mac: EthernetAddress,
@@ -690,6 +693,7 @@ pub fn construct_reset(
             // Set the length to the length of a TCP header
             ip_packet.set_payload_len(TCP_HEADER_LEN.into());
             ip_packet.set_version(6);
+            ip_packet.set_hop_limit(INJECTED_HOP_LIMIT);
             // Make sure the length is good
             ip_packet.check_len()?;
             // Store the source and dst ip addresess
@@ -767,6 +771,7 @@ pub fn construct_udp_inject(
             let mut ip_packet = Ipv6Packet::new_unchecked(eth_packet.payload_mut());
             ip_packet.set_payload_len(udp_total_len as u16);
             ip_packet.set_version(6);
+            ip_packet.set_hop_limit(INJECTED_HOP_LIMIT);
             ip_packet.check_len()?;
             ip_packet.set_src_addr(src);
             ip_packet.set_dst_addr(dst);
@@ -933,5 +938,49 @@ mod tests {
         assert_eq!(tcp.dst_port(), 50000);
         assert!(tcp.rst());
         assert!(tcp.ack());
+    }
+
+    // --- IPv6 hop limit (a zeroed hop limit is discarded by the first router) ---
+
+    fn v6_pair() -> IpPair {
+        IpPair::V6 {
+            src: Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+            dst: Ipv6Address::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2),
+        }
+    }
+
+    #[test]
+    fn construct_reset_ipv6_sets_hop_limit() {
+        let pkt = construct_reset(
+            EthernetAddress([0; 6]),
+            EthernetAddress([0; 6]),
+            v6_pair(),
+            None,
+            443,
+            50000,
+            TcpSeqNumber(1),
+            TcpSeqNumber(2),
+        )
+        .unwrap();
+        let eth = EthernetFrame::new_checked(&pkt[..]).unwrap();
+        let ip = Ipv6Packet::new_checked(eth.payload()).unwrap();
+        assert_eq!(ip.hop_limit(), 64);
+    }
+
+    #[test]
+    fn construct_udp_inject_ipv6_sets_hop_limit() {
+        let pkt = construct_udp_inject(
+            EthernetAddress([0; 6]),
+            EthernetAddress([0; 6]),
+            v6_pair(),
+            53,
+            40000,
+            b"forged",
+        )
+        .unwrap();
+        let eth = EthernetFrame::new_checked(&pkt[..]).unwrap();
+        let ip = Ipv6Packet::new_checked(eth.payload()).unwrap();
+        assert_eq!(ip.hop_limit(), 64);
+        assert_eq!(ip.next_header(), IpProtocol::Udp);
     }
 }
