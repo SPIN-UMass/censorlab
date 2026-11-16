@@ -158,7 +158,7 @@ pub enum ExecutionEnvironment {
 /// None                         -> continue (Action::None)
 /// "allow" | "drop" | "reset"   -> the named action
 /// bytes                        -> inject these bytes as a UDP response
-/// ("delay",   seconds: number) -> hold the packet for `seconds` (Tap/NFQ mode)
+/// ("delay",   seconds: number) -> hold the packet for `seconds` (NFQ; wire forwards)
 /// ("rewrite", {"ttl": int})    -> forward a copy with the IP TTL/hop limit set
 /// ```
 ///

@@ -202,8 +202,9 @@ impl Censor {
                             warn!("Reset action in wire mode: dropping packet (TCP RST injection not yet supported)");
                             Ok(ForwardFramesResult::Success)
                         }
-                        Action::Inject { .. } => {
-                            warn!("Inject action in wire mode: forwarding packet (UDP injection not yet supported)");
+                        // Neither has wire-mode support yet: forward the frame unchanged
+                        action @ (Action::Inject { .. } | Action::Delay(_)) => {
+                            warn!("Unsupported in wire mode, forwarding packet instead of: {action}");
                             if let Some(dest_tx) =
                                 dest_interface.transmit(SmoltcpInstant::from_micros_const(0))
                             {
@@ -222,12 +223,6 @@ impl Censor {
                             } else {
                                 Err(SmoltcpError)
                             }
-                        }
-                        Action::Delay(_instant) => {
-                            // Wire mode doesn't have async delay infrastructure like NFQ mode.
-                            // Drop the packet with a warning.
-                            warn!("Delay action in wire mode: dropping packet (delay not supported)");
-                            Ok(ForwardFramesResult::Success)
                         }
                         Action::Rewrite(rewrite) => {
                             // Forward a mutated copy of the frame
