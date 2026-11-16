@@ -2,8 +2,10 @@
 # run.sh — static cost bounds for every CensorLang program in programs.conf.
 #
 # Uses `censorlab analyze --json`, which derives from the program text alone:
-#   * per-connection state (registers touched + fixed engine counters, bytes)
-#   * per-host state (host registers, bytes)
+#   * per-connection state, bytes: allocated (full register banks + model
+#     buffers + engine state) and touched (registers the program uses instead
+#     of the full banks)
+#   * per-host state (host registers touched / allocated, bytes)
 #   * worst-case per-packet operation counts (loop-free: each line at most once)
 #   * number of regex evaluations (each linear in payload length) and model calls
 #
@@ -27,9 +29,14 @@ while IFS= read -r line || [ -n "$line" ]; do
         echo "programs.conf:$lineno: unrecognized line: $line" >&2
         exit 1
     fi
+    # Analyse under the config the program ships with (its [execution.censorlang]
+    # limits and [models]), as the engine would load it
+    cfg="$(dirname "$REPO_ROOT/$path")/censor_lang.toml"
+    cfg_args=()
+    [[ -f "$cfg" ]] && cfg_args=(-c "$cfg")
     echo "--- $name ($path) ---"
-    censorlab analyze "$REPO_ROOT/$path" | sed 's/^/  /'
-    censorlab analyze --json "$REPO_ROOT/$path" > "$RESULTS/$name.json"
+    censorlab "${cfg_args[@]}" analyze "$REPO_ROOT/$path" | sed 's/^/  /'
+    censorlab "${cfg_args[@]}" analyze --json "$REPO_ROOT/$path" > "$RESULTS/$name.json"
 done < "$EXP_DIR/programs.conf"
 
 python3 "$SCRIPT_DIR/analyze.py"

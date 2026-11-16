@@ -4,7 +4,7 @@ use censorlab::config::{Config, ConfigLoadError};
 use censorlab::ipc::IPC_DEFAULT_PORT;
 use censorlab::model::{start_model_thread, ModelThreadMessage};
 use censorlab::program::analysis::ProgramAnalysis;
-use censorlab::program::program::Program;
+use censorlab::program::check::ModelSignatures;
 use clap::Parser;
 use ort::Error as OrtError;
 use std::path::PathBuf;
@@ -53,14 +53,20 @@ async fn main() -> Result<(), CensorlabError> {
         .finish();
     // Set the global subscriber
     tracing::subscriber::set_global_default(subscriber)?;
-    // Static analysis needs no config, model thread or censor
+    // Static analysis needs no model thread or censor.  The config is optional:
+    // with -c the program is checked against its [execution.censorlang]
+    // settings and [models]; otherwise against the defaults (model names are
+    // then not checked).
     if let SubCmd::Analyze { program, json } = &args.sub_cmd {
         let source = std::fs::read_to_string(program)
             .map_err(|e| CensorlabError::Analyze(format!("{}: {e}", program.display())))?;
-        let parsed: Program = source
-            .parse()
-            .map_err(|e: String| CensorlabError::Analyze(format!("{}: {e}", program.display())))?;
-        let analysis = ProgramAnalysis::of(&parsed, Some(&source));
+        let config = args.config_path.as_ref().map(Config::load).transpose()?;
+        let models: Option<ModelSignatures> = config
+            .as_ref()
+            .map(|c| c.models.keys().map(|name| (name.clone(), None)).collect());
+        let censorlang = config.map(|c| c.execution.censorlang).unwrap_or_default();
+        let analysis = ProgramAnalysis::from_source(&source, &censorlang, models.as_ref())
+            .map_err(|e| CensorlabError::Analyze(format!("{}: {e}", program.display())))?;
         if *json {
             println!("{}", serde_json::to_string_pretty(&analysis).map_err(|e| CensorlabError::Analyze(e.to_string()))?);
         } else {

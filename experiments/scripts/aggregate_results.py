@@ -234,14 +234,19 @@ def static_analysis_macros(static):
     lines.append("% Experiment 9: CensorLang static cost bounds")
     lines.append("% ============================================================")
     lines.append("% Command format: \\Static<Program><Metric>")
-    lines.append("% Metrics: Lines, ConnBytes (per-connection state incl. engine counters),")
-    lines.append("%          HostBytes, Ops (worst-case constant-time ops per packet),")
+    lines.append("% Metrics: Lines, ConnBytes (per-connection state the engine allocates:")
+    lines.append("%          full register banks + model buffers + engine state),")
+    lines.append("%          ConnTouchedBytes (same, counting only registers the program uses),")
+    lines.append("%          HostBytes (host registers the program uses),")
+    lines.append("%          Ops (worst-case constant-time ops per packet),")
     lines.append("%          Regex (regex evaluations per packet), ModelCalls")
     lines.append("")
     for program, r in static.items():
         base = f"Static{sanitize_cmd(program)}"
         lines.append(f"\\newcommand{{\\{base}Lines}}{{{r['lines']}}}")
         lines.append(f"\\newcommand{{\\{base}ConnBytes}}{{{r['per_connection_bytes']}}}")
+        if "per_connection_touched_bytes" in r:
+            lines.append(f"\\newcommand{{\\{base}ConnTouchedBytes}}{{{r['per_connection_touched_bytes']}}}")
         lines.append(f"\\newcommand{{\\{base}HostBytes}}{{{r['per_host_register_bytes']}}}")
         lines.append(f"\\newcommand{{\\{base}Ops}}{{{r['constant_ops']}}}")
         lines.append(f"\\newcommand{{\\{base}Regex}}{{{r['regex_evaluations']}}}")
