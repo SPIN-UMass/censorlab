@@ -1171,8 +1171,8 @@ pub mod field {
                         match self {
                             SrcPort => Ok(Value::Int(packet.transport.src.into())),
                             DstPort => Ok(Value::Int(packet.transport.dst.into())),
-                            Seq => Ok(Value::Int(tcp_metadata.seq.0.into())),
-                            Ack => Ok(Value::Int(tcp_metadata.ack.0.into())),
+                            Seq => Ok(Value::Int(tcp_metadata.seq_number().into())),
+                            Ack => Ok(Value::Int(tcp_metadata.ack_number().into())),
                             Flag(flag) => Ok(flag.eval(&tcp_metadata.flags)),
                             Length => {
                                 let total_len: u32 = (usize::from(tcp_metadata.header_len)
@@ -2406,6 +2406,19 @@ mod tests {
         };
         let val = field::ip::Field::V4(field::ip::V4Field::DontFrag).eval(&v6, true).unwrap();
         assert!(matches!(val, Value::Bool(false)), "{val:?}");
+    }
+
+    #[test]
+    fn field_tcp_seq_ack_non_negative() {
+        let mut pkt = make_tcp_packet(b"");
+        if let TransportMetadataExtra::Tcp(ref mut tcp) = pkt.transport.extra {
+            tcp.seq = TcpSeqNumber(-1);
+            tcp.ack = TcpSeqNumber(i32::MIN);
+        }
+        let seq = field::tcp::Field::Seq.eval(&pkt, false).unwrap();
+        let ack = field::tcp::Field::Ack.eval(&pkt, false).unwrap();
+        assert!(matches!(seq, Value::Int(4294967295)), "{seq:?}");
+        assert!(matches!(ack, Value::Int(2147483648)), "{ack:?}");
     }
 
     #[test]

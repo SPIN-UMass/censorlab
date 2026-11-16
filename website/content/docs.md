@@ -439,8 +439,8 @@ Accessed via `packet.tcp`. Returns `None` if the packet is not TCP.
 |---------------|------------|-------------|
 | `.src`        | `int`      | Source port |
 | `.dst`        | `int`      | Destination port |
-| `.seq`        | `int`      | Sequence number |
-| `.ack`        | `int`      | Acknowledgement number |
+| `.seq`        | `int`      | Sequence number (unsigned, 0 to 2^32-1) |
+| `.ack`        | `int`      | Acknowledgement number (unsigned, 0 to 2^32-1) |
 | `.header_len` | `int`      | TCP header length in bytes |
 | `.urgent_at`  | `int`      | Urgent pointer |
 | `.window_len` | `int`      | Window size |
@@ -918,8 +918,8 @@ Fields read packet metadata. Accessing a field from the wrong protocol (e.g. `fi
 
 | Field                  | Type | Description |
 |------------------------|------|-------------|
-| `field:tcp.seq`        | int  | Sequence number |
-| `field:tcp.ack`        | int  | Acknowledgement number |
+| `field:tcp.seq`        | int  | Sequence number (unsigned, 0 to 2^32-1) |
+| `field:tcp.ack`        | int  | Acknowledgement number (unsigned, 0 to 2^32-1) |
 | `field:tcp.len`        | int  | Total TCP segment length (header + payload) |
 | `field:tcp.header.len` | int  | TCP header length |
 | `field:tcp.payload.len`| int  | TCP payload length |
