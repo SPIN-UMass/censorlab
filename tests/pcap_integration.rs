@@ -1,9 +1,9 @@
 mod common;
 
 use common::packet_builder::{
-    dns_query, high_entropy_payload, http_get, quic_initial_packet, ssh_banner, tcp_frame,
-    tls_client_hello_record, tls_client_hello_record_padded, udp_frame, TCP_ACK, TCP_PSH_ACK,
-    TCP_SYN,
+    dns_query, high_entropy_payload, http_get, quic_initial_packet, quic_initial_split_datagrams,
+    ssh_banner, tcp_frame, tls_client_hello_record, tls_client_hello_record_padded, udp_frame,
+    TCP_ACK, TCP_PSH_ACK, TCP_SYN,
 };
 use common::pcap_builder::PcapBuilder;
 use common::runner::run_pcap_with_config;
@@ -421,6 +421,37 @@ fn test_quic_blocking() {
         "expected Drop, got: {}",
         result.action_lines[0].action
     );
+}
+
+#[test]
+fn test_quic_blocking_client_hello_split_across_datagrams() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    let (first, second) = quic_initial_split_datagrams("example.com");
+
+    PcapBuilder::new()
+        // frame 0: first half of the ClientHello -> SNI not yet known, passes
+        .add_frame(&udp_frame(client, server, 55002, 443, &first))
+        // frame 1: rest of the ClientHello on the same connection -> dropped
+        .add_frame(&udp_frame(client, server, 55002, 443, &second))
+        .write_to(&pcap_path);
+
+    let config = demo_config("quic_blocking");
+    let result = run_pcap_with_config(&config, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        result.action_lines.len(),
+        1,
+        "expected 1 drop action, got: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(1));
+    assert!(result.action_lines[0].action.contains("Drop"));
 }
 
 // ==========================================================================

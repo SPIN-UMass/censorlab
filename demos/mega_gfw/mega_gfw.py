@@ -205,8 +205,13 @@ def check_tls_sni(packet):
 # =============================================================================
 # As QUIC (HTTP/3) adoption grows, the GFW has extended its SNI filtering
 # to QUIC Initial packets. The SNI in QUIC Initial packets is extracted
-# from the embedded TLS ClientHello within the CRYPTO frame.
+# from the embedded TLS ClientHello within the CRYPTO frame, after removing
+# the Initial packet protection (keys derive from the client's DCID).
 # Some censors also block QUIC entirely by dropping all UDP/443 traffic.
+#
+# parse_initial() inspects each datagram on its own, so a ClientHello split
+# across several Initial datagrams is not matched here; see
+# demos/quic_blocking for a per-connection reassembling variant.
 #
 # References:
 #   - Elmenhorst et al., "Web Censorship Measurements of HTTP/3 over QUIC"
