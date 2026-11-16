@@ -440,28 +440,8 @@ impl Censor {
                 }
             }
         };
-        // Handle the delayer if relevant
-        match action? {
-            Action::Delay(instant) => match censor_ctx {
-                Context::Nfq(nfq::Context { delayer, .. }) => {
-                    delayer
-                        .delay_packet(payload.as_ref().to_vec(), instant)
-                        .unwrap();
-                    // We consider the packet "dropped" here
-                    Ok(Action::Drop)
-                }
-                // PCAP mode only reports decisions, so report the delay itself
-                Context::Pcap(_) => Ok(Action::Delay(instant)),
-                // Wire mode has no delay queue: pass the packet through unchanged
-                #[cfg(feature = "wire")]
-                Context::Wire(_) => {
-                    warn!("Delay action is only supported in NFQ mode: forwarding packet");
-                    Ok(Action::None)
-                }
-            },
-            // Return any other actions
-            action => Ok(action),
-        }
+        // Mode-specific actions (e.g. Delay) are carried out by each mode's packet loop
+        action
     }
     /// Processes the raw packet based on its metadata and our internal state
     ///

@@ -1,10 +1,10 @@
 use super::{Action, Censor};
 use crate::arp::ArpCache;
 use crate::censor::{HandleIpcError, IpPair};
-use crate::watermark::Delayer;
+use crate::delay::DelayQueue;
 use clap::Parser;
 use mac_address::MacAddressError;
-use nfq::{Queue, Verdict};
+use nfq::{Message, Queue, Verdict};
 use ort::Error as OrtError;
 use procfs::ProcError;
 use smoltcp::phy::{Device, Medium, RawSocket, TxToken};
@@ -14,8 +14,8 @@ use smoltcp::wire::{Error as SmoltcpError, EthernetAddress, IpAddress, TcpSeqNum
 use std::fmt;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
+use std::time::Instant as StdInstant;
 use thiserror::Error;
-use tokio::task::JoinError;
 use tracing::{error, info, trace, warn};
 
 /// Default IPTables table
@@ -218,7 +218,7 @@ impl Drop for IpTablesRuleActivated {
         }
     }
 }
-/// Context for the NFQ censor, providing network identity and packet delay support.
+/// Context for the NFQ censor, providing network identity.
 pub struct Context {
     /// Stored for potential future use in RST packet construction.
     #[allow(dead_code)]
@@ -227,8 +227,13 @@ pub struct Context {
     /// Stored for potential future use in direction-less traffic handling.
     #[allow(dead_code)]
     pub no_dir_action: Action,
-    /// Module for delaying packets
-    pub delayer: Delayer,
+}
+
+/// Which netfilter queue a held message came from (its verdict must go back there).
+#[derive(Clone, Copy)]
+enum QueueSide {
+    In,
+    Out,
 }
 
 impl Censor {
@@ -309,7 +314,6 @@ impl Censor {
             client_mac,
             client_ip,
             no_dir_action: args.no_dir_action.clone(),
-            delayer: Delayer::new(interface_name),
         };
         // Convert context to generic
         let mut context = (&mut context_nfq).into();
@@ -356,6 +360,11 @@ impl Censor {
         // Start processing packets
         info!("Starting packet loop");
         let mut packet_num = 0;
+        // Packets held by the delay action. We keep the NFQ message itself and
+        // only issue its Accept verdict once the deadline passes, so the kernel
+        // resumes the packet exactly where it was intercepted (correct
+        // direction, routing and link layer) without us re-crafting it.
+        let mut delayed: DelayQueue<(QueueSide, Message)> = DelayQueue::new();
         loop {
             // Handle any incoming ipc requests
             match self.handle_ipc() {
@@ -363,8 +372,22 @@ impl Censor {
                 Err(HandleIpcError::Shutdown) => break,
                 Err(err) => return Err(err.into()),
             }
+            // Release delayed packets whose deadline has passed
+            let now = StdInstant::now();
+            while let Some((side, mut msg)) = delayed.pop_due(now) {
+                trace!("Releasing delayed packet");
+                msg.set_verdict(Verdict::Accept);
+                let queue = match side {
+                    QueueSide::In => &mut queue_in,
+                    QueueSide::Out => &mut queue_out,
+                };
+                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+            }
             // Handle each queue
-            for queue in [&mut queue_in, &mut queue_out] {
+            for (side, queue) in [
+                (QueueSide::In, &mut queue_in),
+                (QueueSide::Out, &mut queue_out),
+            ] {
                 // Handle packets on the queue
                 match queue.recv() {
                     Ok(mut msg) => {
@@ -528,10 +551,10 @@ impl Censor {
                                 msg.set_verdict(Verdict::Accept);
                                 queue.verdict(msg).map_err(NfqModeError::Nfq)?;
                             }
-                            Action::Delay(_) => {
-                                // Drop the original packet
-                                msg.set_verdict(Verdict::Drop);
-                                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+                            Action::Delay(until) => {
+                                // Hold the packet; its verdict is issued once `until` passes
+                                trace!("Delaying packet");
+                                delayed.push(until, (side, msg));
                             }
                             Action::Rewrite(rewrite) => {
                                 // Forward a mutated copy of the packet
@@ -553,6 +576,17 @@ impl Censor {
                 }
             }
         }
+        // Release any still-held packets rather than letting the kernel drop them on unbind
+        while let Some((side, mut msg)) = delayed.pop_any() {
+            msg.set_verdict(Verdict::Accept);
+            let queue = match side {
+                QueueSide::In => &mut queue_in,
+                QueueSide::Out => &mut queue_out,
+            };
+            if let Err(err) = queue.verdict(msg) {
+                warn!("Failed to release delayed packet on shutdown: {err}");
+            }
+        }
         // We initialized firewall rules after binding the queue, so we drop them
         // before the queue is unbound
         drop(rule_in_ipv4);
@@ -566,13 +600,6 @@ impl Censor {
         queue_out
             .unbind(args.iptables.queue_num_out)
             .map_err(NfqModeError::Nfq)?;
-        // Abort the thread used to delay packets
-        context_nfq.delayer.delay_thread.abort();
-        if let Err(err) = context_nfq.delayer.delay_thread.await {
-            if !err.is_cancelled() {
-                Err(err)?
-            }
-        }
         Ok(())
     }
     /// Build the two RST frames for an intercepted segment `src -> dst`.
@@ -672,8 +699,6 @@ pub enum NfqModeError {
     Ort(#[from] OrtError),
     #[error("Error doing processing: {0}")]
     Process(#[from] smoltcp::wire::Error),
-    #[error("Error joining watermark thread :{0}")]
-    ThreadJoin(#[from] JoinError),
 }
 
 #[cfg(test)]
