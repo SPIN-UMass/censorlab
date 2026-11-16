@@ -950,6 +950,9 @@ pub enum Action {
     #[default]
     None,
     /// Send a RST in both directions
+    ///
+    /// Addresses, ports and sequence numbers describe the triggering segment; build
+    /// it with [`crate::transport::reset_for`].
     Reset {
         src_mac: [u8; 6],
         dst_mac: [u8; 6],
@@ -957,10 +960,14 @@ pub enum Action {
         ipid: Option<u16>,
         src_port: u16,
         dst_port: u16,
+        /// SEG.SEQ of the triggering segment
         seq: TcpSeqNumber,
+        /// SEG.ACK of the triggering segment (meaningful only if `is_ack`)
         ack: TcpSeqNumber,
+        /// Whether the triggering segment had the ACK flag set
         is_ack: bool,
-        payload_len: usize,
+        /// SEG.LEN of the triggering segment: payload bytes plus one each for SYN and FIN
+        seg_len: usize,
     },
     /// Inject a UDP packet (e.g. forged DNS response) while allowing the original through
     Inject {
@@ -1050,39 +1057,6 @@ impl Action {
     pub fn is_reset(&self) -> bool {
         matches!(self, Action::Reset { .. })
     }
-    pub fn enrich(
-        self,
-        ips: IpPair,
-        src_port: u16,
-        dst_port: u16,
-        ack: TcpSeqNumber,
-        seq: TcpSeqNumber,
-        payload_len: usize,
-    ) -> Self {
-        if let Action::Reset {
-            src_mac,
-            dst_mac,
-            ipid,
-            is_ack,
-            ..
-        } = self
-        {
-            Action::Reset {
-                src_mac,
-                dst_mac,
-                ips,
-                ipid,
-                src_port,
-                dst_port,
-                seq,
-                ack,
-                payload_len,
-                is_ack,
-            }
-        } else {
-            self
-        }
-    }
     pub fn is_inject(&self) -> bool {
         matches!(self, Action::Inject { .. })
     }
@@ -1095,7 +1069,7 @@ impl Action {
                 dst_port,
                 seq,
                 ack,
-                payload_len,
+                seg_len,
                 is_ack,
                 ..
             } => Action::Reset {
@@ -1107,7 +1081,7 @@ impl Action {
                 dst_port,
                 seq,
                 ack,
-                payload_len,
+                seg_len,
                 is_ack,
             },
             // Inject already carries its own MAC addresses
@@ -1123,7 +1097,7 @@ impl Action {
             dst_port,
             seq,
             ack,
-            payload_len,
+            seg_len,
             is_ack,
             ..
         } = self
@@ -1137,7 +1111,7 @@ impl Action {
                 dst_port,
                 seq,
                 ack,
-                payload_len,
+                seg_len,
                 is_ack,
             }
         } else {
@@ -1170,7 +1144,7 @@ impl FromStr for Action {
                 dst_port: 0,
                 ack: TcpSeqNumber(0),
                 seq: TcpSeqNumber(0),
-                payload_len: 0,
+                seg_len: 0,
                 is_ack: false,
             }),
             _other => Err(ActionFromStrError(s.to_owned())),

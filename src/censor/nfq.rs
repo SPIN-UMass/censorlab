@@ -405,7 +405,7 @@ impl Censor {
                                 seq,
                                 ack,
                                 is_ack,
-                                payload_len,
+                                seg_len,
                             } => {
                                 // Time for misery
                                 let mut src_mac = [0; 6];
@@ -446,7 +446,7 @@ impl Censor {
                                     dst_port,
                                     ack,
                                     seq,
-                                    payload_len,
+                                    seg_len,
                                     is_ack,
                                 )?;
                                 // Send the resets
@@ -593,15 +593,18 @@ impl Censor {
         dst_port: u16,
         ack: TcpSeqNumber,
         seq: TcpSeqNumber,
-        payload_len: usize,
+        seg_len: usize,
         is_ack: bool,
     ) -> Result<(Vec<u8>, Vec<u8>), smoltcp::wire::Error> {
-        // Intercepted packet goes src -> dst with seq and ack fields.
-        // For a RST to be accepted, its seq must be within the recipient's receive window.
-        //
-        // Reset to packet source (client_reset with swapped IPs):
-        // - seq should be what the source expects to receive = intercepted ack
-        // - ack can acknowledge what they sent = intercepted seq + payload_len
+        // The intercepted segment goes src -> dst with SEG.SEQ = `seq`, SEG.ACK = `ack`
+        // (valid only if `is_ack`) and SEG.LEN = `seg_len` (payload + SYN + FIN).
+        // A RST is accepted only if its seq is in the recipient's receive window.
+        let next_seq = seq + seg_len;
+        // Reset to packet source (swapped IPs), per RFC 9293 section 3.10.7.1:
+        // - if the segment had an ACK, the source expects to receive SEG.ACK next;
+        // - otherwise (e.g. a SYN, sender in SYN-SENT) there is no usable seq, so
+        //   <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>, whose ACK makes it acceptable.
+        // In both cases the RST acknowledges everything the source sent.
         let client_reset = crate::transport::construct_reset(
             EthernetAddress(own_mac),
             EthernetAddress(src_host_mac),
@@ -609,28 +612,21 @@ impl Censor {
             ipid,
             dst_port, // src port (swapped)
             src_port, // dst port (swapped)
-            // ack: acknowledge what they sent
-            if is_ack {
-                seq + payload_len
-            } else {
-                TcpSeqNumber(0)
-            },
-            // seq: what they expect to receive = their ack value
-            ack,
+            Some(next_seq),
+            if is_ack { ack } else { TcpSeqNumber(0) },
         )?;
-        // Reset to packet destination (server_reset with original IPs):
-        // - seq should be what the dest expects = intercepted seq + payload_len
-        //   (since the original packet is accepted, dest will have processed it)
-        // - ack = 0 is fine for RST
+        // Reset to packet destination (original IPs): the original segment is
+        // accepted, so the destination next expects SEG.SEQ + SEG.LEN. We know nothing
+        // the destination sent, so this is a bare RST with no ACK.
         let server_reset = crate::transport::construct_reset(
             EthernetAddress(own_mac),
             EthernetAddress(dst_host_mac),
             ips,
             ipid,
-            src_port,          // src port
-            dst_port,          // dst port
-            TcpSeqNumber(0),   // ack
-            seq + payload_len, // seq: what they expect after receiving the packet
+            src_port,
+            dst_port,
+            None,
+            next_seq,
         )?;
 
         Ok((client_reset, server_reset))
@@ -699,5 +695,46 @@ mod reset_frame_tests {
         assert_eq!(f1.dst_addr(), EthernetAddress(client));
         assert_eq!(f2.src_addr(), EthernetAddress(own));
         assert_eq!(f2.dst_addr(), EthernetAddress(server));
+    }
+
+    /// (seq, ack, ACK flag, RST flag) of a crafted IPv4 reset frame.
+    fn tcp_fields(frame: &[u8]) -> (TcpSeqNumber, TcpSeqNumber, bool, bool) {
+        use smoltcp::wire::{Ipv4Packet, TcpPacket};
+        let eth = EthernetFrame::new_checked(frame).unwrap();
+        let ip = Ipv4Packet::new_checked(eth.payload()).unwrap();
+        let tcp = TcpPacket::new_checked(ip.payload()).unwrap();
+        (tcp.seq_number(), tcp.ack_number(), tcp.ack(), tcp.rst())
+    }
+
+    fn resets(seq: i32, ack: i32, seg_len: usize, is_ack: bool) -> (Vec<u8>, Vec<u8>) {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        Censor::craft_resets([2; 6], [3; 6], [4; 6], ips, None, 40000, 443,
+                             TcpSeqNumber(ack), TcpSeqNumber(seq), seg_len, is_ack)
+            .unwrap()
+    }
+
+    #[test]
+    fn resets_for_data_segment_land_in_both_windows() {
+        // Client sent 100 bytes at seq 1000, acknowledging the server up to 5000
+        let (to_client, to_server) = resets(1000, 5000, 100, true);
+        // To the sender: <SEQ=SEG.ACK>, acknowledging what it sent
+        assert_eq!(tcp_fields(&to_client), (TcpSeqNumber(5000), TcpSeqNumber(1100), true, true));
+        // To the receiver: the next sequence number it expects from the sender
+        let (seq, _, ack_flag, rst) = tcp_fields(&to_server);
+        assert_eq!((seq, ack_flag, rst), (TcpSeqNumber(1100), false, true));
+    }
+
+    #[test]
+    fn resets_for_syn_follow_rfc793() {
+        // A SYN has no ACK and occupies one sequence number
+        let (to_client, to_server) = resets(7000, 0, 1, false);
+        // To a SYN-SENT client: <SEQ=0><ACK=SEG.SEQ+SEG.LEN><CTL=RST,ACK>
+        assert_eq!(tcp_fields(&to_client), (TcpSeqNumber(0), TcpSeqNumber(7001), true, true));
+        // To the server, which has seen the SYN and expects ISS+1
+        let (seq, _, ack_flag, rst) = tcp_fields(&to_server);
+        assert_eq!((seq, ack_flag, rst), (TcpSeqNumber(7001), false, true));
     }
 }
