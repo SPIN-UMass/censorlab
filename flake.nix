@@ -141,6 +141,9 @@
               config = {
                 Cmd = [ "/bin/bash" ];
                 Env = [ "PATH=/bin" "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" ];
+                # Lets experiments/10_nfq_end_to_end/scripts/run.sh detect a
+                # loaded image whose censorlab is stale w.r.t. the checkout.
+                Labels = { "censorlab.package" = "${censorlab}"; };
               };
             };
             # Image with real circumvention tools (Shadowsocks, obfs4/lyrebird, Snowflake)
