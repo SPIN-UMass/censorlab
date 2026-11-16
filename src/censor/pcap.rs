@@ -1,4 +1,4 @@
-use super::{Action, Censor};
+use super::{Action, Censor, ClientAddrs};
 
 use clap::Parser;
 use ort::Error as OrtError;
@@ -16,16 +16,18 @@ use thiserror::Error;
 pub struct Args {
     /// Path to the pcap to analyze
     pub pcap_path: PathBuf,
-    /// Ip address considered the "client"
+    /// Ip address(es) considered the "client" (comma-separated, e.g.
+    /// `10.0.0.1,2001:db8::1` to give both an IPv4 and an IPv6 client address)
     ///
     /// Without 2 interfaces, we don't know how to determine the direction of traffic
     /// We need to arbitrarily choose a "client ip" that is used to calculate direction
     /// Anything coming to this IP is wan->cient. Anything from this IP is client->wan
-    pub client_ip: IpAddr,
+    #[clap(value_delimiter = ',', required = true)]
+    pub client_ip: Vec<IpAddr>,
 }
 /// Context for the pcap censor
 pub struct Context {
-    pub client_ip: IpAddress,
+    pub client: ClientAddrs,
 }
 
 impl Censor {
@@ -41,7 +43,7 @@ impl Censor {
         let start_processing = Instant::now();
         // Create our context. This will basically never change
         let mut context = Context {
-            client_ip: args.client_ip.into(),
+            client: ClientAddrs::new(args.client_ip.iter().map(|ip| IpAddress::from(*ip))),
         };
         // Connection-tracking timeouts follow capture time, not wall-clock time
         self.transport_state.use_packet_clock();
@@ -187,4 +189,23 @@ pub enum PcapModeError {
     Pcap(String),
     #[error("Error updating model")]
     Ort(#[from] OrtError),
+}
+
+#[cfg(test)]
+mod args_tests {
+    use super::*;
+
+    #[test]
+    fn client_ip_accepts_v4_and_v6() {
+        let args = Args::try_parse_from(["pcap", "x.pcap", "10.0.0.1,2001:db8::1"]).unwrap();
+        assert_eq!(
+            args.client_ip,
+            vec!["10.0.0.1".parse::<IpAddr>().unwrap(), "2001:db8::1".parse().unwrap()]
+        );
+        // A single address keeps working
+        let args = Args::try_parse_from(["pcap", "x.pcap", "10.0.0.1"]).unwrap();
+        assert_eq!(args.client_ip.len(), 1);
+        // ... and one is required
+        assert!(Args::try_parse_from(["pcap", "x.pcap"]).is_err());
+    }
 }
