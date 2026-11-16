@@ -1,9 +1,9 @@
 mod common;
 
 use common::packet_builder::{
-    dns_query, high_entropy_payload, http_get, quic_initial_packet, ssh_banner, tcp_frame,
-    tls_client_hello_record, tls_client_hello_record_padded, udp_frame, TCP_ACK, TCP_PSH_ACK,
-    TCP_SYN,
+    dns_query, dns_query_typed, high_entropy_payload, http_get, quic_initial_packet, ssh_banner,
+    tcp_frame, tls_client_hello_record, tls_client_hello_record_padded, udp_frame, TCP_ACK,
+    TCP_PSH_ACK, TCP_SYN,
 };
 use common::pcap_builder::PcapBuilder;
 use common::runner::run_pcap_with_config;
@@ -151,6 +151,128 @@ fn test_dns_blocking() {
     assert!(result.action_lines[0].action.contains("Inject"));
     assert_eq!(result.action_lines[1].packet_index, frame_idx(2));
     assert!(result.action_lines[1].action.contains("Inject"));
+}
+
+/// Browsers send HTTPS (65) and SVCB (64) queries, usually with EDNS(0),
+/// alongside A/AAAA. A DNS censor must recognize them rather than failing to
+/// parse and silently allowing them.
+#[test]
+fn test_dns_blocking_modern_qtypes() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let dns_server = [8, 8, 8, 8];
+
+    PcapBuilder::new()
+        // frame 0: HTTPS query for google.com with EDNS -> injected
+        .add_frame(&udp_frame(client, dns_server, 45000, 53, &dns_query_typed("google.com", 65, true)))
+        // frame 1: SVCB query for _dns.google.com -> injected
+        .add_frame(&udp_frame(client, dns_server, 45001, 53, &dns_query_typed("_dns.google.com", 64, false)))
+        // frame 2: AAAA query with EDNS for google.com -> injected
+        .add_frame(&udp_frame(client, dns_server, 45002, 53, &dns_query_typed("google.com", 28, true)))
+        // frame 3: HTTPS query for yahoo.com -> passes
+        .add_frame(&udp_frame(client, dns_server, 45003, 53, &dns_query_typed("yahoo.com", 65, true)))
+        // frame 4: unassigned qtype for google.com -> injected
+        .add_frame(&udp_frame(client, dns_server, 45004, 53, &dns_query_typed("google.com", 0xFF00, false)))
+        .write_to(&pcap_path);
+
+    let config = demo_config("dns_blocking");
+    let result = run_pcap_with_config(&config, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let injected: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|a| a.action.contains("Inject"))
+        .map(|a| a.packet_index)
+        .collect();
+    assert_eq!(
+        injected,
+        vec![frame_idx(0), frame_idx(1), frame_idx(2), frame_idx(4)],
+        "actions: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
+}
+
+/// Python DNS API: DNS over TCP framing, raw labels, numeric codes, EDNS OPT
+/// accessors, and opaque RDATA for record types that are not decoded.
+#[test]
+fn test_dns_python_api_tcp_and_unknown_types() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+
+    let client = [10, 0, 0, 1];
+    let dns_server = [8, 8, 8, 8];
+
+    let query = dns_query_typed("blocked.example", 65, true);
+    let mut framed = (query.len() as u16).to_be_bytes().to_vec();
+    framed.extend_from_slice(&query);
+    let other = dns_query_typed("fine.example", 65, true);
+    let mut framed_other = (other.len() as u16).to_be_bytes().to_vec();
+    framed_other.extend_from_slice(&other);
+
+    // UDP response carrying an HTTPS answer (opaque RDATA)
+    let mut response = dns_query_typed("svc.example", 65, false);
+    response[2] = 0x81;
+    response[3] = 0x80;
+    response[7] = 1; // ANCOUNT
+    response.extend_from_slice(&[0xC0, 0x0C, 0x00, 0x41, 0x00, 0x01, 0, 0, 0, 60, 0, 3, 0, 1, 0]);
+
+    PcapBuilder::new()
+        // frame 0: TCP DNS HTTPS query for blocked.example -> dropped
+        .add_frame(&tcp_frame(client, dns_server, 50000, 53, TCP_PSH_ACK, 1, 1, &framed))
+        // frame 1: TCP DNS HTTPS query for fine.example -> passes
+        .add_frame(&tcp_frame(client, dns_server, 50001, 53, TCP_PSH_ACK, 1, 1, &framed_other))
+        // frame 2: UDP response with HTTPS answer -> dropped
+        .add_frame(&udp_frame(dns_server, client, 53, 45000, &response))
+        .write_to(&pcap_path);
+
+    let script = r#"
+from dns import parse, parse_tcp
+
+def process(packet):
+    tcp = packet.tcp
+    if tcp and tcp.dst == 53 and packet.payload:
+        for m in parse_tcp(packet.payload):
+            q = m.questions[0]
+            if (q.qtype == "HTTPS" and q.qtype_code == 65 and q.qclass == "IN"
+                    and q.labels == [b"blocked", b"example"]
+                    and m.opt.udp == 1232 and m.opt.options == []
+                    and m.trailing_len == 0):
+                return "drop"
+    udp = packet.udp
+    if udp and udp.src == 53:
+        m = parse(packet.payload)
+        a = m.answers[0]
+        if (not m.query and a.rtype == "HTTPS" and a.name == "svc.example"
+                and a.data == ("UNKNOWN", 65, b"\x00\x01\x00") and a.ttl == 60):
+            return "drop"
+"#;
+    let config_str = r#"
+[execution]
+mode = "Python"
+script = "censor.py"
+"#;
+    let config_path = write_temp_config(&tmp, config_str);
+    write_temp_script(&tmp, "censor.py", script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .filter(|a| a.action.contains("Drop"))
+        .map(|a| a.packet_index)
+        .collect();
+    assert_eq!(
+        dropped,
+        vec![frame_idx(0), frame_idx(2)],
+        "actions: {:?}\nstdout: {}",
+        result.action_lines,
+        result.stdout
+    );
 }
 
 // ==========================================================================
