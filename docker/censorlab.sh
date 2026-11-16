@@ -2,15 +2,18 @@
 # censorlab.sh — Run CensorLab in Docker with one command.
 #
 # Builds the Docker image if needed, auto-detects NFQ vs PCAP mode,
-# and picks the right Compose service (host networking + capabilities
-# for NFQ, isolated container otherwise).
+# and picks the right Compose service (NET_ADMIN/NET_RAW capabilities
+# for NFQ, none otherwise). Both services run in their own isolated
+# network namespace (no host networking): NFQ mode only intercepts
+# traffic originating inside the container, e.g. from a --shell session.
 #
 # Usage:
 #   bash docker/censorlab.sh [censorlab args...]
-#   bash docker/censorlab.sh --shell          (NFQ-capable shell, host networking)
-#   bash docker/censorlab.sh --shell-no-nfq   (isolated shell, no host networking)
+#   bash docker/censorlab.sh --shell          (NFQ-capable shell: NET_ADMIN/NET_RAW)
+#   bash docker/censorlab.sh --shell-no-nfq   (shell without extra capabilities)
 #   bash docker/censorlab.sh -c demos/dns_blocking/censor.toml nfq
-#   bash docker/censorlab.sh -c censor.toml pcap traffic.pcap
+#   DOCKER_ARGS="-v $PWD/traffic.pcap:/tmp/traffic.pcap:ro" \
+#     bash docker/censorlab.sh -c demos/http_blocking/censor.toml pcap /tmp/traffic.pcap <CLIENT_IP>
 #
 # The image is automatically rebuilt when source files change.
 #
@@ -28,20 +31,10 @@ if [ -f "$REPO_ROOT/.gitmodules" ] && command -v git &>/dev/null; then
     git -C "$REPO_ROOT" submodule update --init --recursive 2>/dev/null || true
 fi
 
-# Compute a fingerprint of files that affect the Docker image.
-# Uses git so it's portable across Linux and macOS.
-# NOTE: These paths must match the COPY sources in the Dockerfile.
-# If the Dockerfile's COPY paths change, update the list here too.
-compute_build_hash() {
-    (cd "$REPO_ROOT" && {
-        git rev-parse HEAD
-        git diff HEAD -- docker/ flake.nix flake.lock Cargo.toml Cargo.lock \
-            build.rs src/ demos/ website/ .gitmodules
-        git submodule status
-    } 2>/dev/null | git hash-object --stdin 2>/dev/null) || echo "unknown"
-}
-
-BUILD_HASH=$(compute_build_hash)
+# Fingerprint of files that affect the Docker image (see build_hash.sh).
+# shellcheck source=build_hash.sh
+source "$SCRIPT_DIR/build_hash.sh"
+BUILD_HASH=$(compute_build_hash "$REPO_ROOT" "${DOCKERFILE_SOURCES[@]}")
 STORED_HASH=$(docker inspect --format '{{index .Config.Labels "censorlab.build_hash"}}' \
     censorlab:latest 2>/dev/null || echo "")
 
@@ -52,8 +45,8 @@ if [ "$BUILD_HASH" = "unknown" ] || [ "$BUILD_HASH" != "$STORED_HASH" ]; then
     echo ""
 fi
 
-# --shell flag: drop into an interactive shell (with host networking + NET_ADMIN/NET_RAW by default)
-# Use --shell-no-nfq for a shell without host networking/capabilities
+# --shell flag: drop into an interactive shell (with NET_ADMIN/NET_RAW by default)
+# Use --shell-no-nfq for a shell without those capabilities
 if [ "${1:-}" = "--shell" ] || [ "${1:-}" = "--shell-no-nfq" ]; then
     SERVICE="censorlab-nfq"
     if [ "${1:-}" = "--shell-no-nfq" ]; then

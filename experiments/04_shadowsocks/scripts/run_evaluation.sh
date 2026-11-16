@@ -8,7 +8,7 @@
 # Prerequisites:
 #   - CensorLab built with: cargo build --release
 #   - Network capabilities set: ./set_permissions.sh
-#   - iptables NFQ rule configured (see below)
+#   - root / CAP_NET_ADMIN (censorlab nfq installs its own iptables rules)
 #   - A TCP listener on the target port (e.g., ncat -lk 443)
 #
 # Usage:
@@ -35,18 +35,14 @@ echo "Requests: $NUM_REQUESTS"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 1: Set up iptables NFQUEUE rule
+# Step 1: Cleanup handler.  No iptables setup here: `censorlab nfq` installs
+# and removes its own rules (raw PREROUTING -> queue 0, raw OUTPUT -> queue 1).
+# Adding filter INPUT/OUTPUT rules on queue 0 as well queued every packet twice.
 # ---------------------------------------------------------------------------
-echo "--- Setting up iptables NFQ rule ---"
-# Queue outbound HTTPS traffic to NFQUEUE 0
-iptables -I OUTPUT -p tcp --dport "$TARGET_PORT" -j NFQUEUE --queue-num 0 2>/dev/null || true
-iptables -I INPUT -p tcp --sport "$TARGET_PORT" -j NFQUEUE --queue-num 0 2>/dev/null || true
 
 cleanup() {
     echo ""
     echo "--- Cleaning up ---"
-    iptables -D OUTPUT -p tcp --dport "$TARGET_PORT" -j NFQUEUE --queue-num 0 2>/dev/null || true
-    iptables -D INPUT -p tcp --sport "$TARGET_PORT" -j NFQUEUE --queue-num 0 2>/dev/null || true
     # Kill censorlab if we started it
     if [ -n "${CENSOR_PID:-}" ]; then
         kill "$CENSOR_PID" 2>/dev/null || true
