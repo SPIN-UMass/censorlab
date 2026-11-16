@@ -23,6 +23,10 @@ COPY src/ src/
 # Copy demos (referenced by build/configs)
 COPY demos/ demos/
 
+# flake.nix's experiments shell includes packages.opengfw, built from this
+# file; without it, evaluating .#experiments below fails.
+COPY experiments/tools/opengfw/ experiments/tools/opengfw/
+
 # Materialize the experiments shell (expensive, cached by Docker layers).
 # This must come BEFORE copying experiments so that editing experiment
 # scripts doesn't invalidate the Nix build cache.
