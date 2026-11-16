@@ -1,5 +1,7 @@
 use crate::application::tls::ClientHelloAssembler;
 use crate::censor::{Action, Direction, IpPair};
+use crate::config::conntrack::Config as ConntrackConfig;
+use crate::expiring_map::ExpiringMap;
 use crate::model::ModelThreadMessage;
 use crate::program::config::Config as ProgramConfig;
 use crate::program::env::{ProgramEnv, Registers};
@@ -31,13 +33,13 @@ use tracing::error;
 /// Connection key is an identifier that will always resolve to the same value for a connection
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ConnectionKey {
-    /// Lower (by sorting) IP addr
+    /// IP addr of the lower (by sorting (IP, port)) endpoint
     addr_low: IpAddress,
-    /// Higher (by sorting) IP addr
+    /// IP addr of the higher (by sorting (IP, port)) endpoint
     addr_high: IpAddress,
-    /// Lower (by sorting IP) port
+    /// Port belonging to `addr_low`
     port_low: u16,
-    /// Higher (by sorting IP) port
+    /// Port belonging to `addr_high`
     port_high: u16,
     /// Protocol
     proto: TransportProtocol,
@@ -48,9 +50,10 @@ impl ConnectionKey {
         // Extract IPs
         let ip_1 = ips.src();
         let ip_2 = ips.dst();
-        // Place values based on sorting IPs
-        // Sort by IP to ensure symmetric keys (port sort alternative benchmarked in TODO.md)
-        let (addr_low, addr_high, port_low, port_high) = if ip_1 <= ip_2 {
+        // Place values based on sorting (IP, port) endpoints so both directions
+        // map to the same key. Sorting by IP alone is ambiguous when both
+        // endpoints share an IP (loopback / same host), so ports break ties.
+        let (addr_low, addr_high, port_low, port_high) = if (ip_1, port_1) <= (ip_2, port_2) {
             (ip_1, ip_2, port_1, port_2)
         } else {
             (ip_2, ip_1, port_2, port_1)
@@ -64,27 +67,84 @@ impl ConnectionKey {
             proto,
         }
     }
+    /// Whether (`ip`, `port`) is the `addr_low`/`port_low` endpoint of this key
+    fn is_low_endpoint(&self, ip: IpAddress, port: u16) -> bool {
+        self.addr_low == ip && self.port_low == port
+    }
 }
 
-/// Per-host state shared across all connections from the same source IP
+/// Per-host state shared across all connections from the same IP
 #[derive(Debug)]
 pub struct HostState {
-    /// Number of connections initiated from this host
+    /// Number of connections whose first tracked packet came from this host
     pub num_connections: u32,
     /// Total number of packets seen from this host across all connections
     pub num_packets: u32,
     /// Host-level registers for CensorLang programs
     pub registers: Registers,
+    /// Persistent Python dict exposed as `host.state` / `dst_host.state`
+    /// (created lazily in Python mode)
+    py_state: Option<PyObjectRef>,
+}
+
+/// Packet time, in microseconds
+type Micros = u64;
+const MICROS_PER_SEC: u64 = 1_000_000;
+
+/// Source of "now" for connection-tracking timeouts
+#[derive(Debug)]
+enum Clock {
+    /// Live modes: time elapsed since the tracker was created
+    Monotonic(std::time::Instant),
+    /// PCAP mode: the latest capture timestamp seen so far
+    Packet(Micros),
+}
+
+/// Minimal TCP lifecycle: enough to know when a connection has ended so that
+/// a later SYN on the same 5-tuple starts a fresh connection
+#[derive(Clone, Copy, Debug, Default)]
+struct TcpLifecycle {
+    /// FIN seen from the `addr_low`/`port_low` endpoint
+    fin_low: bool,
+    /// FIN seen from the `addr_high`/`port_high` endpoint
+    fin_high: bool,
+    /// RST seen from either endpoint
+    rst: bool,
+}
+impl TcpLifecycle {
+    fn closed(&self) -> bool {
+        self.rst || (self.fin_low && self.fin_high)
+    }
 }
 
 /// Aggregate object used to manage state for many different connections
+///
+/// # State lifetime
+/// Connection and host state is bounded (see [`crate::config::conntrack`]):
+/// * A TCP connection is *closed* once a RST, or a FIN from both endpoints,
+///   has been processed. Packets that follow (final ACKs, retransmissions)
+///   still go to the same per-connection script state. A SYN without ACK on
+///   a closed connection starts a fresh one (script initialization re-runs).
+///   Closed connections are forgotten after `tcp_closed_timeout`.
+/// * Open TCP connections and UDP flows are forgotten after
+///   `tcp_idle_timeout` / `udp_idle_timeout` seconds without packets; a later
+///   packet on the same 5-tuple starts a fresh connection.
+/// * At most `max_connections` connections are tracked; beyond that the one
+///   closest to expiring is evicted.
+/// * Per-host state (counters, CensorLang host registers and the Python
+///   `host.state`/`dst_host.state` dicts) is kept for every IP that sends or
+///   receives traffic, for at most `max_hosts` hosts (least recently seen
+///   evicted first) and, if `host_idle_timeout` is set, until the host has
+///   been idle that long. An evicted host starts again from empty state.
 pub struct TransportState {
     /// Internal tracker for connections
-    connections: HashMap<ConnectionKey, ConnectionInfo>,
-    /// Per-host state keyed by source IP
-    host_states: HashMap<IpAddress, HostState>,
-    /// Persistent Python dicts for per-host user state (keyed by IP string)
-    python_host_dicts: HashMap<String, PyObjectRef>,
+    connections: ExpiringMap<ConnectionKey, ConnectionInfo>,
+    /// Per-host state keyed by IP
+    hosts: ExpiringMap<IpAddress, HostState>,
+    /// Limits on tracked state
+    conntrack: ConntrackConfig,
+    /// Time source for timeouts
+    clock: Clock,
     /// Execution mode
     execution_mode: ExecutionMode,
     /// Interpreter used for executing all python code
@@ -108,6 +168,8 @@ pub struct ConnectionInfo {
     is_first: bool,
     /// Reassembles the client's TLS ClientHello across segments
     client_hello: ClientHelloAssembler,
+    /// Only meaningful for TCP
+    tcp: TcpLifecycle,
 }
 
 #[derive(Debug, Error)]
@@ -249,6 +311,44 @@ fn init_python_scope(
     Ok(process)
 }
 
+/// Build the Reset action for the TCP connection a packet belongs to.
+///
+/// This is the only place a Reset is populated from a packet, so every source of a
+/// Reset (scripts, CensorLang, config lists) targets the same connection the same way.
+/// Returns `None` for non-TCP packets, which have no connection to reset.
+pub fn reset_for(
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Option<Action> {
+    let TransportMetadataExtra::Tcp(tcp) = transport.extra else {
+        return None;
+    };
+    // SYN and FIN each occupy one sequence number (RFC 9293 section 3.4)
+    let seg_len = payload_len + usize::from(tcp.flags.syn) + usize::from(tcp.flags.fin);
+    Some(Action::Reset {
+        src_mac: [0; 6],
+        dst_mac: [0; 6],
+        ips,
+        ipid: None,
+        src_port: transport.src,
+        dst_port: transport.dst,
+        seq: tcp.seq,
+        ack: tcp.ack,
+        seg_len,
+        is_ack: tcp.flags.ack,
+    })
+}
+
+/// [`reset_for`], falling back to Drop for traffic that has no TCP connection to reset.
+pub fn reset_or_drop(
+    ips: IpPair,
+    transport: &crate::program::packet::TransportMetadata,
+    payload_len: usize,
+) -> Action {
+    reset_for(ips, transport, payload_len).unwrap_or(Action::Drop)
+}
+
 /// Recognize the value returned by a PyCL `process()` call and map it to an
 /// engine [`Action`].
 ///
@@ -259,7 +359,7 @@ fn init_python_scope(
 /// None                         -> continue (Action::None)
 /// "allow" | "drop" | "reset"   -> the named action
 /// bytes                        -> inject these bytes as a UDP response
-/// ("delay",   seconds: number) -> hold the packet for `seconds` (Tap/NFQ mode)
+/// ("delay",   seconds: number) -> hold the packet for `seconds` (NFQ; wire forwards)
 /// ("rewrite", {"ttl": int})    -> forward a copy with the IP TTL/hop limit set
 /// ```
 ///
@@ -278,24 +378,7 @@ fn action_from_python(
     }
     if let Some(s) = result.payload::<PyStr>() {
         return match s.as_str().to_lowercase().as_str() {
-            "reset" => {
-                if let TransportMetadataExtra::Tcp(tcp_metadata) = transport.extra {
-                    Action::Reset {
-                        src_mac: [0; 6],
-                        dst_mac: [0; 6],
-                        ips,
-                        ipid: None,
-                        src_port: transport.src,
-                        dst_port: transport.dst,
-                        seq: tcp_metadata.seq,
-                        ack: tcp_metadata.ack,
-                        payload_len,
-                        is_ack: tcp_metadata.flags.ack,
-                    }
-                } else {
-                    Action::Drop
-                }
-            }
+            "reset" => reset_or_drop(ips, transport, payload_len),
             "drop" => Action::Drop,
             "allow" => Action::None,
             other => {
@@ -487,6 +570,7 @@ impl TransportState {
         _model_config: HashMap<String, crate::config::model::Model>,
         _decision_log_path: Option<PathBuf>,
         execution_config: crate::config::execution::Config,
+        conntrack: ConntrackConfig,
         model_sender: mpsc::SyncSender<ModelThreadMessage>,
     ) -> Result<Self, TransportStateInitError> {
         let vm = new_python_interpreter(execution_config.hash_seed);
@@ -537,9 +621,10 @@ impl TransportState {
         };
         // Construct the overall connection manager
         Ok(TransportState {
-            connections: HashMap::new(),
-            host_states: HashMap::new(),
-            python_host_dicts: HashMap::new(),
+            connections: ExpiringMap::new(),
+            hosts: ExpiringMap::new(),
+            conntrack,
+            clock: Clock::Monotonic(std::time::Instant::now()),
             execution_mode: execution_config.mode,
             vm,
             code,
@@ -563,7 +648,6 @@ impl TransportState {
     ) -> Result<Action, SmoltcpError> {
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.
-        let mut packet = packet;
         packet.set_direction(direction);
         // Make a connection key
         let key = ConnectionKey::new(
@@ -572,39 +656,58 @@ impl TransportState {
             packet.transport.dst,
             packet.transport_proto(),
         );
-        let new_key = key.clone();
-        // Get a reference to the tracker's packet list
-        let ConnectionInfo {
-            is_first,
-            env,
-            client_hello,
-        } =
-            self.connections.entry(new_key).or_insert_with(|| {
-                // Initialize the per-connection state
-                ConnectionInfo {
-                    env: match self.execution_mode {
-                        ExecutionMode::Python => {
-                            // New connection means we should initialize a new Python scope
-                            let scope = self.vm.enter(|vm| vm.new_scope_with_builtins());
-                            ExecutionEnvironment::Python {
-                                scope,
-                                state: PythonConnState::Uninitialized,
-                            }
-                        }
-                        ExecutionMode::CensorLang => {
-                            let env = ProgramEnv::new(
-                                packet.connection_identifier(),
-                                &self.censorlang_config,
-                            );
-                            ExecutionEnvironment::CensorLang { env }
-                        }
-                    },
-                    is_first: true,
-                    client_hello: ClientHelloAssembler::new(),
+        let now = self.now();
+        // Forget idle state first so this packet never lands in a timed-out connection
+        self.expire(now);
+        let src_port = packet.transport.src;
+        let tcp_flags = match packet.transport.extra {
+            TransportMetadataExtra::Tcp(tcp_metadata) => Some(tcp_metadata.flags),
+            _ => None,
+        };
+        // A bare SYN on a closed TCP connection is a new connection reusing the 5-tuple
+        let is_bare_syn = tcp_flags.is_some_and(|flags| flags.syn && !flags.ack);
+        if is_bare_syn && self.connections.get(&key).is_some_and(|c| c.tcp.closed()) {
+            if let Some(old) = self.connections.remove(&key) {
+                self.teardown(vec![old.env], Vec::new());
+            }
+        }
+        if !self.connections.contains_key(&key) {
+            // Initialize the per-connection state
+            let env = match self.execution_mode {
+                ExecutionMode::Python => {
+                    // New connection means we should initialize a new Python scope
+                    let scope = self.vm.enter(|vm| vm.new_scope_with_builtins());
+                    ExecutionEnvironment::Python {
+                        scope,
+                        state: PythonConnState::Uninitialized,
+                    }
                 }
-            });
-        // Track the client's ClientHello across segments so programs see it once complete
+                ExecutionMode::CensorLang => {
+                    let env = ProgramEnv::new(
+                        packet.connection_identifier(),
+                        &self.censorlang_config,
+                    );
+                    ExecutionEnvironment::CensorLang { env }
+                }
+            };
+            let info = ConnectionInfo {
+                env,
+                is_first: true,
+                tcp: TcpLifecycle::default(),
+                client_hello: ClientHelloAssembler::new(),
+            };
+            // The real deadline is set once the packet has been processed
+            self.connections.insert(key.clone(), info, now);
+        }
+        // Track the client's ClientHello across segments so programs see it once
+        // complete. The assembler lives in ConnectionInfo, so it is reset along
+        // with the rest of the connection state on 5-tuple reuse or expiry.
         if let TransportMetadataExtra::Tcp(tcp) = packet.transport.extra {
+            let client_hello = &mut self
+                .connections
+                .get_mut(&key)
+                .expect("connection was inserted above")
+                .client_hello;
             client_hello.observe(
                 (ips.src(), packet.transport.src),
                 tcp.seq.0 as u32,
@@ -615,18 +718,13 @@ impl TransportState {
             packet.tls_client_hello = client_hello.client_hello().cloned();
         }
         // Copy of is_first for the execution
-        let is_first_cl = *is_first;
+        let is_first_cl = self.connections.get(&key).is_some_and(|c| c.is_first);
 
         // Update per-host state for the source IP
         let src_ip = ips.src();
         let dst_ip = ips.dst();
-        let config = &self.censorlang_config;
         let (host_num_connections, host_num_packets) = {
-            let host = self.host_states.entry(src_ip).or_insert_with(|| HostState {
-                num_connections: 0,
-                num_packets: 0,
-                registers: Registers::new(config.program.num_registers.into(), config.env.relax_register_types),
-            });
+            let host = self.touch_host(src_ip, now);
             host.num_packets += 1;
             if is_first_cl {
                 host.num_connections += 1;
@@ -635,14 +733,19 @@ impl TransportState {
         };
         // Get dst host counters (don't increment -- dst didn't send this packet)
         let (dst_host_num_connections, dst_host_num_packets) = {
-            let dst_host = self.host_states.entry(dst_ip).or_insert_with(|| HostState {
-                num_connections: 0,
-                num_packets: 0,
-                registers: Registers::new(config.program.num_registers.into(), config.env.relax_register_types),
-            });
+            let dst_host = self.touch_host(dst_ip, now);
             (dst_host.num_connections, dst_host.num_packets)
         };
+        // Per-host persistent Python dicts
+        let host_dicts = match self.execution_mode {
+            ExecutionMode::Python => Some((self.host_py_state(src_ip), self.host_py_state(dst_ip))),
+            ExecutionMode::CensorLang => None,
+        };
 
+        let ConnectionInfo { env, .. } = self
+            .connections
+            .get_mut(&key)
+            .expect("connection was inserted above");
         // If the connection is set up for a Python environment, use that
         let action = match env {
             // Python mode without a script: nothing to run
@@ -659,30 +762,21 @@ impl TransportState {
                 let mut packet = PythonPacket::from(packet);
                 packet.set_direction(direction);
                 let sender = self.model_sender.clone();
-                // Get existing per-host Python dict (if any) for persistent user state
-                let src_ip_key = src_ip.to_string();
-                let dst_ip_key = dst_ip.to_string();
-                let existing_host_dict = self.python_host_dicts.get(&src_ip_key).cloned();
-                let existing_dst_host_dict = self.python_host_dicts.get(&dst_ip_key).cloned();
-                let need_store_dict = existing_host_dict.is_none();
-                let need_store_dst_dict = existing_dst_host_dict.is_none();
+                // Per-host persistent user state dicts (always present in Python mode)
+                let (host_dict, dst_host_dict) =
+                    host_dicts.expect("host dicts are created in Python mode");
                 // Run a function using the per-connection scope
                 match self.vm.enter(move |vm| {
-                    // Create or reuse the per-host state dict
-                    let host_dict = existing_host_dict
-                        .unwrap_or_else(|| vm.ctx.new_dict().to_pyobject(vm));
-                    let dst_host_dict = existing_dst_host_dict
-                        .unwrap_or_else(|| vm.ctx.new_dict().to_pyobject(vm));
                     // Build host object with counters + persistent state dict
                     let host = PythonHost::new(
                         host_num_connections,
                         host_num_packets,
-                        host_dict.clone(),
+                        host_dict,
                     );
                     let dst_host = PythonHost::new(
                         dst_host_num_connections,
                         dst_host_num_packets,
-                        dst_host_dict.clone(),
+                        dst_host_dict,
                     );
                     scope
                         .locals
@@ -728,18 +822,9 @@ impl TransportState {
                         PythonConnState::Uninitialized => unreachable!("initialized above"),
                     };
                     // Finally, return that everything went fine
-                    Ok::<_, PyBaseExceptionRef>((action, host_dict, dst_host_dict))
+                    Ok::<_, PyBaseExceptionRef>(action)
                 }) {
-                    Ok((action, host_dict, dst_host_dict)) => {
-                        // Store the host dicts back if they were newly created
-                        if need_store_dict {
-                            self.python_host_dicts.insert(src_ip_key, host_dict);
-                        }
-                        if need_store_dst_dict {
-                            self.python_host_dicts.insert(dst_ip_key, dst_host_dict);
-                        }
-                        action
-                    }
+                    Ok(action) => action,
                     Err(err) => {
                         let msg = self.vm.enter(|vm| format_exception(vm, &err));
                         error!(
@@ -754,7 +839,10 @@ impl TransportState {
                 // Get the program (should always exist in CensorLang mode)
                 if let Some(ref program) = self.censorlang_program {
                     let field_default_on_error = self.censorlang_config.env.field_default_on_error;
-                    let host = self.host_states.get_mut(&src_ip).unwrap();
+                    let host = self
+                        .hosts
+                        .get_mut(&src_ip)
+                        .expect("source host was touched above");
                     let program_action = env.process(
                         &packet,
                         program,
@@ -772,25 +860,7 @@ impl TransportState {
                         ProgramAction::AllowAll => Action::Ignore,
                         ProgramAction::TerminateAll => Action::Drop,
                         ProgramAction::ResetAll => {
-                            if let TransportMetadataExtra::Tcp(tcp_metadata) =
-                                packet.transport.extra
-                            {
-                                Action::Reset {
-                                    src_mac: [0; 6],
-                                    dst_mac: [0; 6],
-                                    ips,
-                                    ipid: None,
-                                    src_port: packet.transport.src,
-                                    dst_port: packet.transport.dst,
-                                    seq: tcp_metadata.seq,
-                                    ack: tcp_metadata.ack,
-                                    payload_len: packet.payload.len(),
-                                    is_ack: tcp_metadata.flags.ack,
-                                }
-                            } else {
-                                // Reset is only meaningful for TCP; fall back to Drop for UDP
-                                Action::Drop
-                            }
+                            reset_or_drop(ips, &packet.transport, packet.payload.len())
                         }
                     }
                 } else {
@@ -798,10 +868,150 @@ impl TransportState {
                 }
             }
         };
-        if *is_first {
-            *is_first = false;
+        // Update the connection lifecycle now that the script has seen this packet
+        let info = self
+            .connections
+            .get_mut(&key)
+            .expect("connection is only removed below");
+        info.is_first = false;
+        if let Some(flags) = tcp_flags {
+            if flags.rst {
+                info.tcp.rst = true;
+            }
+            if flags.fin {
+                if key.is_low_endpoint(src_ip, src_port) {
+                    info.tcp.fin_low = true;
+                } else {
+                    info.tcp.fin_high = true;
+                }
+            }
         }
+        let timeout = match key.proto {
+            TransportProtocol::Tcp if info.tcp.closed() => self.conntrack.tcp_closed_timeout,
+            TransportProtocol::Tcp => self.conntrack.tcp_idle_timeout,
+            TransportProtocol::Udp => self.conntrack.udp_idle_timeout,
+        };
+        self.connections
+            .set_deadline(&key, now.saturating_add(timeout.get().saturating_mul(MICROS_PER_SEC)));
+        self.enforce_limits();
         Ok(action)
+    }
+
+    /// Use capture timestamps (see [`Self::set_packet_time`]) instead of a
+    /// monotonic clock for timeouts. Used in PCAP mode.
+    pub fn use_packet_clock(&mut self) {
+        self.clock = Clock::Packet(0);
+    }
+
+    /// Advance the packet clock to `micros` (microseconds since the epoch).
+    /// Time never moves backwards, so out-of-order timestamps are ignored.
+    /// Has no effect unless [`Self::use_packet_clock`] was called.
+    pub fn set_packet_time(&mut self, micros: u64) {
+        if let Clock::Packet(now) = &mut self.clock {
+            *now = (*now).max(micros);
+        }
+    }
+
+    fn now(&self) -> Micros {
+        match &self.clock {
+            Clock::Monotonic(start) => start.elapsed().as_micros().try_into().unwrap_or(u64::MAX),
+            Clock::Packet(now) => *now,
+        }
+    }
+
+    /// Deadline for a host's state if it is last seen at `now`. Without an
+    /// idle timeout the deadline is just `now`, which orders hosts by recency
+    fn host_deadline(&self, now: Micros) -> Micros {
+        match self.conntrack.host_idle_timeout {
+            Some(timeout) => now.saturating_add(timeout.get().saturating_mul(MICROS_PER_SEC)),
+            None => now,
+        }
+    }
+
+    /// Get (creating if needed) the state for host `ip` and mark it as seen at `now`
+    fn touch_host(&mut self, ip: IpAddress, now: Micros) -> &mut HostState {
+        let deadline = self.host_deadline(now);
+        if !self.hosts.set_deadline(&ip, deadline) {
+            let config = &self.censorlang_config;
+            let host = HostState {
+                num_connections: 0,
+                num_packets: 0,
+                registers: Registers::new(
+                    config.program.num_registers.into(),
+                    config.env.relax_register_types,
+                ),
+                py_state: None,
+            };
+            self.hosts.insert(ip, host, deadline);
+        }
+        self.hosts.get_mut(&ip).expect("host was inserted above")
+    }
+
+    /// Get (creating if needed) the persistent Python dict for host `ip`,
+    /// which must already be tracked
+    fn host_py_state(&mut self, ip: IpAddress) -> PyObjectRef {
+        let host = self.hosts.get_mut(&ip).expect("host was touched");
+        host.py_state
+            .get_or_insert_with(|| self.vm.enter(|vm| vm.ctx.new_dict().to_pyobject(vm)))
+            .clone()
+    }
+
+    /// Forget connections and hosts whose idle timeout has passed
+    fn expire(&mut self, now: Micros) {
+        let mut envs = Vec::new();
+        while let Some((_, info)) = self.connections.pop_expired(now) {
+            envs.push(info.env);
+        }
+        let mut hosts = Vec::new();
+        if self.conntrack.host_idle_timeout.is_some() {
+            while let Some((_, host)) = self.hosts.pop_expired(now) {
+                hosts.push(host);
+            }
+        }
+        self.teardown(envs, hosts);
+    }
+
+    /// Evict state until the configured size caps are respected
+    fn enforce_limits(&mut self) {
+        let mut envs = Vec::new();
+        while self.connections.len() > self.conntrack.max_connections.get() {
+            match self.connections.pop_first() {
+                Some((_, info)) => envs.push(info.env),
+                None => break,
+            }
+        }
+        let mut hosts = Vec::new();
+        while self.hosts.len() > self.conntrack.max_hosts.get() {
+            match self.hosts.pop_first() {
+                Some((_, host)) => hosts.push(host),
+                None => break,
+            }
+        }
+        self.teardown(envs, hosts);
+    }
+
+    /// Release removed connection and host state
+    ///
+    /// Python objects are released inside the interpreter so `__del__` can
+    /// run. A connection's scope is cleared first: functions defined by the
+    /// script reference the scope's globals, forming a cycle that reference
+    /// counting alone would never free.
+    fn teardown(&self, envs: Vec<ExecutionEnvironment>, hosts: Vec<HostState>) {
+        let has_python = envs
+            .iter()
+            .any(|env| matches!(env, ExecutionEnvironment::Python { .. }))
+            || hosts.iter().any(|host| host.py_state.is_some());
+        if !has_python {
+            return;
+        }
+        self.vm.enter(|_vm| {
+            for env in envs {
+                if let ExecutionEnvironment::Python { scope, .. } = env {
+                    scope.globals.clear();
+                }
+            }
+            drop(hosts);
+        });
     }
 }
 
@@ -811,6 +1021,8 @@ const IPV6_HEADER_LEN: u8 = 40;
 const TCP_HEADER_LEN: u8 = 20;
 const UDP_HEADER_LEN: u8 = 8;
 
+/// Build an Ethernet/IP/TCP RST frame. With `ack: Some(n)` the RST carries the ACK
+/// flag and acknowledgment number `n`; with `None` it is a bare RST.
 pub fn construct_reset(
     src_mac: EthernetAddress,
     dst_mac: EthernetAddress,
@@ -818,7 +1030,7 @@ pub fn construct_reset(
     ipid: Option<u16>,
     src_port: u16,
     dst_port: u16,
-    ack: TcpSeqNumber,
+    ack: Option<TcpSeqNumber>,
     seq: TcpSeqNumber,
 ) -> Result<Vec<u8>, SmoltcpError> {
     let total_length = ETH_HEADER_LEN
@@ -878,7 +1090,7 @@ fn fill_reset(
     ips: IpPair,
     src_port: u16,
     dst_port: u16,
-    ack: TcpSeqNumber,
+    ack: Option<TcpSeqNumber>,
     seq: TcpSeqNumber,
 ) -> Result<(), SmoltcpError> {
     let mut tcp_packet = TcpPacket::new_unchecked(ip_payload);
@@ -886,10 +1098,10 @@ fn fill_reset(
     tcp_packet.check_len()?;
     tcp_packet.set_src_port(src_port);
     tcp_packet.set_dst_port(dst_port);
-    tcp_packet.set_ack_number(ack);
+    tcp_packet.set_ack_number(ack.unwrap_or(TcpSeqNumber(0)));
     tcp_packet.set_seq_number(seq);
     tcp_packet.clear_flags();
-    tcp_packet.set_ack(true);
+    tcp_packet.set_ack(ack.is_some());
     tcp_packet.set_rst(true);
     tcp_packet.fill_checksum(&ips.src(), &ips.dst());
     Ok(())
@@ -1048,6 +1260,19 @@ mod tests {
     }
 
     #[test]
+    fn connection_key_symmetric_same_ip() {
+        // Loopback / same-host traffic: both endpoints share an IP, so the
+        // ports must decide the ordering.
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(127, 0, 0, 1),
+            dst: Ipv4Address::new(127, 0, 0, 1),
+        };
+        let key_fwd = ConnectionKey::new(ips, 50000, 80, TransportProtocol::Tcp);
+        let key_rev = ConnectionKey::new(ips, 80, 50000, TransportProtocol::Tcp);
+        assert_eq!(key_fwd, key_rev);
+    }
+
+    #[test]
     fn connection_key_different_ips() {
         let ips_a = IpPair::V4 {
             src: Ipv4Address::new(10, 0, 0, 1),
@@ -1068,7 +1293,7 @@ mod tests {
             src: Ipv4Address::new(10, 0, 0, 1),
             dst: Ipv4Address::new(10, 0, 0, 2),
         };
-        let key_a = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_a = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Tcp);
         let key_b = ConnectionKey::new(ips, 1234, 443, TransportProtocol::Tcp);
         assert_ne!(key_a, key_b);
     }
@@ -1079,7 +1304,7 @@ mod tests {
             src: Ipv4Address::new(10, 0, 0, 1),
             dst: Ipv4Address::new(10, 0, 0, 2),
         };
-        let key_tcp = ConnectionKey::new(ips.clone(), 1234, 80, TransportProtocol::Tcp);
+        let key_tcp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Tcp);
         let key_udp = ConnectionKey::new(ips, 1234, 80, TransportProtocol::Udp);
         assert_ne!(key_tcp, key_udp);
     }
@@ -1101,7 +1326,7 @@ mod tests {
             Some(0x1234),
             12345,
             80,
-            TcpSeqNumber(1000),
+            Some(TcpSeqNumber(1000)),
             TcpSeqNumber(2000),
         );
         let pkt = result.unwrap();
@@ -1143,7 +1368,7 @@ mod tests {
             None,
             443,
             50000,
-            TcpSeqNumber(500),
+            Some(TcpSeqNumber(500)),
             TcpSeqNumber(600),
         );
         let pkt = result.unwrap();
@@ -1163,5 +1388,62 @@ mod tests {
         assert_eq!(tcp.dst_port(), 50000);
         assert!(tcp.rst());
         assert!(tcp.ack());
+    }
+
+    #[test]
+    fn construct_reset_without_ack_clears_ack_flag() {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(192, 168, 1, 1),
+            dst: Ipv4Address::new(10, 0, 0, 1),
+        };
+        let pkt = construct_reset(EthernetAddress([0; 6]), EthernetAddress([0; 6]), ips, None,
+                                  1, 2, None, TcpSeqNumber(42)).unwrap();
+        let eth = EthernetFrame::new_unchecked(&pkt);
+        let ip = Ipv4Packet::new_unchecked(eth.payload());
+        let tcp = TcpPacket::new_checked(ip.payload()).unwrap();
+        assert!(tcp.rst());
+        assert!(!tcp.ack());
+        assert_eq!(tcp.ack_number(), TcpSeqNumber(0));
+        assert_eq!(tcp.seq_number(), TcpSeqNumber(42));
+        assert!(tcp.verify_checksum(&ips.src(), &ips.dst()));
+    }
+
+    // --- reset_for tests ---
+
+    fn tcp_transport(syn: bool, fin: bool, ack: bool) -> crate::program::packet::TransportMetadata {
+        use crate::program::packet::{TcpFlags, TcpMetadata, TransportMetadata};
+        TransportMetadata {
+            src: 40000,
+            dst: 443,
+            extra: TransportMetadataExtra::Tcp(TcpMetadata {
+                seq: TcpSeqNumber(1000),
+                ack: TcpSeqNumber(2000),
+                header_len: 20,
+                urgent_at: 0,
+                window_len: 0,
+                flags: TcpFlags {
+                    fin, syn, rst: false, psh: false, ack, urg: false, ece: false, cwr: false, ns: false,
+                },
+            }),
+        }
+    }
+
+    fn seg_len_of(action: Option<Action>) -> usize {
+        match action {
+            Some(Action::Reset { seg_len, .. }) => seg_len,
+            other => panic!("expected Reset, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reset_for_counts_syn_and_fin_in_segment_length() {
+        let ips = IpPair::V4 {
+            src: Ipv4Address::new(10, 0, 0, 1),
+            dst: Ipv4Address::new(10, 0, 0, 2),
+        };
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(false, false, true), 5)), 5);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(true, false, false), 0)), 1);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(false, true, true), 5)), 6);
+        assert_eq!(seg_len_of(reset_for(ips, &tcp_transport(true, true, false), 3)), 5);
     }
 }
