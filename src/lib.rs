@@ -2,7 +2,6 @@ pub mod application;
 pub mod censor;
 pub mod config;
 pub mod inject;
-//pub mod epoll;
 pub mod ipc;
 pub mod model;
 pub mod program;

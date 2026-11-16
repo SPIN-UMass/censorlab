@@ -500,7 +500,7 @@ impl Censor {
     /// attached to (it would move the peer's MAC onto our port) and stalls the
     /// very connections we are trying to reset.  `src_host_mac`/`dst_host_mac`
     /// are the next-hop MACs for the original source and destination.
-    fn craft_resets(
+    pub(super) fn craft_resets(
         own_mac: [u8; 6],
         src_host_mac: [u8; 6],
         dst_host_mac: [u8; 6],
