@@ -33,6 +33,9 @@ pub struct Config {
     /// Behaviors for UDP layer
     #[serde(default)]
     pub udp: udp::Config,
+    /// Connection/host state tracking limits
+    #[serde(default)]
+    pub conntrack: conntrack::Config,
     /// Model store
     #[serde(default)]
     pub models: HashMap<String, model::Model>,
@@ -456,6 +459,50 @@ pub mod udp {
     }
 }
 
+/// Config related to connection and host state tracking
+///
+/// All timeouts are in seconds of packet time (capture timestamps in PCAP
+/// mode, a monotonic clock in live modes). Zero is rejected for every value.
+pub mod conntrack {
+    use serde::Deserialize;
+    use std::num::{NonZeroU64, NonZeroUsize};
+
+    #[derive(Clone, Debug, Deserialize)]
+    #[serde(default, deny_unknown_fields)]
+    /// Config related to connection and host state tracking
+    pub struct Config {
+        /// Forget an open TCP connection after this many idle seconds (default: 3600)
+        pub tcp_idle_timeout: NonZeroU64,
+        /// Forget a TCP connection this many idle seconds after it was closed
+        /// by RST or FIN in both directions (default: 60)
+        pub tcp_closed_timeout: NonZeroU64,
+        /// Forget a UDP flow after this many idle seconds (default: 120)
+        pub udp_idle_timeout: NonZeroU64,
+        /// Maximum number of tracked TCP+UDP connections. When exceeded, the
+        /// connection closest to expiring is evicted (default: 65536)
+        pub max_connections: NonZeroUsize,
+        /// Maximum number of hosts with per-host state (counters, registers,
+        /// `host.state`). When exceeded, the least recently seen host is
+        /// evicted (default: 65536)
+        pub max_hosts: NonZeroUsize,
+        /// Forget a host's state after this many seconds without traffic
+        /// from or to it (default: unset, i.e. only `max_hosts` applies)
+        pub host_idle_timeout: Option<NonZeroU64>,
+    }
+    impl Default for Config {
+        fn default() -> Self {
+            Self {
+                tcp_idle_timeout: NonZeroU64::new(3600).unwrap(),
+                tcp_closed_timeout: NonZeroU64::new(60).unwrap(),
+                udp_idle_timeout: NonZeroU64::new(120).unwrap(),
+                max_connections: NonZeroUsize::new(65536).unwrap(),
+                max_hosts: NonZeroUsize::new(65536).unwrap(),
+                host_idle_timeout: None,
+            }
+        }
+    }
+}
+
 /// Config related to the model store
 pub mod model {
     use serde::Deserialize;
@@ -787,6 +834,35 @@ action = "Reset"
         }
         assert!(toml::from_str::<W>("pair = \"not-an-ip\"").is_err());
         assert!(toml::from_str::<W>("pair = \"192.168.1.1\"").is_err()); // missing port
+    }
+
+    #[test]
+    fn conntrack_defaults() {
+        let config: Config = toml::from_str("[execution]\n").unwrap();
+        let ct = config.conntrack;
+        assert_eq!(ct.tcp_idle_timeout.get(), 3600);
+        assert_eq!(ct.tcp_closed_timeout.get(), 60);
+        assert_eq!(ct.udp_idle_timeout.get(), 120);
+        assert_eq!(ct.max_connections.get(), 65536);
+        assert_eq!(ct.max_hosts.get(), 65536);
+        assert!(ct.host_idle_timeout.is_none());
+    }
+
+    #[test]
+    fn conntrack_overrides_and_rejects_invalid() {
+        let config: Config = toml::from_str(
+            "[execution]\n[conntrack]\nudp_idle_timeout = 30\nmax_hosts = 10\nhost_idle_timeout = 600\n",
+        )
+        .unwrap();
+        assert_eq!(config.conntrack.udp_idle_timeout.get(), 30);
+        assert_eq!(config.conntrack.max_hosts.get(), 10);
+        assert_eq!(config.conntrack.host_idle_timeout.map(|t| t.get()), Some(600));
+        // Defaults still apply to unspecified keys
+        assert_eq!(config.conntrack.tcp_idle_timeout.get(), 3600);
+        // Zero, negative and unknown keys are rejected
+        assert!(toml::from_str::<Config>("[execution]\n[conntrack]\nmax_connections = 0\n").is_err());
+        assert!(toml::from_str::<Config>("[execution]\n[conntrack]\ntcp_idle_timeout = -1\n").is_err());
+        assert!(toml::from_str::<Config>("[execution]\n[conntrack]\nmax_conections = 5\n").is_err());
     }
 
     #[test]
