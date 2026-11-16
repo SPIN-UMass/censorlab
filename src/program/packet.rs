@@ -1298,22 +1298,79 @@ pub mod rust_tls {
     }
     #[pyclass]
     impl ClientHelloInfo {
-        /// Server Name Indication, or None
+        /// First server_name host_name entry as raw bytes, or None
         #[pygetset]
         fn sni(&self) -> Option<rustpython_vm::builtins::PyBytes> {
-            self.inner.sni.as_ref().map(|s| rustpython_vm::builtins::PyBytes::from(s.as_bytes().to_vec()))
+            self.inner
+                .sni
+                .as_ref()
+                .map(|s| rustpython_vm::builtins::PyBytes::from(s.clone()))
         }
 
-        /// ALPN protocol names
+        /// Every server_name host_name entry (list of bytes), in order
+        #[pygetset]
+        fn sni_list(&self, vm: &VirtualMachine) -> PyObjectRef {
+            let list: Vec<PyObjectRef> = self
+                .inner
+                .sni_list
+                .iter()
+                .map(|s| vm.ctx.new_bytes(s.clone()).into())
+                .collect();
+            vm.new_pyobj(list)
+        }
+
+        /// True if any host_name entry is not valid UTF-8
+        #[pygetset]
+        fn sni_invalid_utf8(&self) -> bool {
+            self.inner.sni_invalid_utf8
+        }
+
+        /// ALPN protocol names (str; invalid UTF-8 replaced with U+FFFD)
         #[pygetset]
         fn alpn(&self, vm: &VirtualMachine) -> PyObjectRef {
             let list: Vec<PyObjectRef> = self
                 .inner
                 .alpn
                 .iter()
-                .map(|s| vm.new_pyobj(s.clone()))
+                .map(|s| vm.new_pyobj(String::from_utf8_lossy(s).into_owned()))
                 .collect();
             vm.new_pyobj(list)
+        }
+
+        /// True if an extension type occurs more than once
+        #[pygetset]
+        fn duplicate_extensions(&self) -> bool {
+            self.inner.duplicate_extensions
+        }
+
+        /// Types of known extensions (SNI/ALPN/supported_versions) that were malformed
+        #[pygetset]
+        fn malformed_extensions(&self, vm: &VirtualMachine) -> PyObjectRef {
+            let list: Vec<PyObjectRef> = self
+                .inner
+                .malformed_extensions
+                .iter()
+                .map(|t| vm.new_pyobj(*t))
+                .collect();
+            vm.new_pyobj(list)
+        }
+
+        /// Number of TLS records the ClientHello spanned (0 for a bare message)
+        #[pygetset]
+        fn record_count(&self) -> usize {
+            self.inner.record_count
+        }
+
+        /// Number of TCP segments that contributed bytes (0 if not TCP-reassembled)
+        #[pygetset]
+        fn tcp_segments(&self) -> usize {
+            self.inner.tcp_segments
+        }
+
+        /// True if the ClientHello spanned several TLS records or TCP segments
+        #[pygetset]
+        fn reassembled(&self) -> bool {
+            self.inner.reassembled()
         }
 
         /// Legacy TLS version from the ClientHello (e.g. 0x0303)
@@ -1395,7 +1452,11 @@ pub mod rust_quic {
         /// SNI from the TLS ClientHello, if found
         #[pygetset]
         fn sni(&self) -> Option<rustpython_vm::builtins::PyBytes> {
-            self.inner.sni().map(|s| rustpython_vm::builtins::PyBytes::from(s.as_bytes().to_vec()))
+            self.inner
+                .client_hello
+                .as_ref()
+                .and_then(|ch| ch.sni.clone())
+                .map(rustpython_vm::builtins::PyBytes::from)
         }
 
         /// ALPN protocols from the TLS ClientHello, if found
@@ -1405,7 +1466,12 @@ pub mod rust_quic {
                 .inner
                 .client_hello
                 .as_ref()
-                .map(|ch| ch.alpn.iter().map(|s| vm.new_pyobj(s.clone())).collect())
+                .map(|ch| {
+                    ch.alpn
+                        .iter()
+                        .map(|s| vm.new_pyobj(String::from_utf8_lossy(s).into_owned()))
+                        .collect()
+                })
                 .unwrap_or_default();
             vm.new_pyobj(list)
         }
