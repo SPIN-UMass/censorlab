@@ -160,7 +160,7 @@ where
 /// Config related to the execution environment
 pub mod execution {
     use super::Deserialize;
-    use crate::transport::ExecutionMode;
+    use crate::transport::{ExecutionMode, ScriptErrorPolicy};
     use std::path::PathBuf;
 
     #[derive(Default, Deserialize)]
@@ -179,6 +179,10 @@ pub mod execution {
         /// Number of times to repeat sending a TCP RST packet (default: 5)
         #[serde(default = "default_reset_repeat")]
         pub reset_repeat: usize,
+        /// What to do with a packet when the Python censor script raises on it
+        /// (default: Allow, i.e. fail open). Failures are always logged.
+        #[serde(default)]
+        pub on_script_error: ScriptErrorPolicy,
     }
 
     fn default_hash_seed() -> u32 {
