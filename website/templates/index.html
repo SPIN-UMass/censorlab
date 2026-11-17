@@ -1,213 +1,188 @@
 {% extends "base.html" %}
+{% block body_class %}page-home{% endblock %}
 
 {% block content %}
-<section class="hero">
-    <div class="hero-body">
-      <div class="container is-max-desktop">
-        <div class="columns is-centered">
-          <div class="column has-text-centered">
-            <div><h1 class="title is-1 publication-title">{{ section.title }}</h1></div>
-            <h1 class="title is-1 publication-title">{{ section.extra.subtitle }}</h1>
-            {% if not config.extra.anonymous %}
-            <div class="is-size-5 publication-authors">
-              <!-- Paper authors -->
-              {% set unique_institutions = section.extra.authors | map(attribute="institution") | unique %}
-              {% for author in section.extra.authors %}
-								{% set institution = section.extra.institutions | filter(attribute="id", value=author.institution) | first %}
-                <span class="author-block"><a href="{{ author.website }}" target="_blank">{{ author.name }}</a>
-                <sup>{{ institution.symbol }}</sup>
-                </span>
-              {% endfor %}
-            </div>
-            <div class="is-size-5 publication-authors">
-              <div>{{ section.extra.venue }}</div>
-              {% for institution in section.extra.institutions %}
-                <div class="author-block">{{ institution.symbol }} {{ institution.name }}</div>
-              {% endfor %}
-            </div>
-            {% endif %}
-        </div>
-      </div>
+<!-- Hero -->
+<section class="home-hero">
+  <div class="container is-max-desktop">
+    <img class="hero-logo" src="{{ get_url(path="images/censorlab.png") }}" alt="CensorLab logo">
+    <h1 class="hero-title">{{ section.title }}</h1>
+    <p class="hero-subtitle">{{ section.extra.subtitle }}</p>
+    {% if not config.extra.anonymous %}
+    <p class="hero-authors">
+      {% for author in section.extra.authors %}
+      {% set institution = section.extra.institutions | filter(attribute="id", value=author.institution) | first %}
+      <span class="author-block"><a href="{{ author.website }}" target="_blank" rel="noopener">{{ author.name }}</a><sup>{{ institution.symbol }}</sup></span>
+      {% endfor %}
+    </p>
+    <p class="hero-affiliation">
+      {% for institution in section.extra.institutions %}
+      <span class="author-block">{{ institution.symbol }} {{ institution.name }}</span>
+      {% endfor %}
+      {% if section.extra.venue %}<span class="hero-venue">{{ section.extra.venue }}</span>{% endif %}
+    </p>
+    {% endif %}
+    <div class="hero-buttons">
+      <a class="button is-rounded cl-primary" href="{{ get_url(path="getting_started") }}">
+        <span class="icon"><i class="fa-solid fa-rocket"></i></span><span>Get Started</span>
+      </a>
+      <a class="button is-rounded cl-ghost" href="{{ get_url(path="docs") }}">
+        <span class="icon"><i class="fa-solid fa-book"></i></span><span>Docs</span>
+      </a>
+      {% if not config.extra.anonymous %}
+      <a class="button is-rounded cl-ghost" href="{{ section.extra.pdf }}" target="_blank" rel="noopener">
+        <span class="icon"><i class="fas fa-file-pdf"></i></span><span>Paper</span>
+      </a>
+      <a class="button is-rounded cl-ghost" href="{{ section.extra.arxiv }}" target="_blank" rel="noopener">
+        <span class="icon"><i class="ai ai-arxiv"></i></span><span>arXiv</span>
+      </a>
+      <a class="button is-rounded cl-ghost" href="{{ config.extra.repo }}" target="_blank" rel="noopener">
+        <span class="icon"><i class="fab fa-github"></i></span><span>Code</span>
+      </a>
+      {% endif %}
+      <a class="button is-rounded cl-ghost" href="{{ get_url(path="vm-info") }}">
+        <span class="icon"><i class="fa-solid fa-computer"></i></span><span>VM Image</span>
+      </a>
     </div>
   </div>
 </section>
 
-
-<!-- Teaser video-->
-<section class="hero teaser">
+<!-- Demo video -->
+<section class="home-video">
   <div class="container is-max-desktop">
-    <div class="hero-body">
-      <video poster="" id="tree" autoplay controls muted loop height="100%">
-        <!-- Your video here -->
-        <source src="videos/censorlab_demo.mp4" type="video/mp4">
+    <div class="video-frame">
+      <video autoplay controls muted loop playsinline preload="metadata">
+        <source src="{{ get_url(path="videos/censorlab_demo.mp4") }}" type="video/mp4">
       </video>
-      <h2 class="subtitle has-text-centered">
-        CensorLab is a censorship emulation platform that allows developers to test various censorship strategies against their own censorship circumvention tools. By <i>proactively</i> attempting to censor their own protocols, censorship circumvention developers can develop stronger threat models and strengthen their own tools against past, present, and future censor strategies.
-			</h2>
     </div>
+    <p class="lede">
+      CensorLab lets circumvention developers test their tools against the censor strategies of the past, present, and future.
+      By <em>proactively</em> censoring their own protocols, developers can build stronger threat models and harden
+      their tools before a real censor finds the weakness.
+    </p>
   </div>
 </section>
-<!-- End teaser video -->
 
-<!-- Getting started -->
-<section class="section hero">
+<!-- Features -->
+<section class="home-section">
   <div class="container is-max-desktop">
-    <div class="columns is-centered has-text-centered">
-      <div class="column has-text-centered">
-        <div class="publication-links">
-            {% if not config.extra.anonymous %}
-            <span class="link-block">
-              <a href="{{ section.extra.pdf }}" target="_blank"
-              class="external-link button is-normal is-rounded is-dark">
-              <span class="icon">
-                <i class="fas fa-file-pdf"></i>
-              </span>
-              <span>Paper</span>
-            </a>
-            </span>
-            <!-- Github link -->
-            <span class="link-block">
-              <a href="https://github.com/SPIN-UMass/censorlab" target="_blank"
-              class="external-link button is-normal is-rounded is-dark">
-              <span class="icon">
-                <i class="fab fa-github"></i>
-              </span>
-              <span>Code</span>
-            </a>
-          </span>
-            {% endif %}
-        <!-- Link to getting started -->
-        <span class="link-block">
-          <a href="{{ get_url(path="getting_started") }}" target="_blank"
-            class="external-link button is-normal is-rounded is-dark">
-            <span class="icon">
-              <i class="fa-solid fa-book"></i>
-            </span>
-            <span>Getting Started</span>
-          </a>
-        </span>
-        <!-- Link to documentation -->
-        <span class="link-block">
-          <a href="{{ get_url(path="docs") }}"
-            class="external-link button is-normal is-rounded is-dark">
-            <span class="icon">
-              <i class="fa-solid fa-file-lines"></i>
-            </span>
-            <span>Documentation</span>
-          </a>
-        </span>
-        {% if not config.extra.anonymous %}
-        <!-- Link to examples -->
-        <span class="link-block">
-          <a href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank"
-            class="external-link button is-normal is-rounded is-dark">
-            <span class="icon">
-              <i class="fa-brands fa-python"></i>
-            </span>
-            <span>Examples</span>
-          </a>
-        </span>
-        {% endif %}
-
-        <!-- Link to VM Images -->
-        <span class="link-block">
-          <a href="{{ get_url(path="/vm-info") }}" target="_blank"
-            class="external-link button is-normal is-rounded is-dark">
-            <span class="icon">
-              <i class="fa-solid fa-computer"></i>
-            </span>
-            <span>CensorLab VM</span>
-          </a>
-        </span>
-        {% if not config.extra.anonymous %}
- 				<!-- ArXiv abstract Link -->
-				<span class="link-block">
-						<a href="{{ section.extra.arxiv }}" target="_blank"
-						class="external-link button is-normal is-rounded is-dark">
-						<span class="icon">
-							<i class="ai ai-arxiv"></i>
-						</span>
-						<span>arXiv</span>
-					</a>
-				</span>
-        {% endif %}
-        <!--<span class="link-block">
-          <a href="/drives/censorlab.ova" target="_blank"
-            class="external-link button is-normal is-rounded is-dark">
-            <span class="icon">
-              <i class="fa-solid fa-computer"></i>
-            </span>
-            <span>x86_64 VM</span>
-          </a>
-        </span>
-        <span class="link-block">
-          <a href="/drives/censorlab-arm.vmdk" target="_blank"
-            class="external-link button is-normal is-rounded is-dark">
-            <span class="icon">
-              <i class="fa-brands fa-apple"></i>
-            </span>
-            <span>aarch66 VM</span>
-          </a>
-        </span>-->
+    <h2 class="section-heading">What you can emulate</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <span class="feature-icon"><i class="fa-solid fa-layer-group"></i></span>
+        <h3>Layered filtering</h3>
+        <p>Packets flow through Ethernet, ARP, IPv4/IPv6, ICMP, TCP and UDP layers, each with its own allow and block lists. IP lists take CIDR subnets.</p>
       </div>
-    </div>
-      <div class="column is-four-fifths">
-        <h2 class="title is-3">Getting Started</h2>
-        <div class="content has-text-justified">
-          <p>Get up and running with CensorLab in minutes using Docker — no Rust toolchain or system setup needed. We also provide demos, full documentation, and a pre-built VM.</p>
-          Click <a href="{{ get_url(path="getting_started") }}" target="_blank">here</a> for a step-by-step tutorial.
-
-					{% if not config.extra.anonymous %}
-					<p>For educators interested in teaching censorship circumvention, consider using <a href="https://github.com/SPIN-UMass/censorlab/tree/main/homework">this example assignment</a>.</p>
-					{% endif %}
-        </div>
+      <div class="feature">
+        <span class="feature-icon"><i class="fa-brands fa-python"></i></span>
+        <h3>Programmable censors</h3>
+        <p>Write per-connection logic in Python, or in CensorLang, a small DSL that is type- and bounds-checked when it loads.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon"><i class="fa-solid fa-brain"></i></span>
+        <h3>ML classifiers</h3>
+        <p>Load ONNX models and call them from your censor to emulate data-driven traffic classification that no censor has deployed yet.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon"><i class="fa-solid fa-magnifying-glass"></i></span>
+        <h3>Protocol-aware</h3>
+        <p>Strict parsers for DNS, TLS ClientHellos reassembled across segments and records, and decrypted QUIC Initials (v1 and v2).</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon"><i class="fa-solid fa-hand"></i></span>
+        <h3>Real censor actions</h3>
+        <p>Drop, inject TCP RSTs, forge DNS responses, delay, rewrite TTLs, or buffer IPv4 fragments the way TSPU middleboxes do.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-icon"><i class="fa-solid fa-network-wired"></i></span>
+        <h3>Three deployment modes</h3>
+        <p>Intercept live traffic with netfilter queues, run inline as a transparent bridge between two interfaces, or replay a PCAP offline.</p>
       </div>
     </div>
   </div>
 </section>
-<!-- End getting started -->
-<!-- Paper abstract -->
-<section class="section hero is-light">
+
+<!-- Quick look -->
+<section class="home-section is-tinted">
   <div class="container is-max-desktop">
-    <div class="columns is-centered has-text-centered">
-      <div class="column is-four-fifths">
-        <h2 class="title is-3">Abstract</h2>
-        <div class="content has-text-justified">
-          <p>{{ section.extra.abstract }}</p>
-        </div>
+    <h2 class="section-heading">A censor in a few lines</h2>
+    <div class="columns is-variable is-5">
+      <div class="column">
+        <p class="code-caption"><code>demos/http_blocking/http.py</code> resets HTTP connections that mention <code>.org</code></p>
+{{ '```python
+def process(packet):
+    tcp = packet.tcp
+    if tcp and 80 in [tcp.src, tcp.dst]:
+        if b".org" in packet.payload:
+            return "reset"
+```' | markdown | safe }}
       </div>
+      <div class="column">
+        <p class="code-caption">Run it in Docker, no toolchain required</p>
+{% if config.extra.anonymous %}
+{{ "```bash
+bash docker/censorlab.sh -c demos/http_blocking/censor.toml nfq
+```" | markdown | safe }}
+{% else %}
+{{ "```bash
+git clone " ~ config.extra.repo ~ ".git
+cd censorlab && git submodule update --init
+bash docker/censorlab.sh -c demos/http_blocking/censor.toml nfq
+```" | markdown | safe }}
+{% endif %}
+      </div>
+    </div>
+    <div class="has-text-centered">
+      <a class="button is-rounded cl-primary" href="{{ get_url(path="getting_started") }}">
+        <span>Follow the step-by-step tutorial</span><span class="icon"><i class="fa-solid fa-arrow-right"></i></span>
+      </a>
+    </div>
+    {% if not config.extra.anonymous %}
+    <p class="educators">
+      <i class="fa-solid fa-graduation-cap"></i>
+      Teaching censorship circumvention? Try <a href="{{ config.extra.repo }}/tree/main/homework" target="_blank" rel="noopener">our example homework assignment</a>.
+    </p>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Abstract -->
+<section class="home-section">
+  <div class="container is-max-desktop">
+    <h2 class="section-heading">Abstract</h2>
+    <div class="abstract">
+      {{ section.extra.abstract | markdown | safe }}
     </div>
   </div>
 </section>
-<!-- End paper abstract -->
 
-
-<!--BibTex citation 
-  <section class="section" id="BibTeX">
-    <div class="container is-max-desktop content">
-      <h2 class="title">BibTeX</h2>
-      <pre><code>BibTex Code Here</code></pre>
-    </div>
-</section>
-End BibTex citation -->
-
-
-<footer class="footer">
-  <div class="container">
-    <div class="columns is-centered">
-      <div class="column is-8">
-        <div class="content">
-          {% if not config.extra.anonymous %}
-          If you have any questions about CensorLab, please contact us at <a href="mailto:censorlab@cs.umass.edu">censorlab@cs.umass.edu</a>.
-          {% endif %}
-        </div>
-        <div class="content">
-            This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a> which was adopted from the <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
-            You are free to borrow the source code of this website, we just ask that you link back to <a href="https://nerfies.github.io/">the original</a> in the footer. <br> This website is licensed under a <a rel="license"  href="http://creativecommons.org/licenses/by-sa/4.0/" target="_blank">Creative
-            Commons Attribution-ShareAlike 4.0 International License</a>.
-        </div>
-      </div>
+{% if not config.extra.anonymous and section.extra.bibtex %}
+<!-- Citation -->
+<section class="home-section is-tinted" id="bibtex">
+  <div class="container is-max-desktop">
+    <h2 class="section-heading">Citation</h2>
+    <div class="bibtex">
+      <button class="button is-small copy-btn" type="button" aria-label="Copy BibTeX">
+        <span class="icon"><i class="fa-regular fa-copy"></i></span><span>Copy</span>
+      </button>
+      <pre><code>{{ section.extra.bibtex | trim }}</code></pre>
     </div>
   </div>
-</footer>
+</section>
+{% endif %}
 {% endblock content %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.copy-btn').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var text = btn.parentElement.querySelector('code').textContent;
+    var label = btn.querySelector('span:last-child');
+    navigator.clipboard.writeText(text).then(function () {
+      label.textContent = 'Copied';
+      setTimeout(function () { label.textContent = 'Copy'; }, 1500);
+    });
+  });
+});
+</script>
+{% endblock %}

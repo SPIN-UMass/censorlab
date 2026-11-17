@@ -1,5 +1,7 @@
 # The URL the site will be built for
 base_url = "https://censorlab.cs.umass.edu/"
+title = "CensorLab"
+description = "CensorLab is a censorship emulation testbed: write a censor in Python or CensorLang, put it on the path of real traffic, and see whether your circumvention tool survives."
 
 # Whether to automatically compile all Sass files in the sass directory
 compile_sass = true
@@ -20,3 +22,6 @@ render_inline_code = true
 # GitHub URLs.  The Docker image build flips this automatically so the locally
 # served docs are safe for anonymous review.
 anonymous = false
+tagline = "A Testbed for Censorship Experimentation"
+repo = "https://github.com/SPIN-UMass/censorlab"
+email = "censorlab@cs.umass.edu"

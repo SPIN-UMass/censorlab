@@ -1,45 +1,11 @@
 {% extends "base.html" %}
-{% block content %}
-<script>document.body.classList.add('page-light');</script>
-<style>
-  #docs-tabs, #docs-tabs .tabs, #docs-tabs .tabs ul { background-color: #fff !important; }
-  #docs-tabs .tabs li a { color: #111 !important; font-weight: 500; background-color: #f5f5f5 !important; }
-  #docs-tabs .tabs li.is-active a { color: #0f81cc !important; font-weight: 600; background-color: #fff !important; border-bottom-color: #0f81cc !important; }
-</style>
-<!-- Navbar -->
-<nav class="navbar is-light" role="navigation" aria-label="main navigation">
-  <div class="container is-max-desktop">
-    <div class="navbar-brand">
-      <a class="navbar-item has-text-weight-bold" href="{{ get_url(path="/") }}">
-        <img src="{{ get_url(path="images/censorlab.png") }}" alt="CensorLab" style="height: 28px; margin-right: 0.5rem;">
-        CensorLab
-      </a>
-      <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="docsNavbar">
-        <span aria-hidden="true"></span>
-        <span aria-hidden="true"></span>
-        <span aria-hidden="true"></span>
-      </a>
-    </div>
-    <div id="docsNavbar" class="navbar-menu">
-      <div class="navbar-end">
-        <a class="navbar-item" href="{{ get_url(path="/") }}">Home</a>
-        <a class="navbar-item" href="{{ get_url(path="getting_started") }}">Getting Started</a>
-        <a class="navbar-item is-active" href="{{ get_url(path="docs") }}">Documentation</a>
-        {% if not config.extra.anonymous %}
-        <a class="navbar-item" href="https://github.com/SPIN-UMass/censorlab/tree/main/demos" target="_blank">Examples</a>
-        <a class="navbar-item" href="https://github.com/SPIN-UMass/censorlab" target="_blank">
-          <span class="icon"><i class="fab fa-github"></i></span>
-        </a>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-</nav>
+{% block body_class %}page-light{% endblock %}
 
-<section class="section">
-  <div class="container is-max-desktop">
-    <h1 class="title is-2 has-text-centered docs-page-title">CensorLab Documentation</h1>
-    <div class="tabs is-centered is-boxed is-medium" id="docs-tabs">
+{% block content %}
+<section class="section docs-section">
+  <div class="container docs-container">
+    <h1 class="docs-page-title">Documentation</h1>
+    <div class="tabs is-centered" id="docs-tabs">
       <ul>
         <li class="is-active" data-tab="general-usage"><a>General Usage</a></li>
         <li data-tab="configuration-reference"><a>Configuration</a></li>
@@ -47,14 +13,31 @@
         <li data-tab="censorlang-reference"><a>CensorLang</a></li>
       </ul>
     </div>
-    <div class="docs-content" id="docs-content">
-      {{ page.content | safe }}
+    <div class="docs-layout">
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="docs-toc-title">On this page</p>
+        <ul id="docs-toc-list"></ul>
+      </aside>
+      <div class="docs-content" id="docs-content">
+        {{ page.content | safe }}
+      </div>
     </div>
   </div>
 </section>
+{% endblock content %}
 
+{% block scripts %}
 <script>
 (function() {
+  function slugify(text) {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/[\s]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
   // Split the rendered markdown content into tabbed sections by <h1> tags
   var container = document.getElementById('docs-content');
   var children = Array.from(container.childNodes);
@@ -64,14 +47,7 @@
   children.forEach(function(node) {
     // Check for h1 elements (our section dividers)
     if (node.nodeType === 1 && node.tagName === 'H1') {
-      // Create a slug from the heading text
-      var slug = node.textContent
-        .toLowerCase()
-        .replace(/[^a-z0-9\s-]/g, '')
-        .replace(/[\s]+/g, '-')
-        .replace(/-{2,}/g, '-')
-        .replace(/^-+|-+$/g, '');
-      current = { slug: slug, title: node.textContent, nodes: [] };
+      current = { slug: slugify(node.textContent), title: node.textContent, nodes: [] };
       sections.push(current);
     } else if (current) {
       current.nodes.push(node);
@@ -79,10 +55,8 @@
   });
 
   // Skip the first "CensorLab Reference Documentation" heading — it's the page title.
-  // The real sections start from the second h1 onward.
+  // The intro text below it is already represented by the tab bar itself.
   if (sections.length > 0 && sections[0].slug === 'censorlab-reference-documentation') {
-    // The intro text (between the title h1 and first section h1) goes nowhere — it's
-    // already represented by the tab bar itself
     sections.shift();
   }
 
@@ -103,19 +77,35 @@
     container.appendChild(pane);
   });
 
-  // Tab switching
   var tabs = document.querySelectorAll('#docs-tabs li');
   var panes = document.querySelectorAll('.docs-tab-pane');
+  var tocList = document.getElementById('docs-toc-list');
 
-  function activateTab(tabSlug) {
+  // Rebuild the sidebar from the active pane's h2/h3 headings
+  function buildToc(pane) {
+    tocList.innerHTML = '';
+    pane.querySelectorAll('h2, h3').forEach(function(h) {
+      var li = document.createElement('li');
+      li.className = 'toc-' + h.tagName.toLowerCase();
+      var a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent;
+      li.appendChild(a);
+      tocList.appendChild(li);
+    });
+  }
+
+  function activateTab(tabSlug, anchor) {
     tabs.forEach(function(tab) {
       tab.classList.toggle('is-active', tab.getAttribute('data-tab') === tabSlug);
     });
     panes.forEach(function(pane) {
-      pane.classList.toggle('is-active', pane.getAttribute('data-tab') === tabSlug);
+      var active = pane.getAttribute('data-tab') === tabSlug;
+      pane.classList.toggle('is-active', active);
+      if (active) buildToc(pane);
     });
     // Update URL hash without scrolling
-    history.replaceState(null, '', '#' + tabSlug);
+    history.replaceState(null, '', '#' + (anchor || tabSlug));
   }
 
   tabs.forEach(function(tab) {
@@ -125,24 +115,38 @@
     });
   });
 
-  // Activate tab from URL hash on load
-  var hash = window.location.hash.replace('#', '');
-  if (hash) {
-    var matchingTab = document.querySelector('#docs-tabs li[data-tab="' + hash + '"]');
-    if (matchingTab) {
-      activateTab(hash);
-    }
+  tocList.addEventListener('click', function(e) {
+    var a = e.target.closest('a');
+    if (!a) return;
+    e.preventDefault();
+    var id = a.getAttribute('href').slice(1);
+    history.replaceState(null, '', '#' + id);
+    document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+  });
+
+  // Highlight the heading currently in view
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (!entry.isIntersecting) return;
+      tocList.querySelectorAll('a').forEach(function(a) {
+        a.classList.toggle('is-current', a.getAttribute('href') === '#' + entry.target.id);
+      });
+    });
+  }, { rootMargin: '-80px 0px -70% 0px' });
+  container.querySelectorAll('h2, h3').forEach(function(h) { observer.observe(h); });
+
+  // Activate tab from URL hash on load: either a tab slug or a heading id (Zola assigns those)
+  var hash = decodeURIComponent(window.location.hash.replace('#', ''));
+  var target = hash && document.getElementById(hash);
+  var targetPane = target && target.closest('.docs-tab-pane');
+  if (hash && document.querySelector('#docs-tabs li[data-tab="' + CSS.escape(hash) + '"]')) {
+    activateTab(hash);
+  } else if (targetPane) {
+    activateTab(targetPane.getAttribute('data-tab'), hash);
+    target.scrollIntoView();
+  } else if (panes.length) {
+    buildToc(panes[0]);
   }
 })();
-
-// Navbar burger toggle for mobile
-var burger = document.querySelector('.navbar-burger');
-if (burger) {
-  burger.addEventListener('click', function() {
-    var target = document.getElementById(burger.dataset.target);
-    burger.classList.toggle('is-active');
-    target.classList.toggle('is-active');
-  });
-}
 </script>
-{% endblock content %}
+{% endblock %}
