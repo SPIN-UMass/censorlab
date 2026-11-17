@@ -29,7 +29,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use thiserror::Error;
-use tracing::error;
+use crate::packet_log::error;
 
 /// Connection key is an identifier that will always resolve to the same value for a connection
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

@@ -1691,7 +1691,7 @@ fn i64_to_f64(i: i64) -> f64 {
     let f = i as f64;
     let i2: i64 = f as i64;
     if i2 != i {
-        tracing::warn!("Precision loss converting i64 ({i}) to f64 ({f}), round-trip gives {i2}");
+        crate::packet_log::warn!("Precision loss converting i64 ({i}) to f64 ({f}), round-trip gives {i2}");
     }
     f
 }

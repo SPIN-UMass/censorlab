@@ -38,7 +38,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinError;
-use tracing::{debug, error, info_span, warn};
+use crate::packet_log::{debug, error, warn};
 
 /// Used for fast access to a list of every port for examples such as udp port filtering
 pub type PortVec = BitArr!(for 65536, in u64, Msb0);
@@ -576,14 +576,8 @@ impl Censor {
         direction: Direction,
         ip_layer: IpLayer,
     ) -> Result<Action, SmoltcpError> {
-        // Enrich logging
-        let span = info_span!(
-            "ip",
-            direction = tracing::field::display(direction),
-            src = tracing::field::display(ips.src()),
-            dst = tracing::field::display(ips.dst())
-        );
-        let _enter = span.enter();
+        // Attribute log events to this packet (an `ip{...}` span, see packet_log)
+        let _packet = crate::packet_log::enter(direction, ips);
         // Dispatch processing based on protocol
         match (ip_layer.protocol, ips) {
             (IpProtocol::Tcp | IpProtocol::Udp, _) => {

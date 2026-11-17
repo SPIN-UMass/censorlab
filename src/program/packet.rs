@@ -589,7 +589,6 @@ pub mod rust_packet {
         convert::IntoPyException, pyclass, PyObjectRef, PyPayload, PyResult,
         VirtualMachine,
     };
-    use tracing;
 
     use crate::subnet::IpNet;
     use std::io;
@@ -1086,22 +1085,22 @@ pub mod rust_packet {
 
     #[pyfunction]
     fn log_info(msg: String) {
-        tracing::info!("{}", msg);
+        crate::packet_log::info!("{}", msg);
     }
 
     #[pyfunction]
     fn log_error(msg: String) {
-        tracing::error!("{}", msg);
+        crate::packet_log::error!("{}", msg);
     }
 
     #[pyfunction]
     fn log_warn(msg: String) {
-        tracing::warn!("{}", msg);
+        crate::packet_log::warn!("{}", msg);
     }
 
     #[pyfunction]
     fn log_debug(msg: String) {
-        tracing::debug!("{}", msg);
+        crate::packet_log::debug!("{}", msg);
     }
 }
 

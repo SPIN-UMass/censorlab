@@ -207,7 +207,7 @@ mod tcp {
         Action, ConnectionIdentifier, Direction, EnvFields, ModelIO, Packet, Program,
         RegisterBanks, Registers, TransportMetadataExtra,
     };
-    use tracing::{error, warn};
+    use crate::packet_log::{error, warn};
     #[derive(Debug)]
     pub struct ProgramEnv {
         init_id: ConnectionIdentifier,
@@ -316,7 +316,7 @@ mod udp {
         Action, ConnectionIdentifier, EnvFields, ModelIO, Packet, Program, RegisterBanks,
         Registers, TransportMetadataExtra,
     };
-    use tracing::{error, warn};
+    use crate::packet_log::{error, warn};
     #[derive(Debug)]
     pub struct ProgramEnv {
         init_id: ConnectionIdentifier,
