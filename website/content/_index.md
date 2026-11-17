@@ -19,4 +19,14 @@ the anti-censorship community should be able to proactively develop circumventio
 To facilitate proactive censorship research, we design and implement CensorLab, a generic platform for emulating Internet censorship scenarios. CensorLab aims to complement currently reactive circumvention research  by efficiently emulating past, present, and hypothetical censorship strategies in  realistic network environments. Specifically,  CensorLab aims to (1) support all censorship mechanisms previously or currently deployed by real-world censors; (2) support  the emulation of hypothetical (not-yet-deployed) censorship strategies including advanced data-driven censorship mechanisms  (e.g., ML-based traffic classifiers); (3) provide an easy-to-use platform for researchers and practitioners enabling them to perform extensive experimentation; and (4) operate efficiently with minimal overhead.
 We have implemented CensorLab as a fully functional, flexible, and high-performance platform, and showcase how it can be used to emulate a wide range of censorship scenarios, from traditional IP blocking and keyword filtering to hypothetical ML-based censorship mechanisms."""
 extra.venue = ""
+extra.bibtex = """
+@misc{sheffey2024censorlab,
+  title         = {CensorLab: A Testbed for Censorship Experimentation},
+  author        = {Sheffey, Jade and Houmansadr, Amir},
+  year          = {2024},
+  eprint        = {2412.16349},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2412.16349}
+}
+"""
 +++

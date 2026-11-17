@@ -2,45 +2,104 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="description" content="DESCRIPTION META TAG">
-  {% if section %}
-    <meta property="og:title" content="{{ section.title }}"/>
-  {% elif page %}
-    <meta property="og:title" content="{{ page.title }}"/>
-  {% endif %}
-  <meta property="og:description" content="SOCIAL MEDIA DESCRIPTION TAG TAG"/>
-  <meta property="og:url" content="{{ config.base_url }}"/>
-  <!-- Path to banner image, should be in the path listed below. Optimal dimenssions are 1200X630-->
-  <meta property="og:image" content="images/censorlab.png" />
-  <meta property="og:image:width" content="1024"/>
-  <meta property="og:image:height" content="1024"/>
-
-
-  <meta name="twitter:title" content="TWITTER BANNER TITLE META TAG">
-  <meta name="twitter:description" content="TWITTER BANNER DESCRIPTION META TAG">
-  <!-- Path to banner image, should be in the path listed below. Optimal dimenssions are 1200X600-->
-  <meta name="twitter:image" content="static/images/your_twitter_banner_image.png">
-  <meta name="twitter:card" content="summary_large_image">
-  <!-- Keywords for your paper to be indexed by-->
-  <meta name="keywords" content="KEYWORDS SHOULD BE PLACED HERE">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if section %}{% set page_title = section.title %}{% elif page %}{% set page_title = page.title %}{% else %}{% set page_title = config.title %}{% endif %}
+  {% if page_title == config.title %}{% set full_title = config.title ~ " — " ~ config.extra.tagline %}{% else %}{% set full_title = page_title ~ " · " ~ config.title %}{% endif %}
+  <title>{{ full_title }}</title>
+  <meta name="description" content="{{ config.description }}">
+  <meta name="keywords" content="internet censorship, censorship circumvention, censorship emulation, testbed, network measurement, traffic analysis">
+  <meta name="theme-color" content="#1b2433">
 
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ full_title }}">
+  <meta property="og:description" content="{{ config.description }}">
+  <meta property="og:url" content="{{ current_url | default(value=config.base_url) }}">
+  <meta property="og:image" content="{{ get_url(path="images/censorlab.png") }}">
+  <meta property="og:image:width" content="1024">
+  <meta property="og:image:height" content="1024">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ full_title }}">
+  <meta name="twitter:description" content="{{ config.description }}">
+  <meta name="twitter:image" content="{{ get_url(path="images/censorlab.png") }}">
 
-  {% if section %}
-    <title>{{ section.title }}</title>
-  {% elif page %}
-    <title>{{ page.title }}</title>
-  {% endif %}
   <link rel="icon" type="image/png" href="{{ get_url(path="images/censorlab.png") }}">
-  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="{{ get_url(path="css/bulma.min.css") }}">
   <link rel="stylesheet" href="{{ get_url(path="css/academicons.min.css") }}">
   <link rel="stylesheet" href="{{ get_url(path="style.css") }}">
-  <!-- jQuery -->
-  <script src="{{ get_url(path="js/jquery/jquery-3.7.1.min.js") }}"></script>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
+{% set path = current_path | default(value="/") %}
+<nav class="navbar site-nav" role="navigation" aria-label="main navigation">
+  <div class="container is-max-desktop">
+    <div class="navbar-brand">
+      <a class="navbar-item brand" href="{{ get_url(path="/") }}">
+        <img src="{{ get_url(path="images/censorlab.png") }}" alt="">
+        <span>CensorLab</span>
+      </a>
+      <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="siteNavbar">
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </a>
+    </div>
+    <div id="siteNavbar" class="navbar-menu">
+      <div class="navbar-end">
+        <a class="navbar-item{% if path == "/" %} is-active{% endif %}" href="{{ get_url(path="/") }}">Home</a>
+        <a class="navbar-item{% if path is starting_with("/getting_started") %} is-active{% endif %}" href="{{ get_url(path="getting_started") }}">Getting Started</a>
+        <a class="navbar-item{% if path is starting_with("/docs") %} is-active{% endif %}" href="{{ get_url(path="docs") }}">Documentation</a>
+        <a class="navbar-item{% if path is starting_with("/vm-info") %} is-active{% endif %}" href="{{ get_url(path="vm-info") }}">VM</a>
+        {% if not config.extra.anonymous %}
+        <a class="navbar-item" href="{{ config.extra.repo }}/tree/main/demos" target="_blank" rel="noopener">Examples</a>
+        <a class="navbar-item" href="{{ config.extra.repo }}" target="_blank" rel="noopener" aria-label="GitHub">
+          <span class="icon"><i class="fab fa-github fa-lg"></i></span>
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</nav>
+
 {% block content %} {% endblock %}
+
+<footer class="site-footer">
+  <div class="container is-max-desktop">
+    <div class="footer-row">
+      <div class="footer-brand">
+        <img src="{{ get_url(path="images/censorlab.png") }}" alt="">
+        <span>CensorLab</span>
+      </div>
+      <nav class="footer-links">
+        <a href="{{ get_url(path="getting_started") }}">Getting Started</a>
+        <a href="{{ get_url(path="docs") }}">Documentation</a>
+        <a href="{{ get_url(path="vm-info") }}">VM</a>
+        {% if not config.extra.anonymous %}
+        <a href="{{ config.extra.repo }}" target="_blank" rel="noopener">GitHub</a>
+        <a href="mailto:{{ config.extra.email }}">{{ config.extra.email }}</a>
+        {% endif %}
+      </nav>
+    </div>
+    <p class="footer-fine">
+      Site adapted from the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank" rel="noopener">Academic Project Page Template</a>
+      and the <a href="https://nerfies.github.io" target="_blank" rel="noopener">Nerfies</a> project page.
+      Licensed under <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/" target="_blank">CC BY-SA 4.0</a>.
+    </p>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.navbar-burger').forEach(function (burger) {
+  burger.addEventListener('click', function () {
+    var open = burger.classList.toggle('is-active');
+    document.getElementById(burger.dataset.target).classList.toggle('is-active', open);
+    burger.setAttribute('aria-expanded', open);
+  });
+});
+</script>
+{% block scripts %}{% endblock %}
 </body>
 </html>
