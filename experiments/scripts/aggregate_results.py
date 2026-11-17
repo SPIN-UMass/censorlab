@@ -8,7 +8,7 @@ then writes a results.tex file with \\newcommand macros that can be
 Usage:
     python3 experiments/scripts/aggregate_results.py [--output PATH]
 
-Default output: ../clab-paper/experiments/results.tex (relative to this script)
+Default output: experiments/results.tex in this repository
 """
 
 import argparse
@@ -18,7 +18,7 @@ import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENTS_DIR = os.path.dirname(SCRIPT_DIR)
-DEFAULT_OUTPUT = os.path.join(SCRIPT_DIR, "..", "..", "..", "clab-paper", "experiments", "results.tex")
+DEFAULT_OUTPUT = os.path.join(SCRIPT_DIR, "..", "results.tex")
 
 # Mapping from experiment directory to paper scenario names
 EXPERIMENT_SCENARIOS = {
@@ -321,7 +321,17 @@ def collect_resilience(experiments_dir):
         print("  [SKIP] 11_resilience_matrix: no results/resilience_matrix.json", file=sys.stderr)
         return []
     print("  [OK]   11_resilience_matrix: resilience matrix loaded", file=sys.stderr)
-    return data.get("rows", [])
+    rows = list(data.get("rows", []))
+    # Other benign backgrounds (matrix.py --background iscx|combined) re-run the
+    # circumvention captures too; only their benign_<bg> rows are new.
+    for bg in ("iscx", "combined"):
+        extra = load_json(os.path.join(experiments_dir, "11_resilience_matrix", "results",
+                                       f"resilience_matrix_{bg}.json"))
+        if extra is None:
+            continue
+        print(f"  [OK]   11_resilience_matrix: {bg} benign control loaded", file=sys.stderr)
+        rows.extend(r for r in extra.get("rows", []) if r["traffic"] == f"benign_{bg}")
+    return rows
 
 
 def collect_model_extraction(experiments_dir):
@@ -410,7 +420,9 @@ def resilience_macros(rows):
     for r in rows:
         t = sanitize_cmd(r["traffic"]).capitalize()
         base = f"Res{sanitize_cmd(r['program'])}{t}"
-        lines.append(f"\\newcommand{{\\{base}Rate}}{{{r['rate'] * 100:.1f}}}")
+        # from the counts: the stored rate is already rounded to 4 places
+        rate = 100 * r["flagged"] / r["flows"] if r["flows"] else 0.0
+        lines.append(f"\\newcommand{{\\{base}Rate}}{{{rate:.1f}}}")
         lines.append(f"\\newcommand{{\\{base}Flagged}}{{{r['flagged']}}}")
         if r["traffic"] not in seen_traffic:
             seen_traffic.add(r["traffic"])
@@ -606,7 +618,7 @@ def main():
         "--output", "-o",
         type=str,
         default=None,
-        help="Output path for results.tex (default: ../clab-paper/results.tex)",
+        help="Output path for results.tex (default: experiments/results.tex)",
     )
     parser.add_argument(
         "--experiments-dir",
