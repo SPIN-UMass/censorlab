@@ -36,7 +36,10 @@ struct Args {
     sub_cmd: SubCmd,
 }
 
-#[tokio::main]
+// The censor runs on the main thread (block_on); the runtime's workers only
+// serve the IPC listener and the SIGINT handler, so two are plenty (the
+// default, one per core, costs startup time on large machines)
+#[tokio::main(worker_threads = 2)]
 async fn main() -> Result<(), CensorlabError> {
     // Initialize the tract backend for ort (pure Rust ONNX inference)
     ort::set_api(ort_tract::api());
