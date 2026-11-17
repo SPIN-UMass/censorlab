@@ -10,7 +10,7 @@ traffic*, at increasing background ratios.  The background is selected with
 | `BACKGROUND` | source | mix ids / result dirs |
 |---|---|---|
 | `ustc` | benign half of USTC-TFC2016 (Wang et al., ICOIN 2017): BitTorrent, Facetime, FTP, Gmail, MySQL, Outlook, Skype, World of Warcraft — 773k payload-bearing packets, ~140 MB | `bg0 bg10k bg90k bg390k` (unchanged from the original study) |
-| `iscx` | non-VPN application captures of ISCXVPN2016 (Draper-Gil et al., ICISSP 2016): one capture per application (23 apps: streaming, VoIP, chat, e-mail, file transfer, P2P), ≤ 20 000 IP frames each | `bg0_iscx …` |
+| `iscx` | non-VPN application captures of ISCXVPN2016 (Draper-Gil et al., ICISSP 2016): one capture per application (22 apps: streaming, VoIP, chat, e-mail, file transfer; no torrent capture is present in the non-VPN archives), ≤ 20 000 IP frames each | `bg0_iscx …` |
 | `combined` | half of every mix's background packets from each dataset, each rescaled onto the scenario's time span and merged | `bg0_combined …` |
 
 ISCXVPN2016 sits behind a registration form and must be downloaded by hand
