@@ -534,6 +534,46 @@ pub fn shannon_entropy(data: &[u8]) -> f64 {
         / 8.0
 }
 
+/// Compiled patterns for the Python `regex()` builtin, keyed by pattern.
+///
+/// Censor scripts run their module body once per connection, so a script that
+/// compiles a regex at module level would otherwise rebuild the same automaton
+/// for every connection. A compiled regex is immutable and its clones share
+/// the compiled program, so handing out clones is indistinguishable from
+/// compiling afresh. At most `capacity` patterns are kept; later ones are
+/// compiled without caching.
+pub struct RegexCache {
+    map: std::collections::HashMap<String, regex::bytes::Regex>,
+    capacity: usize,
+}
+impl RegexCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            map: std::collections::HashMap::new(),
+            capacity,
+        }
+    }
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+    pub fn get_or_compile(&mut self, pattern: &str) -> Result<regex::bytes::Regex, regex::Error> {
+        if let Some(re) = self.map.get(pattern) {
+            return Ok(re.clone());
+        }
+        let re = regex::bytes::Regex::new(pattern)?;
+        if self.map.len() < self.capacity {
+            self.map.insert(pattern.to_owned(), re.clone());
+        }
+        Ok(re)
+    }
+}
+
+/// Number of distinct patterns the Python `regex()` builtin caches
+const PY_REGEX_CACHE_CAPACITY: usize = 256;
+
 #[pymodule]
 pub mod rust_packet {
     use super::{
@@ -541,7 +581,7 @@ pub mod rust_packet {
         TcpFlags as TcpFlagsRust, TcpMetadata, TransportMetadataExtra, UdpMetadata,
     };
     use crate::censor::Direction;
-    use crate::model::{ModelThreadError, ModelThreadMessage};
+    use crate::model::Models;
     use regex::bytes::Regex as RustRegex;
     use rustpython_vm::convert::ToPyObject;
     use rustpython_vm::{
@@ -549,12 +589,10 @@ pub mod rust_packet {
         convert::IntoPyException, pyclass, PyObjectRef, PyPayload, PyResult,
         VirtualMachine,
     };
-    use tracing;
 
     use crate::subnet::IpNet;
     use std::io;
     use std::net::IpAddr;
-    use std::sync::mpsc;
 
     #[pyattr]
     #[pyclass(module = "rust", name = "Packet")]
@@ -896,8 +934,17 @@ pub mod rust_packet {
     }
     #[pyfunction]
     fn regex(s: String, vm: &VirtualMachine) -> PyResult<Regex> {
+        static CACHE: std::sync::LazyLock<std::sync::Mutex<super::RegexCache>> =
+            std::sync::LazyLock::new(|| {
+                std::sync::Mutex::new(super::RegexCache::new(super::PY_REGEX_CACHE_CAPACITY))
+            });
+        // The cache holds no invariants a panic elsewhere could break
+        let compiled = CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_compile(&s);
         // An invalid pattern is the script's fault: raise, don't panic the process
-        let inner = RustRegex::new(&s)
+        let inner: RustRegex = compiled
             .map_err(|err| vm.new_value_error(format!("invalid regex {s:?}: {err}")))?;
         Ok(Regex { inner })
     }
@@ -920,11 +967,11 @@ pub mod rust_packet {
     #[pyclass(module = "rust", name = "Model")]
     #[derive(Debug, PyPayload)]
     pub struct Model {
-        sender: mpsc::SyncSender<ModelThreadMessage>,
+        models: Models,
     }
     impl Model {
-        pub fn new(sender: mpsc::SyncSender<ModelThreadMessage>) -> Self {
-            Self { sender }
+        pub fn new(models: Models) -> Self {
+            Self { models }
         }
     }
     #[pyclass]
@@ -936,22 +983,9 @@ pub mod rust_packet {
             data: Vec<f32>,
             vm: &VirtualMachine,
         ) -> PyResult<PyListRef> {
-            // A fresh reply channel per request: we hold no sender for it, so
-            // if the model thread dies, recv() sees the disconnect and errors
-            // instead of blocking forever
-            let (response_channel, return_recv) = mpsc::sync_channel::<Result<Vec<f64>, ModelThreadError>>(1);
-            // Send the data over the channel, along with a return address
-            self.sender
-                .send(ModelThreadMessage::Request {
-                    name,
-                    data,
-                    response_channel,
-                })
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
-            // Receive a new value
-            let out = return_recv
-                .recv()
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?
+            let out = self
+                .models
+                .evaluate(&name, data)
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
             // Parse the result into python values
             let out: Vec<PyObjectRef> = out.into_iter().map(|f| f.to_pyobject(vm)).collect();
@@ -1037,22 +1071,22 @@ pub mod rust_packet {
 
     #[pyfunction]
     fn log_info(msg: String) {
-        tracing::info!("{}", msg);
+        crate::packet_log::info!("{}", msg);
     }
 
     #[pyfunction]
     fn log_error(msg: String) {
-        tracing::error!("{}", msg);
+        crate::packet_log::error!("{}", msg);
     }
 
     #[pyfunction]
     fn log_warn(msg: String) {
-        tracing::warn!("{}", msg);
+        crate::packet_log::warn!("{}", msg);
     }
 
     #[pyfunction]
     fn log_debug(msg: String) {
-        tracing::debug!("{}", msg);
+        crate::packet_log::debug!("{}", msg);
     }
 }
 
@@ -1699,6 +1733,24 @@ pub mod rust_quic {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regex_cache_reuses_and_is_bounded() {
+        let mut cache = RegexCache::new(2);
+        assert!(cache.get_or_compile("^a").unwrap().is_match(b"abc"));
+        assert!(cache.get_or_compile("b$").unwrap().is_match(b"ab"));
+        assert_eq!(cache.len(), 2);
+        // A hit does not grow the cache
+        assert!(!cache.get_or_compile("^a").unwrap().is_match(b"bc"));
+        assert_eq!(cache.len(), 2);
+        // Beyond the cap, patterns still compile; they are just not cached
+        assert!(cache.get_or_compile("c+").unwrap().is_match(b"xcc"));
+        assert_eq!(cache.len(), 2);
+        // Invalid patterns error every time and are never cached
+        assert!(cache.get_or_compile("(").is_err());
+        assert!(cache.get_or_compile("(").is_err());
+        assert_eq!(cache.len(), 2);
+    }
 
     /// Helper: build a minimal valid IPv4+TCP packet as raw bytes.
     /// Returns the raw IP-layer bytes (no ethernet frame).

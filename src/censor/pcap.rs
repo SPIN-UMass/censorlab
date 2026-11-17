@@ -35,6 +35,8 @@ impl Censor {
     pub fn run_pcap(mut self, args: Args) -> Result<(), PcapModeError> {
         // Total timer includes file I/O (for cross-tool comparisons)
         let start_total = Instant::now();
+        // Decisions are queued; write out whatever is left however we return
+        let _flush = crate::output::FlushGuard;
         // Open the pcap
         let pcap_file = File::open(args.pcap_path)?;
         let mut pcap_reader = pcap_parser::create_reader(usize::from(u16::MAX), pcap_file)
@@ -118,7 +120,6 @@ impl Censor {
                     }
                 },
             };
-            let data = data.to_vec();
             if let Some(timestamp) = timestamp {
                 self.transport_state.set_packet_time(timestamp);
             }
@@ -132,18 +133,22 @@ impl Censor {
                 report_fragments(Outcome {
                     forward: Vec::new(),
                     drop: fragments.expire(fragment_time),
-                });
+                })
+                .map_err(PcapModeError::Output)?;
             }
             match action {
                 // Fragments the rules let through are held until their packet is complete
                 Ok(Action::None | Action::Ignore) => {
                     if let Some(fragments) = &mut fragments {
-                        if let Some(fragment) = Fragment::parse_ethernet(&data) {
-                            report_fragments(fragments.push(fragment_time, fragment, packet_index));
+                        if let Some(fragment) = Fragment::parse_ethernet(data) {
+                            report_fragments(fragments.push(fragment_time, fragment, packet_index))
+                                .map_err(PcapModeError::Output)?;
                         }
                     }
                 }
-                action => println!("{}: {:?}", packet_index, action),
+                // Queued: written in blocks (see crate::output)
+                action => crate::output::line(format_args!("{}: {:?}", packet_index, action))
+                    .map_err(PcapModeError::Output)?,
             }
             pcap_reader.consume(size);
         }
@@ -152,8 +157,11 @@ impl Censor {
             report_fragments(Outcome {
                 forward: Vec::new(),
                 drop: fragments.drain(),
-            });
+            })
+            .map_err(PcapModeError::Output)?;
         }
+        // The timings include writing out the decisions
+        crate::output::flush().map_err(PcapModeError::Output)?;
         println!(
             "Pcap mode took {}us to process the file ({}us including I/O)",
             start_processing.elapsed().as_micros(),
@@ -165,17 +173,18 @@ impl Censor {
 /// Report what fragment buffering did to the packets with these indices, in the
 /// format of the actions a censor program returns. Fragments forwarded unchanged
 /// are not reported, like any other forwarded packet.
-fn report_fragments(outcome: Outcome<usize>) {
+fn report_fragments(outcome: Outcome<usize>) -> io::Result<()> {
     for released in outcome.forward {
         if let Some(ttl) = released.ttl {
             let action: Result<Action, SmoltcpError> = Ok(Action::Rewrite(Rewrite { ttl: Some(ttl) }));
-            println!("{}: {:?}", released.item, action);
+            crate::output::line(format_args!("{}: {:?}", released.item, action))?;
         }
     }
     for packet_index in outcome.drop {
         let action: Result<Action, SmoltcpError> = Ok(Action::Drop);
-        println!("{}: {:?}", packet_index, action);
+        crate::output::line(format_args!("{}: {:?}", packet_index, action))?;
     }
+    Ok(())
 }
 
 /// Legacy pcap record timestamp in microseconds
@@ -229,6 +238,8 @@ mod tests {
 pub enum PcapModeError {
     #[error("Error opening pcap")]
     Open(#[from] io::Error),
+    #[error("Error writing decisions to stdout")]
+    Output(io::Error),
     #[error("Error reading pcap block")]
     Pcap(String),
     #[error("Error updating model")]

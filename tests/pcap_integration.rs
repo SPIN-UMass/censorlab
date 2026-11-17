@@ -2842,3 +2842,156 @@ fn test_fragment_config_rejects_unknown_keys_and_zero_limits() {
         assert_ne!(result.exit_code, 0, "accepted: {body}");
     }
 }
+
+/// Strip ANSI escape sequences (the log formatter colours its output)
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            // CSI: ESC [ params final-byte
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Every log event emitted while a packet is processed past the IP layer
+/// (by the engine or by a script) carries the packet's `ip{...}` span, and
+/// events outside it do not.
+#[test]
+fn test_log_events_carry_packet_span() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    // A frame whose IPv4 header is cut short: rejected before the IP layer
+    let mut bad_ipv4 = tcp_frame(client, server, 50000, 80, TCP_SYN, 100, 0, &[]);
+    bad_ipv4.truncate(14 + 10);
+    PcapBuilder::new()
+        .add_frame(&tcp_frame(client, server, 50000, 80, TCP_SYN, 100, 0, &[]))
+        // TCP header truncated: the engine warns from inside the IP layer
+        .add_frame(&ipv4_raw_frame(server, client, 6, &[0; 4]))
+        .add_frame(&bad_ipv4)
+        .write_to(&pcap_path);
+    let script = "from rust import log_warn\n\
+                  def process(packet):\n    log_warn('script says hi')\n";
+    let config_path = write_temp_config(
+        &tmp,
+        "[execution]\nmode = \"Python\"\nscript = \"censor.py\"\n",
+    );
+    write_temp_script(&tmp, "censor.py", script);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let stdout = strip_ansi(&result.stdout);
+    let log_lines: Vec<&str> = stdout
+        .lines()
+        .filter(|line| line.contains(" WARN "))
+        // Drop the timestamp
+        .map(|line| line.split_once(' ').map_or(line, |(_, rest)| rest).trim_start())
+        .collect();
+    assert_eq!(
+        log_lines,
+        vec![
+            "WARN ip{direction=client->wan src=10.0.0.1 dst=93.184.216.34}: \
+             censorlab::program::packet::rust_packet: script says hi",
+            "WARN ip{direction=wan->client src=93.184.216.34 dst=10.0.0.1}: \
+             censorlab::censor: Error parsing TCP header, allowing through: Error parsing packet as Tcp: wire::Error",
+            "WARN censorlab::censor: Error parsing IPv4 header, allowing through: Error",
+        ],
+        "{stdout}"
+    );
+}
+
+/// stdout lines that are decisions (`N: action`) or log events (`LEVEL ...`),
+/// in output order, without timestamps
+fn decision_and_log_lines(stdout: &str) -> Vec<String> {
+    strip_ansi(stdout)
+        .lines()
+        .filter_map(|line| {
+            if line.split_once(": ").is_some_and(|(n, _)| n.parse::<usize>().is_ok()) {
+                Some(line.to_owned())
+            } else if line.contains(" WARN ") {
+                Some(line.split_once(' ').map_or(line, |(_, rest)| rest).trim_start().to_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Decision lines and log events reach stdout in the order they happen,
+/// in CensorLang and in Python mode
+#[test]
+fn test_decisions_and_logs_keep_their_order() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    PcapBuilder::new()
+        .add_frame(&tcp_frame(client, server, 50000, 81, TCP_SYN, 100, 0, &[]))
+        // TCP header truncated: a warning, no decision
+        .add_frame(&ipv4_raw_frame(server, client, 6, &[0; 4]))
+        .add_frame(&tcp_frame(client, server, 50000, 81, TCP_PSH_ACK, 101, 1, b"x"))
+        .add_frame(&ipv4_raw_frame(server, client, 6, &[0; 4]))
+        .write_to(&pcap_path);
+    let warning = "WARN ip{direction=wan->client src=93.184.216.34 dst=10.0.0.1}: \
+                   censorlab::censor: Error parsing TCP header, allowing through: \
+                   Error parsing packet as Tcp: wire::Error";
+
+    // CensorLang: every TCP packet is dropped
+    let config_path = write_temp_config(
+        &tmp,
+        "[execution]\nmode = \"CensorLang\"\nscript = \"censor.cl\"\n",
+    );
+    write_temp_script(&tmp, "censor.cl", "RETURN terminate\n");
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(
+        decision_and_log_lines(&result.stdout),
+        vec![
+            "2: Ok(Drop)".to_owned(),
+            warning.to_owned(),
+            "4: Ok(Drop)".to_owned(),
+            warning.to_owned(),
+        ],
+        "{}",
+        result.stdout
+    );
+
+    // Python: the script logs, then its decision is printed
+    let config_path = write_temp_config(
+        &tmp,
+        "[execution]\nmode = \"Python\"\nscript = \"censor.py\"\n",
+    );
+    write_temp_script(
+        &tmp,
+        "censor.py",
+        "from rust import log_warn\n\
+         def process(packet):\n    log_warn('seen')\n    return 'drop'\n",
+    );
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let seen = |dir: &str, src: &str, dst: &str| {
+        format!("WARN ip{{direction={dir} src={src} dst={dst}}}: censorlab::program::packet::rust_packet: seen")
+    };
+    assert_eq!(
+        decision_and_log_lines(&result.stdout),
+        vec![
+            seen("client->wan", "10.0.0.1", "93.184.216.34"),
+            "2: Ok(Drop)".to_owned(),
+            warning.to_owned(),
+            seen("client->wan", "10.0.0.1", "93.184.216.34"),
+            "4: Ok(Drop)".to_owned(),
+            warning.to_owned(),
+        ],
+        "{}",
+        result.stdout
+    );
+}

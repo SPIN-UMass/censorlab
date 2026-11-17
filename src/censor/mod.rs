@@ -13,7 +13,7 @@ use crate::config::ethernet::MACAddress;
 use crate::config::{Config, IpNetPort};
 use crate::ipc::{ipc_thread, ModelThreadError};
 use crate::model::onnx::ModelLoadError;
-use crate::model::ModelThreadMessage;
+use crate::model::Models;
 use crate::program::packet::{IpLayer, Packet};
 use crate::transport::{TransportState, TransportStateInitError};
 use bitvec::prelude::*;
@@ -31,14 +31,13 @@ use std::io;
 use crate::subnet::IpNet;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::mpsc;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinError;
-use tracing::{debug, error, info_span, warn};
+use crate::packet_log::{debug, error, warn};
 
 /// Used for fast access to a list of every port for examples such as udp port filtering
 pub type PortVec = BitArr!(for 65536, in u64, Msb0);
@@ -191,7 +190,7 @@ impl Censor {
         ipc_port: u16,
         config: Config,
         tcp_decision_log_path: Option<PathBuf>,
-        model_sender: mpsc::SyncSender<ModelThreadMessage>,
+        loaded_models: Models,
     ) -> Result<Self, CensorInitError> {
         // Destructure config to move each field independently (avoids cloning models)
         let Config {
@@ -272,7 +271,7 @@ impl Censor {
             tcp_decision_log_path,
             execution,
             conntrack,
-            model_sender,
+            loaded_models,
         )?;
         // Construct the censor object
         Ok(Censor {
@@ -580,14 +579,8 @@ impl Censor {
         direction: Direction,
         ip_layer: IpLayer,
     ) -> Result<Action, SmoltcpError> {
-        // Enrich logging
-        let span = info_span!(
-            "ip",
-            direction = tracing::field::display(direction),
-            src = tracing::field::display(ips.src()),
-            dst = tracing::field::display(ips.dst())
-        );
-        let _enter = span.enter();
+        // Attribute log events to this packet (an `ip{...}` span, see packet_log)
+        let _packet = crate::packet_log::enter(direction, ips);
         // Dispatch processing based on protocol
         match (ip_layer.protocol, ips) {
             (IpProtocol::Tcp | IpProtocol::Udp, _) => {
