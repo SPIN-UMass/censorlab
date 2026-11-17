@@ -15,7 +15,9 @@
 #   DOCKER_ARGS="-v $PWD/traffic.pcap:/tmp/traffic.pcap:ro" \
 #     bash docker/censorlab.sh -c demos/http_blocking/censor.toml pcap /tmp/traffic.pcap <CLIENT_IP>
 #
-# The image is automatically rebuilt when source files change.
+# The image is automatically rebuilt when source files change. The repo's
+# workspace/ directory is mounted at /censorlab/workspace, so files saved
+# there survive the container (each run uses a fresh --rm container).
 #
 # Environment variables:
 #   DOCKER_ARGS    Extra arguments passed to `docker compose run`
@@ -44,6 +46,10 @@ if [ "$BUILD_HASH" = "unknown" ] || [ "$BUILD_HASH" != "$STORED_HASH" ]; then
         --build-arg BUILD_HASH="$BUILD_HASH" censorlab
     echo ""
 fi
+
+# Bind-mounted at /censorlab/workspace (see docker-compose.yml). Create it here
+# so the host user owns it, rather than letting Docker create it as root.
+mkdir -p "$REPO_ROOT/workspace"
 
 # --shell flag: drop into an interactive shell (with NET_ADMIN/NET_RAW by default)
 # Use --shell-no-nfq for a shell without those capabilities

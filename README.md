@@ -11,7 +11,7 @@ git clone https://github.com/SPIN-UMass/censorlab.git
 cd censorlab
 git submodule update --init
 
-# Interactive shell
+# Interactive shell (your files go in workspace/, mounted at /censorlab/workspace)
 ./docker/censorlab.sh --shell
 
 # Run all experiments
@@ -45,12 +45,6 @@ censorlab -p censor.py nfq
 # Help
 censorlab --help
 ```
-
-## Pre-built VM
-
-Pre-built VirtualBox images with everything pre-installed are available for [x86_64](https://voyager.cs.umass.edu/vm-images/censorlab.ova) and [aarch64](https://voyager.cs.umass.edu/vm-images/censorlab-arm.vmdk). See the [VM setup guide](https://censorlab.cs.umass.edu/vm-info/) for import instructions.
-
-This option requires manual updating and is not recommended outside of classroom setting.
 
 ## Experiments
 

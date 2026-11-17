@@ -52,7 +52,6 @@
         <a class="navbar-item{% if path == "/" %} is-active{% endif %}" href="{{ get_url(path="/") }}">Home</a>
         <a class="navbar-item{% if path is starting_with("/getting_started") %} is-active{% endif %}" href="{{ get_url(path="getting_started") }}">Getting Started</a>
         <a class="navbar-item{% if path is starting_with("/docs") %} is-active{% endif %}" href="{{ get_url(path="docs") }}">Documentation</a>
-        <a class="navbar-item{% if path is starting_with("/vm-info") %} is-active{% endif %}" href="{{ get_url(path="vm-info") }}">VM</a>
         {% if not config.extra.anonymous %}
         <a class="navbar-item" href="{{ config.extra.repo }}/tree/main/demos" target="_blank" rel="noopener">Examples</a>
         <a class="navbar-item" href="{{ config.extra.repo }}" target="_blank" rel="noopener" aria-label="GitHub">
@@ -76,7 +75,6 @@
       <nav class="footer-links">
         <a href="{{ get_url(path="getting_started") }}">Getting Started</a>
         <a href="{{ get_url(path="docs") }}">Documentation</a>
-        <a href="{{ get_url(path="vm-info") }}">VM</a>
         {% if not config.extra.anonymous %}
         <a href="{{ config.extra.repo }}" target="_blank" rel="noopener">GitHub</a>
         <a href="mailto:{{ config.extra.email }}">{{ config.extra.email }}</a>

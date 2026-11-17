@@ -25,7 +25,7 @@ git submodule update --init
 bash docker/censorlab.sh --shell
 ```
 
-The first run builds the Docker image (this takes a few minutes). Subsequent runs are instant.
+The first run builds the Docker image (this takes a few minutes). Subsequent runs are instant. To update, `git pull`: the next run rebuilds the image automatically.
 
 ### Option B: Build from Source
 
@@ -38,10 +38,6 @@ git submodule update --init
 cargo build --release
 sudo ./set_permissions.sh   # grants CAP_NET_ADMIN + CAP_NET_RAW
 ```
-
-### Option C: Pre-built VM
-
-We also provide pre-built VM images with everything pre-installed. See the [VM Info](/vm-info/) page for setup instructions. This option is useful for classroom environments or if you want a fully isolated setup.
 
 ## Step 2: Understand the Two Config Files
 
@@ -154,6 +150,8 @@ Try changing `"example.com"` to a different domain and re-running to block a dif
 
 ## Step 4: Write Your First Censor Program
 
+If you're using Docker, put your files in the repository's `workspace/` directory. It is mounted into the container at `/censorlab/workspace`, so you can edit files with your usual editor on the host and they persist between runs. `vim`, `nano` and `tmux` are also available inside the container.
+
 Create a file called `my_censor.py`:
 
 ```python
@@ -179,8 +177,10 @@ script = "my_censor.py"
 Run it:
 
 ```bash
-# Docker
-bash docker/censorlab.sh -c my_censor.toml nfq
+# Docker (files in workspace/), then generate traffic from the same shell
+bash docker/censorlab.sh --shell
+$ censorlab -c workspace/my_censor.toml nfq &
+$ curl https://example.com
 
 # Local build
 censorlab -c my_censor.toml nfq

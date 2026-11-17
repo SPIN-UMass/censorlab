@@ -37,6 +37,8 @@ DOCKER_ARGS="-v $PWD/traffic.pcap:/tmp/traffic.pcap:ro" \
 
 The Docker wrapper auto-detects NFQ vs PCAP mode and grants the `NET_ADMIN`/`NET_RAW` capabilities NFQ needs. Both modes run in the container's own isolated network namespace (no host networking), so NFQ mode only intercepts traffic originating inside the container — use `--shell` and generate traffic from there. The image is automatically rebuilt when source files change.
 
+The repository's `workspace/` directory is mounted at `/censorlab/workspace` (the container's working directory is `/censorlab`), so your own `censor.toml`/`censor.py` files go there and persist across runs. The image also includes `vim`, `nano`, `tmux`, `dig`, `tcpdump` and Shadowsocks (`sslocal`/`ssserver`). Each `--shell` is a separate container with its own network namespace, so run CensorLab and the traffic you want it to see in the same container: use `tmux` for several terminals, or `docker exec -it <container> bash` into the running one.
+
 ### Build from Source
 
 You need a Rust toolchain. Nix users can run `nix develop` for a complete environment.
@@ -60,10 +62,6 @@ cargo test --verbose
 ```
 
 The `set_permissions.sh` script grants `CAP_NET_ADMIN` and `CAP_NET_RAW` capabilities to the binary, which are required for packet interception.
-
-### Pre-built VM
-
-Pre-built VM images with everything pre-installed are available on the [VM Info](/vm-info/) page. Useful for classroom environments or fully isolated setups.
 
 ## Environment Setup
 
