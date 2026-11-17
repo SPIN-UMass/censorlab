@@ -239,7 +239,10 @@ def static_analysis_macros(static):
     lines.append("%          ConnTouchedBytes (same, counting only registers the program uses),")
     lines.append("%          HostBytes (host registers the program uses),")
     lines.append("%          Ops (worst-case constant-time ops per packet),")
-    lines.append("%          Regex (regex evaluations per packet), ModelCalls")
+    lines.append("%          Regex (regex evaluations per packet), ModelCalls,")
+    lines.append("%          RegBytes (registers the program names), RegAllocBytes (full banks),")
+    lines.append("%          EngineBytes (fixed per-connection engine state), HostAllocBytes,")
+    lines.append("%          MaxLinesPerPacket, Conditions, Writes, Returns (worst case per packet)")
     lines.append("")
     for program, r in static.items():
         base = f"Static{sanitize_cmd(program)}"
@@ -251,6 +254,16 @@ def static_analysis_macros(static):
         lines.append(f"\\newcommand{{\\{base}Ops}}{{{r['constant_ops']}}}")
         lines.append(f"\\newcommand{{\\{base}Regex}}{{{r['regex_evaluations']}}}")
         lines.append(f"\\newcommand{{\\{base}ModelCalls}}{{{r['model_calls']}}}")
+        if "per_connection_allocated_register_bytes" in r:
+            engine = (r["per_connection_bytes"] - r["per_connection_allocated_register_bytes"]
+                      - r["per_connection_model_io_bytes"])
+            lines.append(f"\\newcommand{{\\{base}RegBytes}}{{{r['per_connection_register_bytes']}}}")
+            lines.append(f"\\newcommand{{\\{base}RegAllocBytes}}{{{r['per_connection_allocated_register_bytes']}}}")
+            lines.append(f"\\newcommand{{\\{base}EngineBytes}}{{{engine}}}")
+            lines.append(f"\\newcommand{{\\{base}HostAllocBytes}}{{{r['per_host_allocated_register_bytes']}}}")
+            lines.append(f"\\newcommand{{\\{base}MaxLinesPerPacket}}{{{r['max_lines_per_packet']}}}")
+            for k in ("conditions", "writes", "returns"):
+                lines.append(f"\\newcommand{{\\{base}{k.capitalize()}}}{{{r[k]}}}")
     lines.append("")
     return lines
 

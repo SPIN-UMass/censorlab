@@ -1,0 +1,49 @@
+{
+  "source_lines": 10,
+  "lines": 10,
+  "max_lines_per_packet": 10,
+  "regexes": 3,
+  "subnets": 0,
+  "fields": [
+    "tcp.payload.len",
+    "transport.payload.avg_popcount",
+    "transport.payload.printable_fraction"
+  ],
+  "models": [],
+  "connection_registers": {
+    "float": [],
+    "int": [],
+    "bool": [
+      0,
+      1,
+      2
+    ]
+  },
+  "host_registers": {
+    "float": [],
+    "int": [],
+    "bool": []
+  },
+  "num_registers": 16,
+  "per_connection_register_bytes": 3,
+  "per_connection_allocated_register_bytes": 272,
+  "per_connection_model_io_bytes": 0,
+  "per_connection_touched_bytes": 259,
+  "per_connection_bytes": 528,
+  "per_host_register_bytes": 0,
+  "per_host_allocated_register_bytes": 272,
+  "per_packet": {
+    "conditions": 7,
+    "reads": 14,
+    "writes": 3,
+    "copies": 0,
+    "arithmetic": 0,
+    "logic": 0,
+    "regex": 3,
+    "subnet": 0,
+    "model_inputs": 0,
+    "model_calls": 0,
+    "returns": 7
+  },
+  "ends_with_unconditional_return": false
+}

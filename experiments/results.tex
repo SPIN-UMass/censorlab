@@ -555,7 +555,10 @@
 %          ConnTouchedBytes (same, counting only registers the program uses),
 %          HostBytes (host registers the program uses),
 %          Ops (worst-case constant-time ops per packet),
-%          Regex (regex evaluations per packet), ModelCalls
+%          Regex (regex evaluations per packet), ModelCalls,
+%          RegBytes (registers the program names), RegAllocBytes (full banks),
+%          EngineBytes (fixed per-connection engine state), HostAllocBytes,
+%          MaxLinesPerPacket, Conditions, Writes, Returns (worst case per packet)
 
 \newcommand{\StaticHttpKeywordLines}{4}
 \newcommand{\StaticHttpKeywordConnBytes}{528}
@@ -564,6 +567,14 @@
 \newcommand{\StaticHttpKeywordOps}{13}
 \newcommand{\StaticHttpKeywordRegex}{1}
 \newcommand{\StaticHttpKeywordModelCalls}{0}
+\newcommand{\StaticHttpKeywordRegBytes}{1}
+\newcommand{\StaticHttpKeywordRegAllocBytes}{272}
+\newcommand{\StaticHttpKeywordEngineBytes}{256}
+\newcommand{\StaticHttpKeywordHostAllocBytes}{272}
+\newcommand{\StaticHttpKeywordMaxLinesPerPacket}{4}
+\newcommand{\StaticHttpKeywordConditions}{3}
+\newcommand{\StaticHttpKeywordWrites}{1}
+\newcommand{\StaticHttpKeywordReturns}{3}
 \newcommand{\StaticDnsInjectionLines}{3}
 \newcommand{\StaticDnsInjectionConnBytes}{528}
 \newcommand{\StaticDnsInjectionConnTouchedBytes}{257}
@@ -571,6 +582,14 @@
 \newcommand{\StaticDnsInjectionOps}{9}
 \newcommand{\StaticDnsInjectionRegex}{1}
 \newcommand{\StaticDnsInjectionModelCalls}{0}
+\newcommand{\StaticDnsInjectionRegBytes}{1}
+\newcommand{\StaticDnsInjectionRegAllocBytes}{272}
+\newcommand{\StaticDnsInjectionEngineBytes}{256}
+\newcommand{\StaticDnsInjectionHostAllocBytes}{272}
+\newcommand{\StaticDnsInjectionMaxLinesPerPacket}{3}
+\newcommand{\StaticDnsInjectionConditions}{2}
+\newcommand{\StaticDnsInjectionWrites}{1}
+\newcommand{\StaticDnsInjectionReturns}{2}
 \newcommand{\StaticSniFilteringLines}{4}
 \newcommand{\StaticSniFilteringConnBytes}{528}
 \newcommand{\StaticSniFilteringConnTouchedBytes}{257}
@@ -578,6 +597,14 @@
 \newcommand{\StaticSniFilteringOps}{13}
 \newcommand{\StaticSniFilteringRegex}{1}
 \newcommand{\StaticSniFilteringModelCalls}{0}
+\newcommand{\StaticSniFilteringRegBytes}{1}
+\newcommand{\StaticSniFilteringRegAllocBytes}{272}
+\newcommand{\StaticSniFilteringEngineBytes}{256}
+\newcommand{\StaticSniFilteringHostAllocBytes}{272}
+\newcommand{\StaticSniFilteringMaxLinesPerPacket}{4}
+\newcommand{\StaticSniFilteringConditions}{3}
+\newcommand{\StaticSniFilteringWrites}{1}
+\newcommand{\StaticSniFilteringReturns}{3}
 \newcommand{\StaticShadowsocksLines}{22}
 \newcommand{\StaticShadowsocksConnBytes}{528}
 \newcommand{\StaticShadowsocksConnTouchedBytes}{268}
@@ -585,6 +612,14 @@
 \newcommand{\StaticShadowsocksOps}{80}
 \newcommand{\StaticShadowsocksRegex}{3}
 \newcommand{\StaticShadowsocksModelCalls}{0}
+\newcommand{\StaticShadowsocksRegBytes}{12}
+\newcommand{\StaticShadowsocksRegAllocBytes}{272}
+\newcommand{\StaticShadowsocksEngineBytes}{256}
+\newcommand{\StaticShadowsocksHostAllocBytes}{272}
+\newcommand{\StaticShadowsocksMaxLinesPerPacket}{22}
+\newcommand{\StaticShadowsocksConditions}{18}
+\newcommand{\StaticShadowsocksWrites}{5}
+\newcommand{\StaticShadowsocksReturns}{17}
 \newcommand{\StaticMlClassificationLines}{24}
 \newcommand{\StaticMlClassificationConnBytes}{812}
 \newcommand{\StaticMlClassificationConnTouchedBytes}{548}
@@ -592,6 +627,14 @@
 \newcommand{\StaticMlClassificationOps}{97}
 \newcommand{\StaticMlClassificationRegex}{0}
 \newcommand{\StaticMlClassificationModelCalls}{1}
+\newcommand{\StaticMlClassificationRegBytes}{8}
+\newcommand{\StaticMlClassificationRegAllocBytes}{272}
+\newcommand{\StaticMlClassificationEngineBytes}{256}
+\newcommand{\StaticMlClassificationHostAllocBytes}{272}
+\newcommand{\StaticMlClassificationMaxLinesPerPacket}{24}
+\newcommand{\StaticMlClassificationConditions}{24}
+\newcommand{\StaticMlClassificationWrites}{1}
+\newcommand{\StaticMlClassificationReturns}{2}
 \newcommand{\StaticModelExtractionLines}{11}
 \newcommand{\StaticModelExtractionConnBytes}{666}
 \newcommand{\StaticModelExtractionConnTouchedBytes}{427}
@@ -599,6 +642,29 @@
 \newcommand{\StaticModelExtractionOps}{51}
 \newcommand{\StaticModelExtractionRegex}{0}
 \newcommand{\StaticModelExtractionModelCalls}{1}
+\newcommand{\StaticModelExtractionRegBytes}{33}
+\newcommand{\StaticModelExtractionRegAllocBytes}{272}
+\newcommand{\StaticModelExtractionEngineBytes}{256}
+\newcommand{\StaticModelExtractionHostAllocBytes}{272}
+\newcommand{\StaticModelExtractionMaxLinesPerPacket}{11}
+\newcommand{\StaticModelExtractionConditions}{10}
+\newcommand{\StaticModelExtractionWrites}{5}
+\newcommand{\StaticModelExtractionReturns}{3}
+\newcommand{\StaticWuListingLines}{10}
+\newcommand{\StaticWuListingConnBytes}{528}
+\newcommand{\StaticWuListingConnTouchedBytes}{259}
+\newcommand{\StaticWuListingHostBytes}{0}
+\newcommand{\StaticWuListingOps}{31}
+\newcommand{\StaticWuListingRegex}{3}
+\newcommand{\StaticWuListingModelCalls}{0}
+\newcommand{\StaticWuListingRegBytes}{3}
+\newcommand{\StaticWuListingRegAllocBytes}{272}
+\newcommand{\StaticWuListingEngineBytes}{256}
+\newcommand{\StaticWuListingHostAllocBytes}{272}
+\newcommand{\StaticWuListingMaxLinesPerPacket}{10}
+\newcommand{\StaticWuListingConditions}{7}
+\newcommand{\StaticWuListingWrites}{3}
+\newcommand{\StaticWuListingReturns}{7}
 
 % ============================================================
 % Experiment 8: real-traffic workloads with background mixes
