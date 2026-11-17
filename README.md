@@ -11,7 +11,7 @@ git clone https://github.com/SPIN-UMass/censorlab.git
 cd censorlab
 git submodule update --init
 
-# Interactive shell
+# Interactive shell (your files go in workspace/, mounted at /censorlab/workspace)
 ./docker/censorlab.sh --shell
 
 # Run all experiments
