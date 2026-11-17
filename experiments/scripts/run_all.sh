@@ -10,7 +10,7 @@
 #   6. Run aggregate_results.py
 #   7. Print summary
 #
-# Excluded: 06 (live NFQ), 08 (needs the real-traffic dataset; see its README),
+# Excluded: 06 (live NFQ; 06_model_extraction/scripts/run_docker.sh), 08 (needs the real-traffic dataset; see its README),
 # 10 and 11 (Docker).  Run them separately and re-run aggregate_results.py.
 #
 # Usage:
