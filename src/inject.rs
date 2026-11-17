@@ -19,7 +19,7 @@
 use smoltcp::wire::{Ipv4Packet, Ipv6Packet};
 use std::io;
 use std::mem::size_of;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use thiserror::Error;
 
@@ -31,10 +31,10 @@ pub fn ip_destination(packet: &[u8]) -> Option<IpAddr> {
     match packet.first().map(|b| b >> 4) {
         Some(4) => Ipv4Packet::new_checked(packet)
             .ok()
-            .map(|ip| IpAddr::V4(Ipv4Addr::from(ip.dst_addr()))),
+            .map(|ip| IpAddr::V4(ip.dst_addr())),
         Some(6) => Ipv6Packet::new_checked(packet)
             .ok()
-            .map(|ip| IpAddr::V6(Ipv6Addr::from(ip.dst_addr()))),
+            .map(|ip| IpAddr::V6(ip.dst_addr())),
         _ => None,
     }
 }

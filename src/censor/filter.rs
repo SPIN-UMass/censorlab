@@ -29,12 +29,12 @@ impl Contains<u16> for PortVec {
 }
 impl Contains<Ipv4Address> for Ipv4Set {
     fn contains(&self, value: &Ipv4Address) -> bool {
-        self.contains_value(u32::from_be_bytes(value.0))
+        self.contains_value(u32::from(*value))
     }
 }
 impl Contains<Ipv6Address> for Ipv6Set {
     fn contains(&self, value: &Ipv6Address) -> bool {
-        self.contains_value(u128::from_be_bytes(value.0))
+        self.contains_value(u128::from(*value))
     }
 }
 impl Contains<IpPort> for IpPortSet {
@@ -276,8 +276,8 @@ mod subnet_tests {
     #[test]
     fn ipv6_set_allowlist_with_subnet() {
         let allow = AllowList::from(List { list: v6_set(&["2001:db8::/32"]), action: Action::Drop });
-        let inside: Ipv6Address = "2001:db8:1::1".parse::<std::net::Ipv6Addr>().unwrap().into();
-        let outside: Ipv6Address = "2001:db9::1".parse::<std::net::Ipv6Addr>().unwrap().into();
+        let inside: Ipv6Address = "2001:db8:1::1".parse::<std::net::Ipv6Addr>().unwrap();
+        let outside: Ipv6Address = "2001:db9::1".parse::<std::net::Ipv6Addr>().unwrap();
         assert_eq!(allow.recommend(&inside), None);
         assert_eq!(allow.recommend(&outside), Some(Action::Drop));
     }

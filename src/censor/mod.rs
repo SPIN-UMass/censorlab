@@ -781,14 +781,14 @@ impl IpPair {
     }
     pub fn src_std(&self) -> std::net::IpAddr {
         match self {
-            IpPair::V4 { src, .. } => std::net::IpAddr::V4((*src).into()),
-            IpPair::V6 { src, .. } => std::net::IpAddr::V6((*src).into()),
+            IpPair::V4 { src, .. } => std::net::IpAddr::V4(*src),
+            IpPair::V6 { src, .. } => std::net::IpAddr::V6(*src),
         }
     }
     pub fn dst_std(&self) -> std::net::IpAddr {
         match self {
-            IpPair::V4 { dst, .. } => std::net::IpAddr::V4((*dst).into()),
-            IpPair::V6 { dst, .. } => std::net::IpAddr::V6((*dst).into()),
+            IpPair::V4 { dst, .. } => std::net::IpAddr::V4(*dst),
+            IpPair::V6 { dst, .. } => std::net::IpAddr::V6(*dst),
         }
     }
     pub fn swap(&self) -> Self {

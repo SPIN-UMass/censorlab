@@ -2464,8 +2464,8 @@ action = "Reset"
     let action = &result.action_lines[0].action;
     for needle in [
         "Reset",
-        "src: Address([10, 0, 0, 1])",
-        "dst: Address([93, 184, 216, 34])",
+        "src: 10.0.0.1",
+        "dst: 93.184.216.34",
         "src_port: 50000",
         "dst_port: 443",
         "seq: SeqNumber(1000)",
