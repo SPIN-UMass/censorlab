@@ -36,10 +36,10 @@ tokio-byteorder = "0.3"
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["env-filter"] }
-aes = "0.8"
-aes-gcm = "0.10"
-hkdf = "0.12"
-sha2 = "0.10"
+aes = "0.9"
+aes-gcm = "0.11"
+hkdf = "0.13"
+sha2 = "0.11"
 
 [build-dependencies]
 lalrpop = "0.23"
