@@ -977,6 +977,8 @@ pub mod field {
         Udp(udp::Field),
         /// Packet direction (1 = client→WAN, -1 = WAN→client, 0 = unknown)
         Direction,
+        /// Length of the transport-layer (TCP or UDP) payload
+        PayloadLength,
         /// Entropy of the transport-layer payload
         PayloadEntropy,
         /// Average popcount (bits per byte) of the transport-layer payload
@@ -1012,6 +1014,8 @@ pub mod field {
                     .eval(packet, default_on_error)
                     .map_err(FieldError::Udp),
                 Field::Direction => Ok(Value::Int(packet.direction.into())),
+                // A Vec holds at most isize::MAX bytes, so the length fits an i64
+                Field::PayloadLength => Ok(Value::Int(packet.payload.len() as i64)),
                 Field::PayloadEntropy => Ok(Value::Float(packet.payload_entropy())),
                 Field::PayloadAveragePopcount => Ok(Value::Float(packet.payload_average_popcount())),
                 Field::PayloadPrintableFraction => Ok(Value::Float(packet.payload_printable_fraction())),
@@ -1022,7 +1026,7 @@ pub mod field {
         /// (including the default substituted on error)
         pub fn ty(&self) -> RegisterType {
             match self {
-                Field::Env(_) | Field::Direction => RegisterType::Int,
+                Field::Env(_) | Field::Direction | Field::PayloadLength => RegisterType::Int,
                 Field::Timestamp
                 | Field::PayloadEntropy
                 | Field::PayloadAveragePopcount
@@ -1052,6 +1056,7 @@ pub mod field {
                 fields.push(Field::Udp(field));
             }
             fields.push(Field::Direction);
+            fields.push(Field::PayloadLength);
             fields.push(Field::PayloadEntropy);
             fields.push(Field::PayloadAveragePopcount);
             fields.push(Field::PayloadPrintableFraction);
@@ -1109,6 +1114,7 @@ pub mod field {
                 Field::Udp(udp::Field::Length) => "udp.length",
                 Field::Udp(udp::Field::Checksum) => "udp.checksum",
                 Field::Direction => "direction",
+                Field::PayloadLength => "transport.payload.len",
                 Field::PayloadEntropy => "transport.payload.entropy",
                 Field::PayloadAveragePopcount => "transport.payload.avg_popcount",
                 Field::PayloadPrintableFraction => "transport.payload.printable_fraction",
@@ -2747,6 +2753,16 @@ mod tests {
         let fields = default_env_fields();
         let val = field::Field::PayloadEntropy.eval(&pkt, &fields, false).unwrap();
         assert!(matches!(val, Value::Float(f) if f == 0.0));
+    }
+
+    #[test]
+    fn field_transport_payload_len_tcp_and_udp() {
+        let field: field::Field = "transport.payload.len".parse().unwrap();
+        let fields = default_env_fields();
+        for pkt in [make_tcp_packet(b"abcde"), make_udp_packet(b"abcde")] {
+            let val = field.eval(&pkt, &fields, false).unwrap();
+            assert!(matches!(val, Value::Int(5)), "{val:?}");
+        }
     }
 
     #[test]
