@@ -1,7 +1,7 @@
 == latency probe ==
-probe: 200/200 ok, median total 1.23 ms
+probe: 200/200 ok, median total 1.28 ms
 == iperf3 ==
-iperf3: 249.6 Mbit/s received, retransmits 54
+iperf3: 233.4 Mbit/s received, retransmits 50
 Sending 200 TLS ClientHello requests to 172.30.0.20:443...
   100/200 (0.1s elapsed, 0 errors)
   200/200 (0.2s elapsed, 0 errors)

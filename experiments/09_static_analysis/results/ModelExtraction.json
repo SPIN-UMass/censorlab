@@ -3,8 +3,9 @@
   "lines": 11,
   "max_lines_per_packet": 11,
   "regexes": 0,
+  "subnets": 0,
   "fields": [
-    "Tcp(PayloadLength)"
+    "tcp.payload.len"
   ],
   "models": [
     "extractor"
@@ -27,9 +28,14 @@
     "int": [],
     "bool": []
   },
+  "num_registers": 16,
   "per_connection_register_bytes": 33,
-  "per_connection_bytes": 53,
+  "per_connection_allocated_register_bytes": 272,
+  "per_connection_model_io_bytes": 138,
+  "per_connection_touched_bytes": 427,
+  "per_connection_bytes": 666,
   "per_host_register_bytes": 0,
+  "per_host_allocated_register_bytes": 272,
   "per_packet": {
     "conditions": 10,
     "reads": 28,
@@ -38,6 +44,7 @@
     "arithmetic": 1,
     "logic": 0,
     "regex": 0,
+    "subnet": 0,
     "model_inputs": 2,
     "model_calls": 1,
     "returns": 3

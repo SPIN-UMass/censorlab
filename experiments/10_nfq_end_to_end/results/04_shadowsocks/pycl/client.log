@@ -1,13 +1,13 @@
 == latency probe ==
-probe: 200/200 ok, median total 1.46 ms
+probe: 200/200 ok, median total 1.64 ms
 == iperf3 ==
-iperf3: 160.2 Mbit/s received, retransmits 33
+iperf3: 153.7 Mbit/s received, retransmits 22
 Sending 200 connections to 172.30.0.20:443...
-  100/200 (94.6s elapsed, 0 errors)
-  200/200 (202.9s elapsed, 0 errors)
+  100/200 (92.3s elapsed, 0 errors)
+  200/200 (202.5s elapsed, 0 errors)
 
 === Results ===
-Total: 200 connections in 202.9s
+Total: 200 connections in 202.5s
 Errors: 0
 TP=99 FN=1 FP=0 TN=100
 TPR=0.9900  TNR=1.0000

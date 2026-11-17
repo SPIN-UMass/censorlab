@@ -1,0 +1,8 @@
+tool,file,loc
+PyCL,censor.py,24
+CensorLang,censor.cl,5
+Zeek,comparison/zeek_tls_sni.zeek,56
+Scapy,comparison/scapy_tls_sni.py,136
+Suricata,comparison/suricata_tls_sni.rules,1
+Snort,comparison/snort_tls_sni.rules,1
+OpenGFW,comparison/opengfw_tls_sni.yaml,3

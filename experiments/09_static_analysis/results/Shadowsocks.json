@@ -3,12 +3,13 @@
   "lines": 22,
   "max_lines_per_packet": 22,
   "regexes": 3,
+  "subnets": 0,
   "fields": [
-    "PayloadAveragePopcount",
-    "PayloadEntropy",
-    "Tcp(Flag(Ack))",
-    "Tcp(PayloadLength)",
-    "Tcp(SrcPort)"
+    "tcp.flag.ack",
+    "tcp.payload.len",
+    "tcp.src",
+    "transport.payload.avg_popcount",
+    "transport.payload.entropy"
   ],
   "models": [],
   "connection_registers": {
@@ -28,9 +29,14 @@
     "int": [],
     "bool": []
   },
+  "num_registers": 16,
   "per_connection_register_bytes": 12,
-  "per_connection_bytes": 32,
+  "per_connection_allocated_register_bytes": 272,
+  "per_connection_model_io_bytes": 0,
+  "per_connection_touched_bytes": 268,
+  "per_connection_bytes": 528,
   "per_host_register_bytes": 0,
+  "per_host_allocated_register_bytes": 272,
   "per_packet": {
     "conditions": 18,
     "reads": 38,
@@ -39,6 +45,7 @@
     "arithmetic": 0,
     "logic": 0,
     "regex": 3,
+    "subnet": 0,
     "model_inputs": 0,
     "model_calls": 0,
     "returns": 17

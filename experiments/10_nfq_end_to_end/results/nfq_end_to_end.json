@@ -14,10 +14,10 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.382,
-      "latency_p95_ms": 1.577,
-      "latency_stdev_ms": 0.136,
-      "throughput_mbps": 10713.0,
+      "latency_median_ms": 1.337,
+      "latency_p95_ms": 1.516,
+      "latency_stdev_ms": 0.1,
+      "throughput_mbps": 11553.5,
       "retransmits": 0
     },
     {
@@ -33,11 +33,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.258,
-      "latency_p95_ms": 1.394,
-      "latency_stdev_ms": 0.084,
-      "throughput_mbps": 205.1,
-      "retransmits": 40
+      "latency_median_ms": 1.317,
+      "latency_p95_ms": 1.468,
+      "latency_stdev_ms": 0.136,
+      "throughput_mbps": 193.2,
+      "retransmits": 29
     },
     {
       "scenario": "01_http_keyword",
@@ -52,11 +52,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.351,
-      "latency_p95_ms": 1.503,
-      "latency_stdev_ms": 0.093,
-      "throughput_mbps": 181.4,
-      "retransmits": 27
+      "latency_median_ms": 1.336,
+      "latency_p95_ms": 1.487,
+      "latency_stdev_ms": 0.1,
+      "throughput_mbps": 167.0,
+      "retransmits": 31
     },
     {
       "scenario": "01_http_keyword",
@@ -71,11 +71,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.205,
-      "latency_p95_ms": 1.362,
-      "latency_stdev_ms": 0.122,
-      "throughput_mbps": 260.8,
-      "retransmits": 59
+      "latency_median_ms": 1.26,
+      "latency_p95_ms": 1.414,
+      "latency_stdev_ms": 0.096,
+      "throughput_mbps": 223.6,
+      "retransmits": 44
     },
     {
       "scenario": "02_dns_injection",
@@ -90,10 +90,10 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.274,
-      "latency_p95_ms": 1.42,
-      "latency_stdev_ms": 0.1,
-      "throughput_mbps": 10147.9,
+      "latency_median_ms": 1.345,
+      "latency_p95_ms": 1.527,
+      "latency_stdev_ms": 0.132,
+      "throughput_mbps": 11020.3,
       "retransmits": 0
     },
     {
@@ -109,11 +109,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.294,
-      "latency_p95_ms": 1.428,
-      "latency_stdev_ms": 0.098,
-      "throughput_mbps": 205.3,
-      "retransmits": 40
+      "latency_median_ms": 1.34,
+      "latency_p95_ms": 1.443,
+      "latency_stdev_ms": 0.075,
+      "throughput_mbps": 192.8,
+      "retransmits": 39
     },
     {
       "scenario": "02_dns_injection",
@@ -128,11 +128,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.356,
-      "latency_p95_ms": 1.473,
-      "latency_stdev_ms": 0.082,
-      "throughput_mbps": 168.9,
-      "retransmits": 23
+      "latency_median_ms": 1.376,
+      "latency_p95_ms": 1.504,
+      "latency_stdev_ms": 0.105,
+      "throughput_mbps": 174.1,
+      "retransmits": 27
     },
     {
       "scenario": "02_dns_injection",
@@ -147,11 +147,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.211,
-      "latency_p95_ms": 1.386,
-      "latency_stdev_ms": 0.113,
-      "throughput_mbps": 236.9,
-      "retransmits": 55
+      "latency_median_ms": 1.26,
+      "latency_p95_ms": 1.364,
+      "latency_stdev_ms": 0.076,
+      "throughput_mbps": 222.6,
+      "retransmits": 49
     },
     {
       "scenario": "03_tls_sni",
@@ -166,10 +166,10 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.377,
-      "latency_p95_ms": 1.523,
-      "latency_stdev_ms": 0.08,
-      "throughput_mbps": 10807.6,
+      "latency_median_ms": 1.303,
+      "latency_p95_ms": 1.545,
+      "latency_stdev_ms": 0.147,
+      "throughput_mbps": 10858.4,
       "retransmits": 0
     },
     {
@@ -185,11 +185,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.292,
-      "latency_p95_ms": 1.441,
-      "latency_stdev_ms": 0.142,
-      "throughput_mbps": 210.2,
-      "retransmits": 48
+      "latency_median_ms": 1.331,
+      "latency_p95_ms": 1.486,
+      "latency_stdev_ms": 0.1,
+      "throughput_mbps": 180.4,
+      "retransmits": 39
     },
     {
       "scenario": "03_tls_sni",
@@ -204,11 +204,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.317,
-      "latency_p95_ms": 1.486,
-      "latency_stdev_ms": 0.124,
-      "throughput_mbps": 191.1,
-      "retransmits": 47
+      "latency_median_ms": 1.347,
+      "latency_p95_ms": 1.45,
+      "latency_stdev_ms": 0.077,
+      "throughput_mbps": 164.7,
+      "retransmits": 23
     },
     {
       "scenario": "03_tls_sni",
@@ -223,11 +223,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.228,
-      "latency_p95_ms": 1.404,
-      "latency_stdev_ms": 0.122,
-      "throughput_mbps": 249.6,
-      "retransmits": 54
+      "latency_median_ms": 1.281,
+      "latency_p95_ms": 1.395,
+      "latency_stdev_ms": 0.076,
+      "throughput_mbps": 233.4,
+      "retransmits": 50
     },
     {
       "scenario": "04_shadowsocks",
@@ -242,10 +242,10 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.272,
-      "latency_p95_ms": 1.416,
-      "latency_stdev_ms": 0.088,
-      "throughput_mbps": 10869.2,
+      "latency_median_ms": 1.261,
+      "latency_p95_ms": 1.405,
+      "latency_stdev_ms": 0.107,
+      "throughput_mbps": 11165.7,
       "retransmits": 0
     },
     {
@@ -261,11 +261,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.268,
-      "latency_p95_ms": 1.43,
-      "latency_stdev_ms": 0.116,
-      "throughput_mbps": 211.4,
-      "retransmits": 44
+      "latency_median_ms": 1.318,
+      "latency_p95_ms": 1.464,
+      "latency_stdev_ms": 0.101,
+      "throughput_mbps": 190.9,
+      "retransmits": 29
     },
     {
       "scenario": "04_shadowsocks",
@@ -280,11 +280,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.456,
-      "latency_p95_ms": 1.613,
-      "latency_stdev_ms": 0.097,
-      "throughput_mbps": 160.2,
-      "retransmits": 33
+      "latency_median_ms": 1.64,
+      "latency_p95_ms": 1.787,
+      "latency_stdev_ms": 0.082,
+      "throughput_mbps": 153.7,
+      "retransmits": 22
     },
     {
       "scenario": "04_shadowsocks",
@@ -299,11 +299,11 @@
       "requests": 200,
       "probe_ok": 200,
       "probe_n": 200,
-      "latency_median_ms": 1.321,
-      "latency_p95_ms": 1.532,
-      "latency_stdev_ms": 0.362,
-      "throughput_mbps": 256.1,
-      "retransmits": 47
+      "latency_median_ms": 1.27,
+      "latency_p95_ms": 1.436,
+      "latency_stdev_ms": 0.113,
+      "throughput_mbps": 226.2,
+      "retransmits": 44
     }
   ]
 }

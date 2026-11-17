@@ -1,7 +1,7 @@
 == latency probe ==
-probe: 200/200 ok, median total 1.36 ms
+probe: 200/200 ok, median total 1.38 ms
 == iperf3 ==
-iperf3: 168.9 Mbit/s received, retransmits 23
+iperf3: 174.1 Mbit/s received, retransmits 27
   [1/200] rsf.org -> 10.10.10.10 (injected)
   [2/200] resolver1.opendns.com -> 93.184.216.34 (normal)
   [3/200] earthquake.usgs.gov -> 93.184.216.34 (normal)
