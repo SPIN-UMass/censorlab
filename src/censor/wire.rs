@@ -1,5 +1,6 @@
 use super::{Censor, Direction, HandleIpcError, IpPair};
-use crate::censor::Action;
+use crate::censor::{Action, Rewrite};
+use crate::fragment::{Fragment, Normalizer, Outcome};
 use crate::sys::{set_promiscuous_mode, PromiscuousModeError};
 use clap::Parser;
 use smoltcp::phy::{Medium, RawSocket};
@@ -10,6 +11,7 @@ use smoltcp::wire::{
 use std::collections::VecDeque;
 use std::io;
 use std::os::unix::io::AsRawFd;
+use std::time::Instant;
 use thiserror::Error;
 use tracing::{debug, info, span, warn, Level};
 
@@ -377,6 +379,22 @@ fn wait(ports: &[Port; 2]) -> io::Result<()> {
     Ok(())
 }
 
+/// The frames fragment buffering releases, each with the side it arrived on and
+/// rewritten to the first fragment's TTL. Discarded frames are simply not sent.
+fn released_frames(outcome: Outcome<(Side, Vec<u8>)>) -> Vec<(Side, Vec<u8>)> {
+    outcome
+        .forward
+        .into_iter()
+        .map(|released| {
+            let (ingress, mut frame) = released.item;
+            if released.ttl.is_some() && !(Rewrite { ttl: released.ttl }).apply_ethernet(&mut frame) {
+                warn!("Could not rewrite the TTL of a buffered fragment: forwarding unchanged");
+            }
+            (ingress, frame)
+        })
+        .collect()
+}
+
 impl Censor {
     /// Run the censor in wire mode
     pub fn run_wire(mut self, args: Args) -> Result<(), WireError> {
@@ -392,6 +410,9 @@ impl Censor {
         let budgets = [args.wan_packets.max(1), args.client_packets.max(1)];
         let mut buf = vec![0u8; RECV_BUF_LEN];
         info!("Bridging {} <-> {}", args.wan_interface, args.client_interface);
+        // Fragments held by `[ip.fragments] mode = "Buffer"`, with their ingress side
+        let mut fragments: Option<Normalizer<(Side, Vec<u8>)>> = self.fragments.map(Normalizer::new);
+        let start = Instant::now();
         loop {
             // Handle IPC (model updates, shutdown on SIGINT)
             match self.handle_ipc() {
@@ -406,6 +427,13 @@ impl Censor {
                 port.flush();
             }
             wait(&ports).map_err(WireError::Poll)?;
+            if let Some(fragments) = &mut fragments {
+                // Incomplete packets that timed out are dropped
+                let expired = fragments.expire(start.elapsed());
+                if !expired.is_empty() {
+                    debug!("Dropping {} fragments of incomplete packets", expired.len());
+                }
+            }
             for ingress in [Side::Wan, Side::Client] {
                 let direction = ingress.ingress_direction();
                 let span = span!(Level::TRACE, "forwarding frame", direction = %direction);
@@ -421,6 +449,16 @@ impl Censor {
                     let frame = &buf[..len];
                     let mut context = Context { direction };
                     let verdict = self.process_frame(frame, &mut (&mut context).into());
+                    // Fragments the rules let through are held until their packet is complete
+                    if let (Some(fragments), Ok(Action::None | Action::Ignore)) = (&mut fragments, &verdict) {
+                        if let Some(fragment) = Fragment::parse_ethernet(frame) {
+                            let outcome = fragments.push(start.elapsed(), fragment, (ingress, frame.to_vec()));
+                            for (from, frame) in released_frames(outcome) {
+                                ports[from.other() as usize].send(&frame);
+                            }
+                            continue;
+                        }
+                    }
                     for (out, emit) in plan_frame(verdict, frame, self.reset_repeat) {
                         let egress = match out {
                             Out::Forward => ingress.other(),
@@ -583,6 +621,30 @@ mod tests {
         };
         let eth = EthernetFrame::new_checked(&copy[..]).unwrap();
         assert_eq!(Ipv4Packet::new_checked(eth.payload()).unwrap().hop_limit(), 7);
+    }
+
+    #[test]
+    fn released_fragments_keep_their_side_and_take_the_new_ttl() {
+        use crate::fragment::Released;
+        let outcome = Outcome {
+            forward: vec![
+                Released { item: (Side::Client, tcp_frame()), ttl: None },
+                Released { item: (Side::Wan, tcp_frame()), ttl: Some(9) },
+            ],
+            drop: vec![(Side::Client, tcp_frame())],
+        };
+        let frames = released_frames(outcome);
+        let ttl = |frame: &[u8]| {
+            let eth = EthernetFrame::new_checked(frame).unwrap();
+            let ip = Ipv4Packet::new_checked(eth.payload()).unwrap();
+            assert!(ip.verify_checksum());
+            ip.hop_limit()
+        };
+        let [(Side::Client, unchanged), (Side::Wan, rewritten)] = &frames[..] else {
+            panic!("expected the two forwarded frames: {frames:?}")
+        };
+        assert_eq!(unchanged, &tcp_frame());
+        assert_eq!(ttl(rewritten), 9);
     }
 
     #[test]
