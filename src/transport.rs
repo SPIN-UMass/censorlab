@@ -14,7 +14,7 @@ use crate::program::packet::TransportMetadataExtra;
 use crate::program::packet::{Packet, TransportProtocol};
 use crate::program::program::{Action as ProgramAction, Program, ProgramLoadError};
 use ort::Error as OrtError;
-use rustpython_vm::builtins::{PyBaseExceptionRef, PyCode};
+use rustpython_vm::builtins::{PyBaseExceptionRef, PyCode, PyStrInterned};
 use rustpython_vm::convert::ToPyObject;
 use rustpython_vm::scope::Scope;
 use rustpython_vm::{self as vm, PyObjectRef, PyRef, Settings};
@@ -160,6 +160,8 @@ pub struct TransportState {
     censorlang_program: Option<Program>,
     /// CensorLang program config
     censorlang_config: ProgramConfig,
+    /// Interned names of the per-packet script globals
+    py_names: PyNames,
 }
 
 #[derive(Debug)]
@@ -200,6 +202,23 @@ const PROCESS: &str = "process";
 const MODEL: &str = "model";
 const HOST: &str = "host";
 const DST_HOST: &str = "dst_host";
+
+/// Interned (hash-cached) names of the globals set for every packet
+#[derive(Clone, Copy)]
+struct PyNames {
+    packet: &'static PyStrInterned,
+    host: &'static PyStrInterned,
+    dst_host: &'static PyStrInterned,
+}
+impl PyNames {
+    fn new(vm: &vm::VirtualMachine) -> Self {
+        Self {
+            packet: vm.ctx.intern_str(PACKET),
+            host: vm.ctx.intern_str(HOST),
+            dst_host: vm.ctx.intern_str(DST_HOST),
+        }
+    }
+}
 
 #[derive(Debug, Default, Deserialize, Clone, Copy)]
 pub enum ExecutionMode {
@@ -578,6 +597,7 @@ impl TransportState {
         loaded_models: Models,
     ) -> Result<Self, TransportStateInitError> {
         let vm = new_python_interpreter(execution_config.hash_seed);
+        let py_names = vm.enter(PyNames::new);
         // Only compile the script as Python if we're in Python mode
         let python_script = match execution_config.mode {
             ExecutionMode::Python => execution_config.script.as_ref(),
@@ -645,6 +665,7 @@ impl TransportState {
             loaded_models,
             censorlang_program,
             censorlang_config: execution_config.censorlang,
+            py_names,
         })
     }
     /// Processes the tcp packet based on its metadata and our internal state
@@ -779,8 +800,6 @@ impl TransportState {
             // Python mode without a script: nothing to run
             ExecutionEnvironment::Python { .. } if self.code.is_none() => Action::None,
             ExecutionEnvironment::Python { scope, state } => {
-                // Copy the code references
-                let code = self.code.clone().expect("checked above");
                 let on_script_error = self.on_script_error;
                 let conn = ConnectionLabel::of(ips, &packet);
                 let conn_ref = &conn;
@@ -789,7 +808,8 @@ impl TransportState {
                 let len = packet.payload.len();
                 let mut packet = PythonPacket::from(packet);
                 packet.set_direction(direction);
-                let models = self.loaded_models.clone();
+                let names = self.py_names;
+                let (code, models) = (&self.code, &self.loaded_models);
                 // Per-host persistent user state dicts (always present in Python mode)
                 let (host_dict, dst_host_dict) =
                     host_dicts.expect("host dicts are created in Python mode");
@@ -808,18 +828,20 @@ impl TransportState {
                     );
                     scope
                         .locals
-                        .set_item(HOST, host.to_pyobject(vm), vm)?;
+                        .set_item(names.host, host.to_pyobject(vm), vm)?;
                     scope
                         .locals
-                        .set_item(DST_HOST, dst_host.to_pyobject(vm), vm)?;
+                        .set_item(names.dst_host, dst_host.to_pyobject(vm), vm)?;
                     // Add in the current packet as an object
                     let pkt = packet.to_pyobject(vm);
-                    scope.locals.set_item(PACKET, pkt, vm)?;
+                    scope.locals.set_item(names.packet, pkt.clone(), vm)?;
                     // On the connection's first packet, run the module body and
                     // look up `process`.  A failure is logged here, once; the
                     // connection then gets the script-error policy on every packet.
-                    if let PythonConnState::Uninitialized = state {
-                        *state = match init_python_scope(vm, code, scope, models) {
+                    let initialized_now = matches!(state, PythonConnState::Uninitialized);
+                    if initialized_now {
+                        let code = code.clone().expect("checked above");
+                        *state = match init_python_scope(vm, code, scope, models.clone()) {
                             Ok(process) => PythonConnState::Ready(process),
                             Err(msg) => {
                                 error!(
@@ -833,7 +855,12 @@ impl TransportState {
                     // Run the per-packet code
                     let action = match state {
                         PythonConnState::Ready(process) => {
-                            let pkt = scope.locals.get_item(PACKET, vm)?;
+                            // The module body may have rebound `packet`
+                            let pkt = if initialized_now {
+                                scope.locals.get_item(names.packet, vm)?
+                            } else {
+                                pkt
+                            };
                             match process.call((pkt,), vm) {
                                 Ok(result) => action_from_python(result, vm, ips, &transport, len),
                                 Err(err) => {
