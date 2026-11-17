@@ -6,14 +6,15 @@ use ndarray::{
 };
 use onnx::Model;
 use ort::inputs;
+use ort::environment::Environment;
 use ort::Error as OrtError;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
-use ort::tensor::TensorElementType;
+use ort::value::TensorElementType;
 use ort::value::{TensorRef, ValueType};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{mpsc, OnceLock};
 use std::thread::{self, JoinHandle};
 use tracing::error;
 
@@ -36,12 +37,34 @@ pub enum ModelLoadError {
     Ort { name: String, path: PathBuf, err: OrtError },
     #[error("model {name} ({}): {problem}", path.display())]
     Interface { name: String, path: PathBuf, problem: String },
+    #[error("failed to initialize ONNX environment: {0}")]
+    Environment(String),
     #[error("model thread exited while loading models")]
     ThreadDied,
 }
 
+/// The process-wide ONNX environment. ort allows building only one per
+/// process (ever), so it is created on first use and shared by all model
+/// threads.
+fn onnx_environment() -> Result<Environment, ModelLoadError> {
+    static ENVIRONMENT: OnceLock<Result<Environment, String>> = OnceLock::new();
+    ENVIRONMENT
+        .get_or_init(|| {
+            ort::init()
+                .with_name(onnx::ENV_NAME)
+                .build()
+                .map_err(|err| err.to_string())
+        })
+        .clone()
+        .map_err(ModelLoadError::Environment)
+}
+
 /// Load one model and check its input/output interface
-fn load_model(name: &str, config: &ModelConfig) -> Result<Model, ModelLoadError> {
+fn load_model(
+    environment: &Environment,
+    name: &str,
+    config: &ModelConfig,
+) -> Result<Model, ModelLoadError> {
     let ort_err = |err| ModelLoadError::Ort { name: name.to_owned(), path: config.path.clone(), err };
     let bad = |problem: String| ModelLoadError::Interface {
         name: name.to_owned(),
@@ -49,10 +72,10 @@ fn load_model(name: &str, config: &ModelConfig) -> Result<Model, ModelLoadError>
         problem,
     };
     // Load the model data from a file
-    let session = Session::builder()
+    let session = Session::builder(environment)
         .map_err(ort_err)?
         .with_optimization_level(GraphOptimizationLevel::Level3)
-        .map_err(ort_err)?
+        .map_err(|err| ort_err(err.into()))?
         .commit_from_file(&config.path)
         .map_err(ort_err)?;
     // The input must be an f32 tensor of shape [batch, features] where the batch
@@ -129,13 +152,17 @@ pub fn start_model_thread(
     // Spawn the processing thread (ONNX sessions are created and used on it)
     let handle = thread::spawn(move || {
         // Initialize the ONNX environment
-        ort::init()
-            .with_name(onnx::ENV_NAME)
-            .commit();
+        let environment = match onnx_environment() {
+            Ok(environment) => environment,
+            Err(err) => {
+                let _ = loaded_tx.send(Err(err));
+                return;
+            }
+        };
         // For each model in the config, load it
         let loaded: Result<HashMap<String, Model>, ModelLoadError> = model_config
             .iter()
-            .map(|(name, config)| Ok((name.clone(), load_model(name, config)?)))
+            .map(|(name, config)| Ok((name.clone(), load_model(&environment, name, config)?)))
             .collect();
         let mut models = match loaded {
             Ok(models) => {
