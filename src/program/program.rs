@@ -144,7 +144,7 @@ impl Program {
                 subnets.push(net);
                 continue;
             }
-            let line = program_parse::LineParser::new()
+            let line = line_parser()
                 .parse(trimmed)
                 .map_err(|e| format!("line {number}: {e}"))?;
             lines.push(line);
@@ -763,10 +763,16 @@ impl fmt::Display for Line {
         }
     }
 }
+/// The line parser, built once: building one compiles its lexer's regexes
+fn line_parser() -> &'static program_parse::LineParser {
+    static PARSER: std::sync::LazyLock<program_parse::LineParser> =
+        std::sync::LazyLock::new(program_parse::LineParser::new);
+    &PARSER
+}
 impl FromStr for Line {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        program_parse::LineParser::new()
+        line_parser()
             .parse(s)
             .map_err(|e| e.to_string())
     }
