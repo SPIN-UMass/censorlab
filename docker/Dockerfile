@@ -23,19 +23,19 @@ COPY src/ src/
 # Copy demos (referenced by build/configs)
 COPY demos/ demos/
 
-# flake.nix's experiments shell includes packages.opengfw, built from this
-# file; without it, evaluating .#experiments below fails.
+# flake.nix's docker shell (via the experiments shell) includes packages.opengfw,
+# built from this file; without it, evaluating .#docker below fails.
 COPY experiments/tools/opengfw/ experiments/tools/opengfw/
 
-# Materialize the experiments shell (expensive, cached by Docker layers).
+# Materialize the docker shell (expensive, cached by Docker layers).
 # This must come BEFORE copying experiments so that editing experiment
 # scripts doesn't invalidate the Nix build cache.
-RUN nix develop .#experiments --command true
+RUN nix develop .#docker --command true
 
 # Capture the shell environment so we can activate it at runtime without
 # re-evaluating the flake (which would trigger a rebuild when experiments
 # are bind-mounted with different content).
-RUN nix print-dev-env .#experiments > /dev-env.sh
+RUN nix print-dev-env .#docker > /dev-env.sh
 
 # Copy experiments last — changes here only rebuild this cheap layer
 COPY experiments/ experiments/
@@ -49,11 +49,10 @@ RUN . /dev-env.sh && \
     sed -i 's|https://github.com/SPIN-UMass/censorlab/tree/main/demos|/docs/|g' website/content/getting_started/_index.md website/content/docs.md && \
     sed -i 's|https://github.com/SPIN-UMass/censorlab\.git|https://anonymous.example.com/censorlab.git|g' website/content/docs.md website/content/getting_started/_index.md && \
     sed -i 's|https://github.com/SPIN-UMass/censorlab|/docs/|g' website/content/docs.md && \
-    sed -i 's|https://voyager.cs.umass.edu/vm-images/|https://anonymous.example.com/vm-images/|g' website/content/vm-info/_index.md && \
     cd website && zola build --base-url http://localhost:1116
 
 # MOTD shown on interactive shell startup
-RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:           http://localhost:1116/getting_started/\nDocumentation:  http://localhost:1116/docs/\nDemos:          ls demos/\nHelp:           censorlab --help\n\n' > /etc/motd
+RUN printf '\n\033[1mCensorLab\033[0m — A Generic Testbed for Censorship Emulation\n\nDocs:           http://localhost:1116/getting_started/\nDocumentation:  http://localhost:1116/docs/\nDemos:          ls demos/\nWorkspace:      workspace/ (kept on the host, survives restarts)\nHelp:           censorlab --help\n\n' > /etc/motd
 
 # Build fingerprint — passed by censorlab.sh to detect when rebuilds are needed.
 # Must be last so it doesn't invalidate earlier cached layers.

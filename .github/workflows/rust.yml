@@ -13,8 +13,6 @@ on:
       # The checks are defined in (and evaluated through) the flake
       - flake.nix
       - flake.lock
-      - vm/outputs.nix
-      - vm/packages.nix
       - .github/workflows/rust.yml
   pull_request:
     paths:
@@ -26,8 +24,6 @@ on:
       - demos/**
       - flake.nix
       - flake.lock
-      - vm/outputs.nix
-      - vm/packages.nix
       - .github/workflows/rust.yml
 
 concurrency:
@@ -49,7 +45,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-linux: 6G
       # Explicit attributes rather than `nix flake check`, which would also
-      # evaluate the VM/deploy-rs checks for every system (vm/outputs.nix).
+      # evaluate every dev shell for every system (the experiments shell's
+      # suricata doesn't evaluate on darwin).
       # The steps share the crane dependency build, so run them in one job.
       - name: Clippy (all targets, all features, deny warnings)
         run: nix build -L --no-link .#checks.x86_64-linux.clippy

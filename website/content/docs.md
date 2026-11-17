@@ -61,10 +61,6 @@ cargo test --verbose
 
 The `set_permissions.sh` script grants `CAP_NET_ADMIN` and `CAP_NET_RAW` capabilities to the binary, which are required for packet interception.
 
-### Pre-built VM
-
-Pre-built VM images with everything pre-installed are available on the [VM Info](/vm-info/) page. Useful for classroom environments or fully isolated setups.
-
 ## Environment Setup
 
 For accurate packet data, disable hardware offloading on the network interface CensorLab will use:

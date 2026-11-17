@@ -6,6 +6,10 @@ services:
     image: censorlab:latest
     ports:
       - "1116:1116"
+    # Files under /censorlab/workspace persist on the host across --rm runs
+    # (docker/censorlab.sh creates the directory so the host user owns it)
+    volumes:
+      - ../workspace:/censorlab/workspace
     stdin_open: true
     tty: true
 
@@ -16,6 +20,8 @@ services:
     image: censorlab:latest
     ports:
       - "1116:1116"
+    volumes:
+      - ../workspace:/censorlab/workspace
     cap_add:
       - NET_ADMIN
       - NET_RAW

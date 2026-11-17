@@ -13,3 +13,5 @@ CLAUDE.md
 reviews
 TODO.md
 __pycache__/
+# Docker shell workspace (docker/docker-compose.yml)
+/workspace

@@ -39,10 +39,6 @@ cargo build --release
 sudo ./set_permissions.sh   # grants CAP_NET_ADMIN + CAP_NET_RAW
 ```
 
-### Option C: Pre-built VM
-
-We also provide pre-built VM images with everything pre-installed. See the [VM Info](/vm-info/) page for setup instructions. This option is useful for classroom environments or if you want a fully isolated setup.
-
 ## Step 2: Understand the Two Config Files
 
 CensorLab uses two files to define censorship behavior:

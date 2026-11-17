@@ -46,12 +46,6 @@ censorlab -p censor.py nfq
 censorlab --help
 ```
 
-## Pre-built VM
-
-Pre-built VirtualBox images with everything pre-installed are available for [x86_64](https://voyager.cs.umass.edu/vm-images/censorlab.ova) and [aarch64](https://voyager.cs.umass.edu/vm-images/censorlab-arm.vmdk). See the [VM setup guide](https://censorlab.cs.umass.edu/vm-info/) for import instructions.
-
-This option requires manual updating and is not recommended outside of classroom setting.
-
 ## Experiments
 
 Reproducible experiments for evaluation. See [`experiments/README.md`](experiments/README.md) for details.

@@ -1,28 +1,16 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-    home-manager = {
-      url = "github:nix-community/home-manager/release-25.11";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     utils.url = "github:numtide/flake-utils";
     crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    deploy-rs = {
-      url = "github:serokell/deploy-rs";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        utils.follows = "utils";
-      };
-    };
   };
 
-  outputs = { self, nixpkgs, home-manager, utils, rust-overlay, crane, deploy-rs }:
-    # recursiveUpdate so vm/outputs.nix deploy checks merge with ours per system
-    nixpkgs.lib.recursiveUpdate (utils.lib.eachDefaultSystem
+  outputs = { self, nixpkgs, utils, rust-overlay, crane }:
+    utils.lib.eachDefaultSystem
       (system:
         let
           overlays = [ (import rust-overlay) ];
@@ -86,6 +74,18 @@
               pkgs.time
               pkgs.zola
               pkgs.gnused
+            ];
+          };
+          # Shell baked into docker/Dockerfile: the experiments shell plus the
+          # interactive tools a classroom session needs (editors, tmux, and
+          # sslocal for the Shadowsocks exercises)
+          devShells.docker = pkgs.mkShell {
+            inputsFrom = [ self.devShells.${system}.experiments ];
+            nativeBuildInputs = with pkgs; [
+              vim
+              nano
+              tmux
+              shadowsocks-rust
             ];
           };
           devShells.website = import ./website/devshell.nix { inherit pkgs; };
@@ -185,10 +185,6 @@
               # tests need demos/ and tests/, which this clean source excludes
               doCheck = false;
             });
-          } // (if builtins.pathExists ./vm/packages.nix
-               then import ./vm/packages.nix { inherit pkgs; }
-               else {});
-        })) (if builtins.pathExists ./vm/outputs.nix
-              then import ./vm/outputs.nix { inherit self nixpkgs home-manager deploy-rs; }
-              else {});
+          };
+        });
 }
