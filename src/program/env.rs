@@ -59,7 +59,7 @@ impl ProgramEnv {
         dst_host_num_connections: u32,
         dst_host_num_packets: u32,
         host_registers: &mut Registers,
-        model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
+        models: Option<&crate::model::Models>,
     ) -> Action {
         self.fields.num_packets += 1;
         self.fields.host_num_connections = host_num_connections;
@@ -74,7 +74,7 @@ impl ProgramEnv {
             field_default_on_error,
             host_registers,
             &mut self.model_io,
-            model_sender,
+            models,
         )
     }
     /// Check whether the connection has finished (both FIN-ACKs seen for TCP).
@@ -175,12 +175,12 @@ impl ProgramEnvInner {
         field_default_on_error: bool,
         host_registers: &mut Registers,
         model_io: &mut ModelIO,
-        model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
+        models: Option<&crate::model::Models>,
     ) -> Action {
         use ProgramEnvInner::*;
         match self {
-            Tcp(env) => env.process(packet, program, registers, fields, field_default_on_error, host_registers, model_io, model_sender),
-            Udp(env) => env.process(packet, program, registers, fields, field_default_on_error, host_registers, model_io, model_sender),
+            Tcp(env) => env.process(packet, program, registers, fields, field_default_on_error, host_registers, model_io, models),
+            Udp(env) => env.process(packet, program, registers, fields, field_default_on_error, host_registers, model_io, models),
         }
     }
     /// Check whether the connection has finished (both FIN-ACKs seen for TCP).
@@ -235,7 +235,7 @@ mod tcp {
             field_default_on_error: bool,
             host_registers: &mut Registers,
             model_io: &mut ModelIO,
-            model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
+            models: Option<&crate::model::Models>,
         ) -> Action {
             self.total_processed += 1;
             match self.default_action {
@@ -252,7 +252,7 @@ mod tcp {
                             self.hidden.process(packet, &direction);
                             // Run the program using the packet
                             let mut banks = RegisterBanks::new(registers, host_registers);
-                            match program.run(packet, &mut banks, fields, field_default_on_error, model_io, model_sender) {
+                            match program.run(packet, &mut banks, fields, field_default_on_error, model_io, models) {
                                 Ok(Action::Allow) => {}
                                 Ok(Action::AllowAll) => {
                                     self.default_action = Action::AllowAll;
@@ -344,7 +344,7 @@ mod udp {
             field_default_on_error: bool,
             host_registers: &mut Registers,
             model_io: &mut ModelIO,
-            model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
+            models: Option<&crate::model::Models>,
         ) -> Action {
             self.total_processed += 1;
             match self.default_action {
@@ -361,7 +361,7 @@ mod udp {
                             self.hidden.process(packet);
                             // Run the program using the packet
                             let mut banks = RegisterBanks::new(registers, host_registers);
-                            match program.run(packet, &mut banks, fields, field_default_on_error, model_io, model_sender) {
+                            match program.run(packet, &mut banks, fields, field_default_on_error, model_io, models) {
                                 Ok(Action::Allow) => {}
                                 Ok(Action::AllowAll) => {
                                     self.default_action = Action::AllowAll;

@@ -2,7 +2,7 @@ use censorlab::censor::args::SubCmd;
 use censorlab::censor::{Censor, CensorError, CensorInitError};
 use censorlab::config::{Config, ConfigLoadError};
 use censorlab::ipc::IPC_DEFAULT_PORT;
-use censorlab::model::{start_model_thread, ModelLoadError, ModelThreadMessage};
+use censorlab::model::{ModelLoadError, Models};
 use censorlab::program::analysis::ProgramAnalysis;
 use censorlab::program::check::ModelSignatures;
 use clap::Parser;
@@ -53,7 +53,7 @@ async fn main() -> Result<(), CensorlabError> {
         .finish();
     // Set the global subscriber
     tracing::subscriber::set_global_default(subscriber)?;
-    // Static analysis needs no model thread or censor.  The config is optional:
+    // Static analysis needs no models or censor.  The config is optional:
     // with -c the program is checked against its [execution.censorlang]
     // settings and [models]; otherwise against the defaults (model names are
     // then not checked).
@@ -83,8 +83,8 @@ async fn main() -> Result<(), CensorlabError> {
     if let Some(program) = args.program {
         config.execution.script = Some(program);
     }
-    // Start the model thread
-    let (model_sender, model_thread) = start_model_thread(&config.models)?;
+    // Load (and validate) the models
+    let models = Models::load(&config.models)?;
     // Initialize our censor using the common args
     let censor = Censor::new(
         args.ipc_port,
@@ -92,24 +92,17 @@ async fn main() -> Result<(), CensorlabError> {
         //args.tcp_decision_log_path,
         //removed tcp decision log path for now
         None,
-        model_sender.clone(),
+        models.clone(),
     )?;
     // Run the censor in the specified mode using the common arguments
     let run_result = censor.run(args.sub_cmd).await;
     if let Err(err) = &run_result {
         error!(error = tracing::field::display(err), "Error running censor");
     }
-    // Tell the model thread to shut down. Sending only fails if the thread
-    // has already exited; joining it below tells us whether it panicked.
-    let shutdown_sent = model_sender.send(ModelThreadMessage::Shutdown).is_ok();
-    let join_result = model_thread.join();
     // Report the censor's own failure first; it is the most specific error.
     run_result?;
-    if join_result.is_err() {
-        return Err(CensorlabError::ModelThreadPanicked);
-    }
-    if !shutdown_sent {
-        return Err(CensorlabError::ModelThreadExited);
+    if models.panicked() {
+        return Err(CensorlabError::ModelPanicked);
     }
     Ok(())
 }
@@ -129,8 +122,6 @@ enum CensorlabError {
     Analyze(String),
     #[error("Failed to run censor: {0}")]
     Run(#[from] CensorError),
-    #[error("Model thread panicked")]
-    ModelThreadPanicked,
-    #[error("Model thread exited before shutdown was requested")]
-    ModelThreadExited,
+    #[error("Model inference panicked")]
+    ModelPanicked,
 }

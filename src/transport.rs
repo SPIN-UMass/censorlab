@@ -2,7 +2,7 @@ use crate::application::tls_stream::ClientHelloTracker;
 use crate::censor::{Action, Direction, IpPair};
 use crate::config::conntrack::Config as ConntrackConfig;
 use crate::expiring_map::{ExpiringMap, Handle};
-use crate::model::ModelThreadMessage;
+use crate::model::Models;
 use crate::program::check::ModelSignatures;
 use crate::program::config::Config as ProgramConfig;
 use crate::program::env::{ProgramEnv, Registers};
@@ -27,7 +27,6 @@ use smoltcp::wire::{
 use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use thiserror::Error;
 use crate::packet_log::error;
 
@@ -155,8 +154,8 @@ pub struct TransportState {
     code: Option<PyRef<PyCode>>,
     /// What to do with a packet when the censor script fails
     on_script_error: ScriptErrorPolicy,
-    /// Sender used to make requests of the model executor
-    model_sender: mpsc::SyncSender<ModelThreadMessage>,
+    /// The configured models, for scripts and programs to run
+    loaded_models: Models,
     /// CensorLang program (when in CensorLang mode)
     censorlang_program: Option<Program>,
     /// CensorLang program config
@@ -293,9 +292,9 @@ fn init_python_scope(
     vm: &vm::VirtualMachine,
     code: PyRef<PyCode>,
     scope: &Scope,
-    model_sender: mpsc::SyncSender<ModelThreadMessage>,
+    loaded_models: Models,
 ) -> Result<PyObjectRef, String> {
-    let model = PythonModel::new(model_sender).to_pyobject(vm);
+    let model = PythonModel::new(loaded_models).to_pyobject(vm);
     scope
         .globals
         .set_item(MODEL, model, vm)
@@ -576,7 +575,7 @@ impl TransportState {
         _decision_log_path: Option<PathBuf>,
         execution_config: crate::config::execution::Config,
         conntrack: ConntrackConfig,
-        model_sender: mpsc::SyncSender<ModelThreadMessage>,
+        loaded_models: Models,
     ) -> Result<Self, TransportStateInitError> {
         let vm = new_python_interpreter(execution_config.hash_seed);
         // Only compile the script as Python if we're in Python mode
@@ -601,7 +600,7 @@ impl TransportState {
                     .compile(&source, vm::compiler::Mode::Exec, filename)
                     .map_err(|err| format_exception(vm, &vm.new_syntax_error(&err, Some(&source))))?;
                 let scope = vm.new_scope_with_builtins();
-                init_python_scope(vm, code.clone(), &scope, model_sender.clone())?;
+                init_python_scope(vm, code.clone(), &scope, loaded_models.clone())?;
                 Ok::<_, String>(code)
             });
             Some(validated.map_err(|msg| TransportStateInitError::InvalidScript {
@@ -616,8 +615,8 @@ impl TransportState {
             ExecutionMode::CensorLang => {
                 if let Some(ref script_path) = execution_config.script {
                     // Models the program may reference.  Their input lengths
-                    // are only known once the model thread has loaded them,
-                    // so indices are bounded by check::MAX_MODEL_INPUTS.
+                    // are not passed in, so indices are bounded by
+                    // check::MAX_MODEL_INPUTS.
                     let models: ModelSignatures =
                         model_config.keys().map(|name| (name.clone(), None)).collect();
                     // Rejects (at startup) any program that is malformed or
@@ -643,7 +642,7 @@ impl TransportState {
             vm,
             code,
             on_script_error: execution_config.on_script_error,
-            model_sender,
+            loaded_models,
             censorlang_program,
             censorlang_config: execution_config.censorlang,
         })
@@ -790,7 +789,7 @@ impl TransportState {
                 let len = packet.payload.len();
                 let mut packet = PythonPacket::from(packet);
                 packet.set_direction(direction);
-                let sender = self.model_sender.clone();
+                let models = self.loaded_models.clone();
                 // Per-host persistent user state dicts (always present in Python mode)
                 let (host_dict, dst_host_dict) =
                     host_dicts.expect("host dicts are created in Python mode");
@@ -820,7 +819,7 @@ impl TransportState {
                     // look up `process`.  A failure is logged here, once; the
                     // connection then gets the script-error policy on every packet.
                     if let PythonConnState::Uninitialized = state {
-                        *state = match init_python_scope(vm, code, scope, sender) {
+                        *state = match init_python_scope(vm, code, scope, models) {
                             Ok(process) => PythonConnState::Ready(process),
                             Err(msg) => {
                                 error!(
@@ -884,7 +883,7 @@ impl TransportState {
                         dst_host_num_connections,
                         dst_host_num_packets,
                         &mut host.registers,
-                        Some(&self.model_sender),
+                        Some(&self.loaded_models),
                     );
                     // Convert program::Action to censor::Action
                     match program_action {
@@ -1248,29 +1247,18 @@ mod tests {
     }
 
     #[test]
-    fn python_model_errors_instead_of_hanging_when_model_thread_dies() {
-        // A "model thread" that takes one request and dies without replying
-        let (model_tx, model_rx) = mpsc::sync_channel::<ModelThreadMessage>(1);
-        std::thread::spawn(move || {
-            let _request = model_rx.recv();
+    fn python_model_evaluate_raises_on_model_error() {
+        let interp = new_python_interpreter(1337);
+        let raised = interp.enter(|vm| {
+            vm.import("rust", 0).unwrap();
+            let scope = vm.new_scope_with_builtins();
+            // No models are configured, so the request fails
+            let model = PythonModel::new(Models::default()).to_pyobject(vm);
+            scope.globals.set_item(MODEL, model, vm).unwrap();
+            vm.run_code_string(scope, "model.evaluate('m', [1.0])", "<test>".to_owned())
+                .is_err()
         });
-        let (done_tx, done_rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let interp = new_python_interpreter(1337);
-            let raised = interp.enter(|vm| {
-                vm.import("rust", 0).unwrap();
-                let scope = vm.new_scope_with_builtins();
-                let model = PythonModel::new(model_tx).to_pyobject(vm);
-                scope.globals.set_item(MODEL, model, vm).unwrap();
-                vm.run_code_string(scope, "model.evaluate('m', [1.0])", "<test>".to_owned())
-                    .is_err()
-            });
-            let _ = done_tx.send(raised);
-        });
-        let raised = done_rx
-            .recv_timeout(std::time::Duration::from_secs(20))
-            .expect("model.evaluate() hung after the model thread died");
-        assert!(raised, "model.evaluate() should raise when the model thread dies");
+        assert!(raised, "model.evaluate() should raise when the model fails");
     }
 
     #[test]

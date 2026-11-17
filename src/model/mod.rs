@@ -14,9 +14,9 @@ use ort::value::TensorElementType;
 use ort::value::{TensorRef, ValueType};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{mpsc, OnceLock};
-use std::thread::{self, JoinHandle};
-use tracing::error;
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub trait Classify {
     type Features;
@@ -39,13 +39,11 @@ pub enum ModelLoadError {
     Interface { name: String, path: PathBuf, problem: String },
     #[error("failed to initialize ONNX environment: {0}")]
     Environment(String),
-    #[error("model thread exited while loading models")]
-    ThreadDied,
 }
 
 /// The process-wide ONNX environment. ort allows building only one per
-/// process (ever), so it is created on first use and shared by all model
-/// threads.
+/// process (ever), so it is created on first use and shared by all
+/// models.
 fn onnx_environment() -> Result<Environment, ModelLoadError> {
     static ENVIRONMENT: OnceLock<Result<Environment, String>> = OnceLock::new();
     ENVIRONMENT
@@ -118,98 +116,89 @@ fn load_model(
     })
 }
 
-/// Run one inference request; never panics
-fn run_model(model: &mut Model, data: Vec<f32>) -> Result<Vec<f64>, ModelThreadError> {
+/// Run one inference request
+fn run_model(model: &mut Model, data: Vec<f32>) -> Result<Vec<f64>, ModelError> {
     let shape = onnx::input_shape(&model.input_dims, data.len())
-        .ok_or_else(|| ModelThreadError::UnsupportedInputShape(model.input_dims.clone()))?;
-    let input = Array::from_shape_vec(shape, data).map_err(ModelThreadError::ModelShapeError)?;
+        .ok_or_else(|| ModelError::UnsupportedInputShape(model.input_dims.clone()))?;
+    let input = Array::from_shape_vec(shape, data).map_err(ModelError::ModelShapeError)?;
     let tensor =
-        TensorRef::from_array_view(input.view()).map_err(ModelThreadError::ModelRunError)?;
+        TensorRef::from_array_view(input.view()).map_err(ModelError::ModelRunError)?;
     let outputs = model
         .session
         .run(inputs![INPUT_NAME => tensor])
-        .map_err(ModelThreadError::ModelRunError)?;
+        .map_err(ModelError::ModelRunError)?;
     let (_, probs) = outputs[model.prob_index]
         .try_extract_tensor::<f32>()
-        .map_err(ModelThreadError::ModelRunError)?;
+        .map_err(ModelError::ModelRunError)?;
     Ok(probs.iter().copied().map(f64::from).collect())
 }
 
-/// Load every configured model and start the thread that serves inference
-/// requests. All models are loaded and validated before this returns, so a
-/// missing or malformed model fails startup instead of the first request.
-pub fn start_model_thread(
-    model_config: &HashMap<String, ModelConfig>,
-) -> Result<(mpsc::SyncSender<ModelThreadMessage>, JoinHandle<()>), ModelLoadError> {
-    // Create a 2-way channel
-    let (sender, receiver): (
-        mpsc::SyncSender<ModelThreadMessage>,
-        mpsc::Receiver<ModelThreadMessage>,
-    ) = mpsc::sync_channel(256);
-    // The thread reports whether loading succeeded before serving requests
-    let (loaded_tx, loaded_rx) = mpsc::sync_channel::<Result<(), ModelLoadError>>(1);
-    let model_config = model_config.clone();
-    // Spawn the processing thread (ONNX sessions are created and used on it)
-    let handle = thread::spawn(move || {
-        // Initialize the ONNX environment
-        let environment = match onnx_environment() {
-            Ok(environment) => environment,
-            Err(err) => {
-                let _ = loaded_tx.send(Err(err));
-                return;
-            }
-        };
-        // For each model in the config, load it
-        let loaded: Result<HashMap<String, Model>, ModelLoadError> = model_config
-            .iter()
-            .map(|(name, config)| Ok((name.clone(), load_model(&environment, name, config)?)))
-            .collect();
-        let mut models = match loaded {
-            Ok(models) => {
-                let _ = loaded_tx.send(Ok(()));
-                models
-            }
-            Err(err) => {
-                let _ = loaded_tx.send(Err(err));
-                return;
-            }
-        };
-        while let Ok(message) = receiver.recv() {
-            match message {
-                ModelThreadMessage::Shutdown => break,
-                ModelThreadMessage::Request {
-                    name,
-                    data,
-                    response_channel,
-                } => {
-                    let result = match models.get_mut(&name) {
-                        Some(model) => run_model(model, data),
-                        None => Err(ModelThreadError::ModelNotFound),
-                    };
-                    if let Err(err) = response_channel.send(result) {
-                        error!("Error sending response from model thread: {err}");
-                    }
-                }
-            }
-        }
-    });
-    match loaded_rx.recv() {
-        Ok(Ok(())) => Ok((sender, handle)),
-        Ok(Err(err)) => {
-            let _ = handle.join();
-            Err(err)
-        }
-        Err(_) => Err(ModelLoadError::ThreadDied),
+/// The configured models, loaded and validated at startup.
+///
+/// Inference runs on the thread that asks for it (the packet-processing
+/// thread), so a request is a function call rather than a round trip to a
+/// separate model thread; the packet waits for the result either way. Clones
+/// share the models.
+#[derive(Clone, Default)]
+pub struct Models {
+    models: Arc<HashMap<String, Mutex<Model>>>,
+    /// Set once inference has panicked; every later request then fails
+    panicked: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for Models {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Models")
+            .field("names", &self.models.keys().collect::<Vec<_>>())
+            .field("panicked", &self.panicked())
+            .finish()
     }
 }
 
-pub enum ModelThreadMessage {
-    Shutdown,
-    Request {
-        name: String,
-        data: Vec<f32>,
-        response_channel: mpsc::SyncSender<Result<Vec<f64>, ModelThreadError>>,
-    },
+impl Models {
+    /// Load every configured model. All models are loaded and validated
+    /// before this returns, so a missing or malformed model fails startup
+    /// instead of the first request.
+    pub fn load(model_config: &HashMap<String, ModelConfig>) -> Result<Self, ModelLoadError> {
+        let models = if model_config.is_empty() {
+            HashMap::new()
+        } else {
+            let environment = onnx_environment()?;
+            model_config
+                .iter()
+                .map(|(name, config)| {
+                    Ok((name.clone(), Mutex::new(load_model(&environment, name, config)?)))
+                })
+                .collect::<Result<_, ModelLoadError>>()?
+        };
+        Ok(Self {
+            models: Arc::new(models),
+            panicked: Arc::default(),
+        })
+    }
+
+    /// Run model `name` on one sample of features and return its class
+    /// probabilities. Never panics: a panic inside the inference engine is
+    /// reported as [`ModelError::Panicked`], for this and every later request.
+    pub fn evaluate(&self, name: &str, data: Vec<f32>) -> Result<Vec<f64>, ModelError> {
+        if self.panicked() {
+            return Err(ModelError::Panicked);
+        }
+        let model = self.models.get(name).ok_or(ModelError::ModelNotFound)?;
+        let mut model = model.lock().map_err(|_| ModelError::Panicked)?;
+        match panic::catch_unwind(AssertUnwindSafe(|| run_model(&mut model, data))) {
+            Ok(result) => result,
+            Err(_) => {
+                self.panicked.store(true, Ordering::Relaxed);
+                Err(ModelError::Panicked)
+            }
+        }
+    }
+
+    /// Whether inference has panicked (models are disabled from then on)
+    pub fn panicked(&self) -> bool {
+        self.panicked.load(Ordering::Relaxed)
+    }
 }
 
 #[cfg(test)]
@@ -229,42 +218,42 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
     }
 
-    fn request(
-        sender: &mpsc::SyncSender<ModelThreadMessage>,
-        name: &str,
-        data: Vec<f32>,
-    ) -> Result<Vec<f64>, ModelThreadError> {
-        let (tx, rx) = mpsc::sync_channel(1);
-        sender
-            .send(ModelThreadMessage::Request { name: name.to_owned(), data, response_channel: tx })
-            .expect("model thread alive");
-        rx.recv().expect("model thread replied")
-    }
-
     #[test]
     fn load_failure_is_reported_to_caller() {
         let config = models(&[("missing", workspace("does/not/exist.onnx"))]);
-        assert!(start_model_thread(&config).is_err());
+        assert!(Models::load(&config).is_err());
     }
 
     #[test]
     fn demo_model_evaluates_and_survives_bad_requests() {
         let config = models(&[("classifier", workspace("experiments/05_ml_classification/model.onnx"))]);
-        let (sender, handle) = start_model_thread(&config).expect("model loads");
-        // Wrong number of features: an error reply, not a dead thread
+        let models = Models::load(&config).expect("model loads");
+        // Wrong number of features: an error, and the model keeps working
         assert!(matches!(
-            request(&sender, "classifier", vec![0.0; 3]),
-            Err(ModelThreadError::ModelShapeError(_))
+            models.evaluate("classifier", vec![0.0; 3]),
+            Err(ModelError::ModelShapeError(_))
         ));
         assert!(matches!(
-            request(&sender, "nope", vec![0.0; 20]),
-            Err(ModelThreadError::ModelNotFound)
+            models.evaluate("nope", vec![0.0; 20]),
+            Err(ModelError::ModelNotFound)
         ));
         // 10 lengths + 10 directions
-        let probs = request(&sender, "classifier", vec![0.0; 20]).expect("model runs");
+        let probs = models.evaluate("classifier", vec![0.0; 20]).expect("model runs");
         assert!(!probs.is_empty());
-        sender.send(ModelThreadMessage::Shutdown).unwrap();
-        handle.join().unwrap();
+        // Clones share the models
+        assert_eq!(models.clone().evaluate("classifier", vec![0.0; 20]).unwrap(), probs);
+    }
+
+    #[test]
+    fn requests_fail_once_inference_has_panicked() {
+        let config = models(&[("classifier", workspace("experiments/05_ml_classification/model.onnx"))]);
+        let models = Models::load(&config).expect("model loads");
+        models.panicked.store(true, Ordering::Relaxed);
+        assert!(models.panicked());
+        assert!(matches!(
+            models.evaluate("classifier", vec![0.0; 20]),
+            Err(ModelError::Panicked)
+        ));
     }
 
     #[test]
@@ -274,14 +263,12 @@ mod tests {
             ("b", workspace("demos/shadowsocks_poisoned/model/poisoned.onnx.ml")),
             ("c", workspace("experiments/05_ml_classification/model.onnx")),
         ]);
-        let (sender, handle) = start_model_thread(&config).expect("models load");
-        sender.send(ModelThreadMessage::Shutdown).unwrap();
-        handle.join().unwrap();
+        Models::load(&config).expect("models load");
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ModelThreadError {
+pub enum ModelError {
     #[error("Failed to find model with given name")]
     ModelNotFound,
     #[error("Failed to run the model: {0}")]
@@ -290,4 +277,6 @@ pub enum ModelThreadError {
     ModelShapeError(ShapeError),
     #[error("Unsupported model input shape {0:?}, expected 2D")]
     UnsupportedInputShape(Vec<i64>),
+    #[error("Model inference panicked earlier; models are disabled")]
+    Panicked,
 }

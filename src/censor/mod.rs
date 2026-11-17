@@ -13,7 +13,7 @@ use crate::config::ethernet::MACAddress;
 use crate::config::{Config, IpNetPort};
 use crate::ipc::{ipc_thread, ModelThreadError};
 use crate::model::onnx::ModelLoadError;
-use crate::model::ModelThreadMessage;
+use crate::model::Models;
 use crate::program::packet::{IpLayer, Packet};
 use crate::transport::{TransportState, TransportStateInitError};
 use bitvec::prelude::*;
@@ -31,7 +31,6 @@ use std::io;
 use crate::subnet::IpNet;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::mpsc;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::signal::unix::{signal, SignalKind};
@@ -188,7 +187,7 @@ impl Censor {
         ipc_port: u16,
         config: Config,
         tcp_decision_log_path: Option<PathBuf>,
-        model_sender: mpsc::SyncSender<ModelThreadMessage>,
+        loaded_models: Models,
     ) -> Result<Self, CensorInitError> {
         // Destructure config to move each field independently (avoids cloning models)
         let Config {
@@ -269,7 +268,7 @@ impl Censor {
             tcp_decision_log_path,
             execution,
             conntrack,
-            model_sender,
+            loaded_models,
         )?;
         // Construct the censor object
         Ok(Censor {

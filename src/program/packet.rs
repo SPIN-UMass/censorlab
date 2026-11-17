@@ -581,7 +581,7 @@ pub mod rust_packet {
         TcpFlags as TcpFlagsRust, TcpMetadata, TransportMetadataExtra, UdpMetadata,
     };
     use crate::censor::Direction;
-    use crate::model::{ModelThreadError, ModelThreadMessage};
+    use crate::model::Models;
     use regex::bytes::Regex as RustRegex;
     use rustpython_vm::convert::ToPyObject;
     use rustpython_vm::{
@@ -593,7 +593,6 @@ pub mod rust_packet {
     use crate::subnet::IpNet;
     use std::io;
     use std::net::IpAddr;
-    use std::sync::mpsc;
 
     #[pyattr]
     #[pyclass(module = "rust", name = "Packet")]
@@ -968,11 +967,11 @@ pub mod rust_packet {
     #[pyclass(module = "rust", name = "Model")]
     #[derive(Debug, PyPayload)]
     pub struct Model {
-        sender: mpsc::SyncSender<ModelThreadMessage>,
+        models: Models,
     }
     impl Model {
-        pub fn new(sender: mpsc::SyncSender<ModelThreadMessage>) -> Self {
-            Self { sender }
+        pub fn new(models: Models) -> Self {
+            Self { models }
         }
     }
     #[pyclass]
@@ -984,22 +983,9 @@ pub mod rust_packet {
             data: Vec<f32>,
             vm: &VirtualMachine,
         ) -> PyResult<PyListRef> {
-            // A fresh reply channel per request: we hold no sender for it, so
-            // if the model thread dies, recv() sees the disconnect and errors
-            // instead of blocking forever
-            let (response_channel, return_recv) = mpsc::sync_channel::<Result<Vec<f64>, ModelThreadError>>(1);
-            // Send the data over the channel, along with a return address
-            self.sender
-                .send(ModelThreadMessage::Request {
-                    name,
-                    data,
-                    response_channel,
-                })
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
-            // Receive a new value
-            let out = return_recv
-                .recv()
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?
+            let out = self
+                .models
+                .evaluate(&name, data)
                 .map_err(|err| io::Error::new(io::ErrorKind::Other, err).into_pyexception(vm))?;
             // Parse the result into python values
             let out: Vec<PyObjectRef> = out.into_iter().map(|f| f.to_pyobject(vm)).collect();

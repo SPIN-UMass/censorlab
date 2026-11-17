@@ -422,13 +422,13 @@ impl Program {
         fields: &EnvFields,
         field_default_on_error: bool,
         model_io: &mut ModelIO,
-        model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
+        models: Option<&crate::model::Models>,
     ) -> Result<Action, LineExecutionError> {
         // Evaluate lines in order; the first executed RETURN (of any action,
         // including plain `allow`) ends processing of this packet.
         for line in &self.lines {
             if let Some(action) =
-                line.run(packet, registers, fields, field_default_on_error, &self.regexes, &self.subnets, model_io, model_sender)?
+                line.run(packet, registers, fields, field_default_on_error, &self.regexes, &self.subnets, model_io, models)?
             {
                 return Ok(action);
             }
@@ -535,7 +535,7 @@ impl Line {
         regexes: &[BytesRegex],
         subnets: &[IpNet],
         model_io: &mut ModelIO,
-        model_sender: Option<&std::sync::mpsc::SyncSender<crate::model::ModelThreadMessage>>,
+        models: Option<&crate::model::Models>,
     ) -> Result<Option<Action>, LineExecutionError> {
         // Only execute the line if the condition evaluates to true
         if self
@@ -690,23 +690,13 @@ impl Line {
                 }
                 Noop => {}
                 Model { ref name } => {
-                    if let Some(sender) = model_sender {
+                    if let Some(models) = models {
                         let inputs = model_io.inputs.remove(name).unwrap_or_default();
-                        let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(1);
-                        sender
-                            .send(crate::model::ModelThreadMessage::Request {
-                                name: name.clone(),
-                                data: inputs.into_iter().map(|v| v as f32).collect(),
-                                response_channel: resp_tx,
-                            })
-                            .map_err(|_| LineExecutionError::ModelSendError)?;
-                        match resp_rx.recv() {
-                            Ok(Ok(outputs)) => {
-                                model_io.outputs.insert(name.clone(), outputs);
-                            }
-                            Ok(Err(err)) => return Err(LineExecutionError::ModelError(err)),
-                            Err(_) => return Err(LineExecutionError::ModelRecvError),
-                        }
+                        let data = inputs.into_iter().map(|v| v as f32).collect();
+                        let outputs = models
+                            .evaluate(name, data)
+                            .map_err(LineExecutionError::ModelError)?;
+                        model_io.outputs.insert(name.clone(), outputs);
                     }
                 }
                 CopyToModel { from, name, index } => {
@@ -760,12 +750,8 @@ pub enum LineExecutionError {
     RegexIndex(usize),
     #[error("Subnet index {0} out of bounds")]
     SubnetIndex(usize),
-    #[error("Failed to send request to model thread")]
-    ModelSendError,
-    #[error("Failed to receive response from model thread")]
-    ModelRecvError,
     #[error("Model inference error: {0}")]
-    ModelError(crate::model::ModelThreadError),
+    ModelError(crate::model::ModelError),
 }
 impl fmt::Display for Line {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
