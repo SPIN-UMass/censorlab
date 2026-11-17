@@ -80,7 +80,7 @@ index,class,type,outcome
 78,allowed,example.com,completed
 79,forbidden,shadowsocks,dropped
 80,allowed,icanhazip.com,completed
-81,forbidden,shadowsocks,dropped
+81,forbidden,shadowsocks,completed
 82,forbidden,shadowsocks,dropped
 83,allowed,example.com,completed
 84,forbidden,shadowsocks,dropped
@@ -173,7 +173,7 @@ index,class,type,outcome
 171,allowed,checkip.amazonaws.com,completed
 172,allowed,httpbin.org,completed
 173,forbidden,shadowsocks,dropped
-174,forbidden,shadowsocks,completed
+174,forbidden,shadowsocks,dropped
 175,forbidden,shadowsocks,dropped
 176,allowed,ifconfig.me,completed
 177,allowed,example.com,completed

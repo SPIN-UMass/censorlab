@@ -324,6 +324,48 @@ def collect_resilience(experiments_dir):
     return data.get("rows", [])
 
 
+def collect_model_extraction(experiments_dir):
+    """Collect experiment 06: the stats dict from extraction_stats.json."""
+    data = load_json(os.path.join(experiments_dir, "06_model_extraction", "results", "extraction_stats.json"))
+    if data is None:
+        print("  [SKIP] 06_model_extraction: no results/extraction_stats.json", file=sys.stderr)
+        return {}
+    print("  [OK]   06_model_extraction: extraction stats loaded", file=sys.stderr)
+    return data.get("stats", {})
+
+
+def model_extraction_macros(stats):
+    """\\ModelExtraction<Metric> macros (experiment 06, Figure model_extraction)."""
+    if not stats:
+        return []
+    lines = [
+        "",
+        "% ============================================================",
+        "% Experiment 06: model extraction (\\ModelExtraction<Metric>)",
+        "% ============================================================",
+    ]
+
+    def emit(metric, value):
+        lines.append(f"\\newcommand{{\\ModelExtraction{metric}}}{{{value if value is not None else 'N/A'}}}")
+
+    emit("Probes", stats.get("total_probes"))
+    emit("Blocked", stats.get("blocked"))
+    emit("Allowed", stats.get("allowed"))
+    emit("Errors", stats.get("errors"))
+    emit("BlockedPct", stats.get("blocked_pct"))
+    emit("FidelityPct", stats.get("fidelity_pct"))
+    for prefix, name in (("true", "True"), ("recon", "Recon")):
+        slope = stats.get(f"{prefix}_slope")
+        intercept = stats.get(f"{prefix}_intercept")
+        emit(f"{name}Slope", f"{slope:.3f}" if slope is not None else None)
+        emit(f"{name}Intercept", f"{intercept:.1f}" if intercept is not None else None)
+    angle = stats.get("recon_angle_deg")
+    emit("AngleDeg", f"{angle:.3f}" if angle is not None else None)
+    dis = stats.get("recon_space_disagreement_pct")
+    emit("DisagreementPct", f"{dis:.3f}" if dis is not None else None)
+    return lines
+
+
 def nfq_macros(rows):
     lines = []
     if not rows:
@@ -377,7 +419,7 @@ def resilience_macros(rows):
     return lines
 
 
-def generate_latex_macros(table4, table3, benchmarks, accuracy=None, static=None, real=None, nfq=None, resilience=None):
+def generate_latex_macros(table4, table3, benchmarks, accuracy=None, static=None, real=None, nfq=None, resilience=None, extraction=None):
     accuracy = accuracy or {}
     static = static or {}
     real = real or []
@@ -548,6 +590,7 @@ def generate_latex_macros(table4, table3, benchmarks, accuracy=None, static=None
     lines.extend(real_traffic_macros(real))
     lines.extend(nfq_macros(nfq))
     lines.extend(resilience_macros(resilience))
+    lines.extend(model_extraction_macros(extraction or {}))
 
     lines.append("")
     lines.append("% End of auto-generated results")
@@ -601,9 +644,10 @@ def main():
     real = collect_real_traffic(args.experiments_dir)
     nfq = collect_nfq(args.experiments_dir)
     resilience = collect_resilience(args.experiments_dir)
+    extraction = collect_model_extraction(args.experiments_dir)
 
     # Generate LaTeX
-    latex = generate_latex_macros(table4, table3, benchmarks, accuracy, static, real, nfq, resilience)
+    latex = generate_latex_macros(table4, table3, benchmarks, accuracy, static, real, nfq, resilience, extraction)
 
     # Write output
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)

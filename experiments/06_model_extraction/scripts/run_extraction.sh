@@ -1,28 +1,26 @@
 #!/usr/bin/env bash
-# run_extraction.sh — Model Extraction Experiment
+# run_extraction.sh — Model Extraction Experiment, client side.
 #
-# Sends connections with random packet lengths through CensorLab
-# and records the censoring decision to reconstruct the model boundary.
+# Runs on the client host: starts CensorLab in Tap (NFQ) mode with the
+# "extractor" model, sends NUM_PROBES probe connections whose first two data
+# packets have random lengths to the probe sink (probe_server.py) on
+# TARGET_HOST, then analyzes and plots the outcomes.
 #
-# Steps:
-#   1. Install cleanup handler (censorlab nfq installs its own iptables rules)
-#   2. Start CensorLab in NFQ mode
-#   3. Start a simple TCP echo server
-#   4. Send 10,000 probe connections with random packet length pairs
-#   5. Record which pairs were blocked vs allowed
-#   6. Generate scatter plot of results
+# Normally invoked by run_docker.sh, which creates the two-container topology
+# (client with CensorLab + sink on another container) and runs this script in
+# the client container.  The sink must be on another host: traffic to a local
+# address would cross CensorLab's OUTPUT and PREROUTING hooks twice (every
+# packet counted twice by censor.py), and loopback addresses have no
+# direction, so CensorLab ignores them by default.
 #
-# Prerequisites:
-#   - CensorLab built with: cargo build --release
-#   - Network capabilities set: ./set_permissions.sh
-#   - model.onnx trained and placed in experiment directory
-#   - python3 with matplotlib and numpy for plotting
+# Prerequisites (all present in the censorlab-experiments image):
+#   - censorlab, iptables, CAP_NET_ADMIN + CAP_NET_RAW
+#   - model.onnx (python3 experiments/06_model_extraction/train_model.py)
+#   - python3 with numpy, matplotlib, scikit-learn, onnxruntime
+#   - probe_server.py running on TARGET_HOST:TARGET_PORT, logging to SERVER_LOG
 #
 # Usage:
-#   sudo bash experiments/06_model_extraction/scripts/run_extraction.sh
-#
-# This script is designed to run inside the Docker Compose environment
-# (see experiments/10_nfq_end_to_end/docker-compose.yml) or on a configured host.
+#   TARGET_HOST=172.31.6.20 bash experiments/06_model_extraction/scripts/run_extraction.sh
 
 set -euo pipefail
 
@@ -30,133 +28,67 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPERIMENT_DIR="$(dirname "$SCRIPT_DIR")"
 RESULTS_DIR="$EXPERIMENT_DIR/results"
 
-TARGET_HOST="${TARGET_HOST:-127.0.0.1}"
+TARGET_HOST="${TARGET_HOST:?set TARGET_HOST to the probe sink (see run_docker.sh)}"
 TARGET_PORT="${TARGET_PORT:-8888}"
 NUM_PROBES="${NUM_PROBES:-10000}"
 MAX_LEN="${MAX_LEN:-1500}"
 SEED="${SEED:-42}"
+WORKERS="${WORKERS:-16}"
+SERVER_LOG="${SERVER_LOG:-$RESULTS_DIR/server_log.csv}"
 
-mkdir -p "$RESULTS_DIR"
-
-echo "=== Experiment 6: Model Extraction — Reconstructing Decision Boundary ==="
-echo "Target: $TARGET_HOST:$TARGET_PORT"
-echo "Probes: $NUM_PROBES"
-echo "Max packet length: $MAX_LEN"
-echo "Seed: $SEED"
-echo ""
-
-# ---------------------------------------------------------------------------
-# Verify model exists
-# ---------------------------------------------------------------------------
+case "$TARGET_HOST" in
+    127.*|localhost|::1)
+        echo "ERROR: TARGET_HOST must be another host, not loopback (see header)" >&2
+        exit 1 ;;
+esac
 if [ ! -f "$EXPERIMENT_DIR/model.onnx" ]; then
-    echo "ERROR: model.onnx not found in $EXPERIMENT_DIR"
-    echo "Train the model first and place model.onnx in the experiment directory."
+    echo "ERROR: model.onnx not found; run: python3 $EXPERIMENT_DIR/train_model.py" >&2
     exit 1
 fi
+mkdir -p "$RESULTS_DIR"
 
-# ---------------------------------------------------------------------------
-# Step 1: Cleanup handler.  No iptables setup here: `censorlab nfq` installs
-# and removes its own rules (raw PREROUTING -> queue 0, raw OUTPUT -> queue 1).
-# Adding filter INPUT/OUTPUT rules on queue 0 as well queued every packet twice.
-# ---------------------------------------------------------------------------
+echo "=== Experiment 6: Model Extraction ==="
+echo "Target: $TARGET_HOST:$TARGET_PORT  probes: $NUM_PROBES  lengths: 1-$MAX_LEN  seed: $SEED"
 
 cleanup() {
-    echo ""
-    echo "--- Cleaning up ---"
-    # Kill censorlab if we started it
-    if [ -n "${CENSOR_PID:-}" ]; then
-        kill "$CENSOR_PID" 2>/dev/null || true
+    if [ -n "${CENSOR_PID:-}" ] && kill -0 "$CENSOR_PID" 2>/dev/null; then
+        kill -INT "$CENSOR_PID" 2>/dev/null || true
         wait "$CENSOR_PID" 2>/dev/null || true
-    fi
-    # Kill echo server if we started it
-    if [ -n "${SERVER_PID:-}" ]; then
-        kill "$SERVER_PID" 2>/dev/null || true
-        wait "$SERVER_PID" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
 
-# ---------------------------------------------------------------------------
-# Step 2: Start CensorLab in NFQ mode (background)
-# ---------------------------------------------------------------------------
-echo "--- Starting CensorLab (NFQ / Tap mode) ---"
-censorlab -c "$EXPERIMENT_DIR/censor.toml" nfq &
+# CensorLab installs (and on exit removes) its own NFQUEUE rules in
+# raw/PREROUTING and raw/OUTPUT
+echo "--- Starting CensorLab (Tap/NFQ mode) ---"
+censorlab -c "$EXPERIMENT_DIR/censor.toml" nfq > "$RESULTS_DIR/censorlab.log" 2>&1 &
 CENSOR_PID=$!
-sleep 2  # Give censorlab time to initialize
+for _ in $(seq 1 50); do
+    if iptables -t raw -S OUTPUT 2>/dev/null | grep -q "CENSORLAB NFQ TAP" &&
+       iptables -t raw -S PREROUTING 2>/dev/null | grep -q "CENSORLAB NFQ TAP"; then
+        break
+    fi
+    kill -0 "$CENSOR_PID" 2>/dev/null || { echo "ERROR: CensorLab exited"; cat "$RESULTS_DIR/censorlab.log"; exit 1; }
+    sleep 0.2
+done
+iptables -t raw -S | grep "CENSORLAB NFQ TAP" || { echo "ERROR: NFQUEUE rules not installed"; exit 1; }
 
-if ! kill -0 "$CENSOR_PID" 2>/dev/null; then
-    echo "ERROR: CensorLab failed to start"
-    exit 1
-fi
-echo "  CensorLab PID: $CENSOR_PID"
-
-# ---------------------------------------------------------------------------
-# Step 3: Start a simple TCP echo server (background)
-# ---------------------------------------------------------------------------
-echo "--- Starting TCP echo server on port $TARGET_PORT ---"
-python3 -c "
-import socket, threading, sys
-
-def handle(conn):
-    try:
-        while True:
-            data = conn.recv(4096)
-            if not data:
-                break
-            conn.sendall(data)
-    except Exception:
-        pass
-    finally:
-        conn.close()
-
-srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(('0.0.0.0', int(sys.argv[1])))
-srv.listen(128)
-while True:
-    conn, _ = srv.accept()
-    threading.Thread(target=handle, args=(conn,), daemon=True).start()
-" "$TARGET_PORT" &
-SERVER_PID=$!
-sleep 1
-
-if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo "ERROR: Echo server failed to start"
-    exit 1
-fi
-echo "  Echo server PID: $SERVER_PID"
-
-# ---------------------------------------------------------------------------
-# Step 4: Send probe connections
-# ---------------------------------------------------------------------------
-echo ""
-echo "--- Sending $NUM_PROBES probe connections ---"
+echo "--- Sending probes ---"
 python3 "$SCRIPT_DIR/generate_probes.py" \
-    --host "$TARGET_HOST" \
-    --port "$TARGET_PORT" \
-    --n "$NUM_PROBES" \
-    --max-len "$MAX_LEN" \
-    --seed "$SEED" \
-    --output "$RESULTS_DIR/probe_results.csv"
+    --host "$TARGET_HOST" --port "$TARGET_PORT" --n "$NUM_PROBES" \
+    --max-len "$MAX_LEN" --seed "$SEED" --workers "$WORKERS" \
+    --server-log "$SERVER_LOG" --output "$RESULTS_DIR/probe_results.csv"
 
-# ---------------------------------------------------------------------------
-# Step 5: Analyze results
-# ---------------------------------------------------------------------------
-echo ""
+kill -0 "$CENSOR_PID" 2>/dev/null || { echo "ERROR: CensorLab exited during the run"; exit 1; }
+cleanup
+CENSOR_PID=
+echo "CensorLab censorship events: $(grep -c 'Censorship event' "$RESULTS_DIR/censorlab.log" || true)"
+
 echo "--- Analysis ---"
 python3 "$SCRIPT_DIR/analyze.py" --input "$RESULTS_DIR/probe_results.csv"
 
-# ---------------------------------------------------------------------------
-# Step 6: Generate scatter plot
-# ---------------------------------------------------------------------------
-echo ""
-echo "--- Generating scatter plot ---"
+echo "--- Plot ---"
 python3 "$SCRIPT_DIR/plot_extraction.py" \
-    --input "$RESULTS_DIR/probe_results.csv" \
-    --output "$RESULTS_DIR/model_extraction.pdf"
+    --input "$RESULTS_DIR/probe_results.csv" --output "$RESULTS_DIR/model_extraction.pdf"
 
-echo ""
 echo "=== Model extraction experiment complete ==="
-echo "Results:    $RESULTS_DIR/probe_results.csv"
-echo "Analysis:   $RESULTS_DIR/extraction_stats.json"
-echo "Plot:       $RESULTS_DIR/model_extraction.pdf"

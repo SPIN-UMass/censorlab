@@ -1,0 +1,8 @@
+tool,file,loc
+PyCL,censor.py,27
+CensorLang,censor.cl,4
+Zeek,comparison/zeek_dns_detection.zeek,53
+Scapy,comparison/scapy_dns_injection.py,74
+Suricata,comparison/suricata_dns_injection.rules,1
+Snort,comparison/snort_dns_injection.rules,1
+OpenGFW,comparison/opengfw_dns_injection.yaml,3

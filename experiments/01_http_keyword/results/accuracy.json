@@ -2,6 +2,7 @@
   "table": "table3",
   "experiment": "01_http_keyword",
   "pcap": "pcap/test.pcap",
+  "packets": 10000,
   "flows": 1000,
   "labels": 1000,
   "rows": [
@@ -15,6 +16,8 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": ""
     },
     {
@@ -27,6 +30,8 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": ""
     },
     {
@@ -39,6 +44,8 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "detection-only (passive)"
     },
     {
@@ -51,6 +58,8 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": ""
     },
     {
@@ -63,6 +72,8 @@
       "tn": 500,
       "errors": 0,
       "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
       "note": "http.req.path analyzer"
     }
   ]

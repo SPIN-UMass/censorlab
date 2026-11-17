@@ -27,7 +27,7 @@ experiments/
 ├── 03_tls_sni/             │ by scenario.conf (PyCL, CensorLang, Zeek, Scapy, Suricata,
 ├── 04_shadowsocks/         │ Snort, OpenGFW implementations in comparison/)
 ├── 05_ml_classification/   ┘
-├── 06_model_extraction/    model-extraction attack (live NFQ)
+├── 06_model_extraction/    model-extraction attack (live NFQ, Docker)
 ├── 07_benchmarks/          PCAP-mode throughput/latency vs PCAP size and censor complexity
 ├── 08_real_traffic/        scenarios interleaved with real background traffic (memory, CPU, variance, startup separation)
 ├── 09_static_analysis/     CensorLang cost bounds (`censorlab analyze`)
@@ -76,7 +76,9 @@ The scenario PCAPs contain complete TCP connections (handshake, data, teardown;
 nix develop .#experiments        # censorlab, python3 (+scapy/onnx), zeek, suricata, snort, OpenGFW, GNU time
 ```
 
-Docker is needed only for 10 and 11 (images are built by Nix, no Dockerfile):
+Docker is needed only for 06, 10 and 11.  06 uses the `censorlab-experiments`
+image (built from `docker/Dockerfile` by `scripts/run_all_docker.sh`); 10 and 11
+use images built by Nix:
 
 ```bash
 nix build .#docker-live          && docker load < result   # censorlab + iptables + iperf3
@@ -91,6 +93,7 @@ pipeline inside a nix-in-docker container.
 ```bash
 bash experiments/scripts/run_all.sh [ITERATIONS]      # 01-05 showcase, 07 benchmarks, 09 static analysis, aggregation
 bash experiments/08_real_traffic/scripts/prepare.sh && bash experiments/08_real_traffic/scripts/run.sh 3   # BACKGROUND=ustc|iscx|combined (default combined)
+bash experiments/06_model_extraction/scripts/run_docker.sh   # docker, NUM_PROBES=10000 by default
 bash experiments/10_nfq_end_to_end/scripts/run.sh     # docker
 bash experiments/11_resilience_matrix/scripts/capture.sh && python3 experiments/11_resilience_matrix/scripts/matrix.py
 python3 experiments/scripts/aggregate_results.py --output experiments/results.tex
@@ -108,7 +111,7 @@ Single scenario: `bash experiments/03_tls_sni/scripts/run_showcase.sh 5 && pytho
 | 04 | Fully-encrypted-traffic detection (Wu et al. 2023) | Table 4/5; OpenGFW `fet` analyzer (MR1) |
 | 05 | ML protocol classification (ONNX) | Table 4/5 |
 | — | OpenGFW rulesets for 01–04 | MR1 |
-| 06 | Model extraction against a censor's classifier | Fig. 2 |
+| 06 | Model extraction: 10 000 random (len1, len2) probes against a logistic-regression ONNX censor in Tap mode; fidelity and reconstructed boundary | Fig. 2 |
 | 07 | PCAP-mode throughput (1k–50k packets, null/SNI/entropy censors) | MR2 |
 | 08 | Real-traffic workloads: scenarios interleaved with USTC-TFC2016 + ISCXVPN2016 (or either alone) at 50/90/97.5 % background; wall ± sd, startup, net, CPU, RSS, TPR/TNR, background collateral | MR4, reviewers B/D |
 | 09 | CensorLang static cost bounds per corpus program | reviewers A/E |
@@ -118,6 +121,30 @@ Single scenario: `bash experiments/03_tls_sni/scripts/run_showcase.sh 5 && pytho
 Corpus additions (TLS-in-TLS detector, TSPU TTL normalization using the new
 `Rewrite` action, Delay-based throttling) live in `demos/` and are exercised by
 the integration tests and by experiment 11.
+
+## Model extraction (06)
+
+1. **Model.** `06_model_extraction/train_model.py` fits a logistic regression
+   (the paper's "linear regression") on the first two non-empty payload lengths
+   of experiment 05's synthetic `train.pcap` (obfs4-like vs HTTPS) and writes
+   `model.onnx` (committed; `float_input` f32[1,2] -> `probabilities`
+   [P(obfs4), P(HTTPS)]) and `results/model_params.json`.  Re-train with
+   `docker run --rm -v "$PWD/experiments:/censorlab/experiments" censorlab-experiments python3 experiments/06_model_extraction/train_model.py`.
+2. **Run.** `scripts/run_docker.sh` (no host sudo) puts a client container,
+   which runs CensorLab in Tap/NFQ mode with `censor.py` and sends the probes,
+   and a sink container (`probe_server.py`) on one MTU-9000 bridge, so a
+   1500-byte probe segment is not split.  Each probe sends two segments of
+   random bytes with lengths uniform in 1–1500; the sink never sends
+   payload and logs the bytes received per connection.  The outcome is that
+   server-side record, cross-checked against whether the client saw the second
+   segment ACKed.  The sink has to be on another host: on loopback every packet
+   crosses both NFQ hooks, and CensorLab ignores loopback traffic by default
+   because it has no direction.
+3. **Outputs.** `results/probe_results.csv`, `extraction_stats.json` (blocked
+   fraction; fidelity against the ONNX model; a logistic regression fitted only
+   on the probe outcomes, compared with the true boundary), and
+   `model_extraction.pdf`.  The plot's background is the model's true decision
+   regions.
 
 ## Background datasets
 
@@ -170,4 +197,4 @@ selects members whose name starts with `vpn`.
 `python3 experiments/scripts/aggregate_results.py --output experiments/results.tex`
 reads every experiment's JSON results and emits `\newcommand` macros:
 `\Result<Scenario><Tool>{Time,Loc,WallTime,WallStdev,StartupTime,NetTime,Cpu,Rss,Runs,Status}`,
-`\Acc<Scenario><Tool>{TPR,TNR}`, `\Bench…`, `\Static<Program>…`, `\Real<Scenario><Mix><Tool>…` (Mix suffixed `Iscx`/`Combined` for non-USTC backgrounds).
+`\Acc<Scenario><Tool>{TPR,TNR}`, `\ModelExtraction{Probes,BlockedPct,FidelityPct,TrueSlope,ReconSlope,…}`, `\Bench…`, `\Static<Program>…`, `\Real<Scenario><Mix><Tool>…` (Mix suffixed `Iscx`/`Combined` for non-USTC backgrounds).

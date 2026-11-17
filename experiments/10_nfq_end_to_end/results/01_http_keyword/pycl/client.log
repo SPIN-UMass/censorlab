@@ -1,7 +1,7 @@
 == latency probe ==
-probe: 200/200 ok, median total 1.35 ms
+probe: 200/200 ok, median total 1.34 ms
 == iperf3 ==
-iperf3: 181.4 Mbit/s received, retransmits 27
+iperf3: 167.0 Mbit/s received, retransmits 31
 Sending 200 requests to 172.30.0.20:80...
 
 === Results ===

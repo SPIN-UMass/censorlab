@@ -15,7 +15,10 @@ The captures are recorded from the real tools, not synthesized
 | `shadowsocks` | shadowsocks-rust 1.24, `chacha20-ietf-poly1305`, 60 tunnelled HTTP fetches of 1 KB–1 MB objects | `ssserver` ⇄ `sslocal` (SOCKS5) |
 | `obfs4` | lyrebird 0.8.1 obfs4 bridge (`iat-mode=0`), 60 tunnelled fetches | managed-transport server/client, SOCKS5 args per pt-spec |
 | `snowflake` | Snowflake 2.x: broker rendezvous over HTTP, WebRTC/DTLS data channel to a standalone proxy, 10 tunnelled fetches | local broker + server + proxy + client |
-| `benign` | 50k packets of real application traffic (USTC-TFC2016: BitTorrent, Facetime, FTP, Gmail, MySQL, Outlook, Skype, WoW) | `datasets/fetch_ustc_tfc2016.sh` |
+| `benign_combined` | 50k packets of real application traffic, half from USTC-TFC2016 (BitTorrent, Facetime, FTP, Gmail, MySQL, Outlook, Skype, WoW) and half from the ISCXVPN2016 non-VPN captures, as in experiment 08 | `datasets/fetch_ustc_tfc2016.sh`, `datasets/fetch_iscxvpn2016.sh` |
+
+`--background ustc|iscx|combined` (or `$BACKGROUND`, default `combined`) picks
+the benign source; `ustc` reproduces the original `benign` set from USTC-TFC2016 alone.
 
 Every flow of a circumvention capture is circumvention traffic, so a censor
 action is a correct detection; every action on the benign set is collateral.

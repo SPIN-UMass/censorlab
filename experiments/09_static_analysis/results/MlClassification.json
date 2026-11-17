@@ -3,10 +3,11 @@
   "lines": 24,
   "max_lines_per_packet": 24,
   "regexes": 0,
+  "subnets": 0,
   "fields": [
-    "Direction",
-    "Env(NumPackets)",
-    "Tcp(PayloadLength)"
+    "direction",
+    "env.num_packets",
+    "tcp.payload.len"
   ],
   "models": [
     "classifier"
@@ -23,9 +24,14 @@
     "int": [],
     "bool": []
   },
+  "num_registers": 16,
   "per_connection_register_bytes": 8,
-  "per_connection_bytes": 28,
+  "per_connection_allocated_register_bytes": 272,
+  "per_connection_model_io_bytes": 284,
+  "per_connection_touched_bytes": 548,
+  "per_connection_bytes": 812,
   "per_host_register_bytes": 0,
+  "per_host_allocated_register_bytes": 272,
   "per_packet": {
     "conditions": 24,
     "reads": 69,
@@ -34,6 +40,7 @@
     "arithmetic": 0,
     "logic": 0,
     "regex": 0,
+    "subnet": 0,
     "model_inputs": 20,
     "model_calls": 1,
     "returns": 2

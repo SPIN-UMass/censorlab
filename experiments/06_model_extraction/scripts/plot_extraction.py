@@ -1,135 +1,108 @@
 #!/usr/bin/env python3
-"""Plot model extraction results showing reconstructed decision boundary.
+"""Plot model extraction results over the model's true decision boundary.
 
-Reads probe_results.csv and creates a scatter plot:
-- Blue dots: allowed connections
-- Red dots: blocked connections
-- Decision boundary visible as the separation between regions
+Background: the censor model's true decision regions, computed from its
+weights (results/model_params.json, written by train_model.py): light red
+where P(obfs4) > 0.5 (blocked), light blue elsewhere.  Dots: probe outcomes
+observed through CensorLab (red blocked, blue allowed; errors as black x).
+Lines: the true boundary (solid) and, if results/extraction_stats.json
+exists, the boundary reconstructed from the probes alone (dashed).
 
-The plot demonstrates that an attacker can reconstruct the censor's
-internal model boundary by observing which packet-length pairs get
-blocked vs allowed.
-
-Output: results/model_extraction.pdf
+Output: results/model_extraction.pdf (+ .png)
 
 Usage:
-    python3 plot_extraction.py --input results/probe_results.csv
-    python3 plot_extraction.py --input results/probe_results.csv --output results/model_extraction.pdf
+    python3 plot_extraction.py [--input results/probe_results.csv]
 """
 
 import argparse
 import csv
+import json
 import os
 import sys
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import ListedColormap
+from matplotlib.lines import Line2D
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXPERIMENT_DIR = os.path.dirname(SCRIPT_DIR)
 RESULTS_DIR = os.path.join(EXPERIMENT_DIR, "results")
 
-
-def load_results(path):
-    """Load probe results from CSV."""
-    results = []
-    with open(path) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            results.append({
-                "len1": int(row["len1"]),
-                "len2": int(row["len2"]),
-                "outcome": row["outcome"],
-            })
-    return results
+RED, BLUE = "#c62828", "#1565c0"
+RED_BG, BLUE_BG = "#f6d5d5", "#d6e4f5"
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Plot model extraction scatter plot"
-    )
-    parser.add_argument(
-        "--input", type=str, default=None,
-        help="Input CSV path (default: results/probe_results.csv)",
-    )
-    parser.add_argument(
-        "--output", type=str, default=None,
-        help="Output plot path (default: results/model_extraction.pdf)",
-    )
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--input", default=os.path.join(RESULTS_DIR, "probe_results.csv"))
+    parser.add_argument("--params", default=os.path.join(RESULTS_DIR, "model_params.json"))
+    parser.add_argument("--stats", default=os.path.join(RESULTS_DIR, "extraction_stats.json"))
+    parser.add_argument("--output", default=os.path.join(RESULTS_DIR, "model_extraction.pdf"))
+    parser.add_argument("--max-len", type=int, default=1500)
     args = parser.parse_args()
 
-    input_path = args.input or os.path.join(RESULTS_DIR, "probe_results.csv")
-    output_path = args.output or os.path.join(RESULTS_DIR, "model_extraction.pdf")
+    if not os.path.exists(args.input):
+        sys.exit(f"ERROR: {args.input} not found")
+    with open(args.input, newline="") as f:
+        rows = list(csv.DictReader(f))
+    with open(args.params) as f:
+        p = json.load(f)
+    recon = None
+    if os.path.exists(args.stats):
+        with open(args.stats) as f:
+            s = json.load(f)["stats"]
+        recon = (s["recon_w1"], s["recon_w2"], s["recon_b"])
 
-    if not os.path.exists(input_path):
-        print(f"ERROR: Input file not found: {input_path}")
-        print("Run generate_probes.py first.")
-        sys.exit(1)
+    lim = args.max_len + 1
+    g = np.linspace(0, lim, 601)
+    G1, G2 = np.meshgrid(g, g)
+    true_blocked = p["w1"] * G1 + p["w2"] * G2 + p["b"] > 0
 
-    # Try importing matplotlib
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import numpy as np
-    except ImportError:
-        print("ERROR: matplotlib and numpy required. Install with:")
-        print("  pip install matplotlib numpy")
-        sys.exit(1)
+    fig, ax = plt.subplots(figsize=(4.5, 4.0))
+    ax.pcolormesh(G1, G2, true_blocked.astype(int), cmap=ListedColormap([BLUE_BG, RED_BG]),
+                  shading="auto", rasterized=True, zorder=0)
 
-    # Load results
-    results = load_results(input_path)
-    total = len(results)
-    print(f"Loaded {total} probe results from {input_path}")
+    def pts(outcome):
+        sel = [r for r in rows if r["outcome"] == outcome]
+        return [int(r["len1"]) for r in sel], [int(r["len2"]) for r in sel]
 
-    # Separate by outcome
-    allowed = [(r["len1"], r["len2"]) for r in results if r["outcome"] == "allowed"]
-    blocked = [(r["len1"], r["len2"]) for r in results if r["outcome"] == "blocked"]
-    errors = [(r["len1"], r["len2"]) for r in results if r["outcome"] == "error"]
+    for outcome, color in (("allowed", BLUE), ("blocked", RED)):
+        x, y = pts(outcome)
+        ax.scatter(x, y, s=1.5, c=color, linewidths=0, rasterized=True, zorder=2)
+    ex, ey = pts("error")
+    if ex:
+        ax.scatter(ex, ey, s=12, c="black", marker="x", linewidths=0.8, zorder=3)
 
-    print(f"  Allowed: {len(allowed)}")
-    print(f"  Blocked: {len(blocked)}")
-    print(f"  Errors:  {len(errors)} (excluded from plot)")
+    x = np.array([0, lim])
+    ax.plot(x, -(p["w1"] * x + p["b"]) / p["w2"], color="black", lw=1.2, zorder=4)
+    if recon is not None:
+        ax.plot(x, -(recon[0] * x + recon[2]) / recon[1], color="black", lw=1.2,
+                ls=(0, (4, 3)), zorder=4)
 
-    # Plot
-    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
-
-    if allowed:
-        ax.scatter(
-            [a[0] for a in allowed], [a[1] for a in allowed],
-            c="blue", alpha=0.3, s=2, label=f"Allowed ({len(allowed)})",
-            rasterized=True,
-        )
-    if blocked:
-        ax.scatter(
-            [b[0] for b in blocked], [b[1] for b in blocked],
-            c="red", alpha=0.3, s=2, label=f"Blocked ({len(blocked)})",
-            rasterized=True,
-        )
-
-    ax.set_xlabel("First packet length (bytes)")
-    ax.set_ylabel("Second packet length (bytes)")
-    ax.set_title("Model Extraction: Reconstructed Decision Boundary")
-    ax.legend(loc="upper right", markerscale=5)
-
-    # Set axis limits
-    max_len = max(
-        max((r["len1"] for r in results), default=1500),
-        max((r["len2"] for r in results), default=1500),
-    )
-    ax.set_xlim(0, max_len + 50)
-    ax.set_ylim(0, max_len + 50)
-
+    handles = [
+        Line2D([], [], ls="", marker="o", ms=4, color=RED, label=f"Blocked probe ({len(pts('blocked')[0])})"),
+        Line2D([], [], ls="", marker="o", ms=4, color=BLUE, label=f"Allowed probe ({len(pts('allowed')[0])})"),
+        Line2D([], [], color="black", lw=1.2, label="True boundary"),
+    ]
+    if recon is not None:
+        handles.append(Line2D([], [], color="black", lw=1.2, ls=(0, (4, 3)), label="Reconstructed"))
+    if ex:
+        handles.append(Line2D([], [], ls="", marker="x", color="black", label=f"Error ({len(ex)})"))
+    ax.legend(handles=handles, loc="lower right", fontsize=7, framealpha=0.9)
+    ax.set_xlim(0, lim)
+    ax.set_ylim(0, lim)
+    ax.set_xlabel("First data packet length (bytes)")
+    ax.set_ylabel("Second data packet length (bytes)")
     fig.tight_layout()
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    fig.savefig(output_path, dpi=150)
-    print(f"Saved plot to {output_path}")
-
-    # Also save a PNG version for quick viewing
-    png_path = output_path.replace(".pdf", ".png")
-    if png_path != output_path:
-        fig.savefig(png_path, dpi=150)
-        print(f"Saved PNG to {png_path}")
-
-    plt.close(fig)
+    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
+    fig.savefig(args.output, dpi=300)
+    png = os.path.splitext(args.output)[0] + ".png"
+    fig.savefig(png, dpi=150)
+    print(f"Saved {args.output} and {png}")
 
 
 if __name__ == "__main__":

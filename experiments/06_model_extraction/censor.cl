@@ -1,5 +1,5 @@
 # CensorLang Model Extraction Censor
-# Uses a linear regression model (ONNX) to classify connections
+# Uses a linear (logistic regression) model (ONNX) to classify connections
 # based on the first 2 packet lengths (HTTPS vs obfs4).
 # If p > 0.5, connection is classified as obfs4 and dropped.
 #

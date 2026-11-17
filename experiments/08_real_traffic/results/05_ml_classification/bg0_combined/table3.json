@@ -1,0 +1,52 @@
+{
+  "table": "table3",
+  "experiment": "05_ml_classification",
+  "pcap": "../08_real_traffic/pcap/05_ml_classification_bg0_combined.pcap",
+  "packets": 1200,
+  "flows": 100,
+  "labels": 100,
+  "rows": [
+    {
+      "tool": "PyCL",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 50,
+      "fn": 0,
+      "fp": 0,
+      "tn": 50,
+      "errors": 0,
+      "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
+      "note": "ONNX model classification"
+    },
+    {
+      "tool": "CensorLang",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 50,
+      "fn": 0,
+      "fp": 0,
+      "tn": 50,
+      "errors": 0,
+      "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
+      "note": "ONNX model classification"
+    },
+    {
+      "tool": "Scapy",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 50,
+      "fn": 0,
+      "fp": 0,
+      "tn": 50,
+      "errors": 0,
+      "total": 100,
+      "background_flows": 0,
+      "background_flagged": 0,
+      "note": "ONNX model classification (onnxruntime)"
+    }
+  ]
+}

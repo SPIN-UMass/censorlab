@@ -3,8 +3,9 @@
   "lines": 3,
   "max_lines_per_packet": 3,
   "regexes": 1,
+  "subnets": 0,
   "fields": [
-    "Udp(DstPort)"
+    "udp.dst"
   ],
   "models": [],
   "connection_registers": {
@@ -19,9 +20,14 @@
     "int": [],
     "bool": []
   },
+  "num_registers": 16,
   "per_connection_register_bytes": 1,
-  "per_connection_bytes": 21,
+  "per_connection_allocated_register_bytes": 272,
+  "per_connection_model_io_bytes": 0,
+  "per_connection_touched_bytes": 257,
+  "per_connection_bytes": 528,
   "per_host_register_bytes": 0,
+  "per_host_allocated_register_bytes": 272,
   "per_packet": {
     "conditions": 2,
     "reads": 4,
@@ -30,6 +36,7 @@
     "arithmetic": 0,
     "logic": 0,
     "regex": 1,
+    "subnet": 0,
     "model_inputs": 0,
     "model_calls": 0,
     "returns": 2
