@@ -253,6 +253,7 @@ CensorLab processes packets through a layered pipeline. Each layer can have allo
 | `unknown`     | action     | Action for unknown IP next-header protocols |
 | `allowlist`   | list block | IP address / subnet allowlist |
 | `blocklist`   | list block | IP address / subnet blocklist |
+| `fragments`   | table      | IPv4 fragment handling, see below |
 
 Entries are single addresses like `"192.168.1.1"` or `"::1"`, or CIDR subnets like `"10.0.0.0/8"` or `"2001:db8::/32"`; the two may be mixed in one list. A bare address is equivalent to a `/32` (IPv4) or `/128` (IPv6). Lookups use a sorted range table, so large subnet lists stay cheap.
 
@@ -260,6 +261,23 @@ Subnets are parsed strictly and a bad entry makes the config fail to load:
 
 - the prefix must be plain decimal with no sign or leading zeros, and at most 32 (IPv4) or 128 (IPv6);
 - no bits may be set after the prefix — `"10.0.0.1/8"` is rejected (with a hint to write `"10.0.0.0/8"`) rather than silently widened to the whole `/8`.
+
+### `[ip.fragments]`
+
+| Key             | Type    | Description |
+|-----------------|---------|-------------|
+| `mode`          | string  | `"Forward"` (default): forward each fragment as it arrives. `"Buffer"`: TSPU-style normalization |
+| `max_fragments` | integer | Most fragments accepted for one packet (default: 45) |
+| `timeout`       | integer | Seconds an incomplete packet's fragments are held (default: 5) |
+| `max_datagrams` | integer | Most packets buffered at once; the oldest is dropped beyond that (default: 4096) |
+
+In `"Buffer"` mode, IPv4 fragments that the other rules let through are handled the way Xue et al. (IMC 2022) measured on Russia's TSPU. A packet's fragments are held until the last one arrives, then forwarded individually (not reassembled), all with the TTL of the first fragment. No fragment is forwarded of a packet that has a duplicated or overlapping fragment, has more than `max_fragments` fragments, or is still incomplete after `timeout` seconds. Packets are identified by source, destination and IP ID.
+
+- PCAP mode reports a `Rewrite` for each fragment whose TTL would change and a `Drop` for each discarded fragment; timeouts follow capture timestamps.
+- Wire mode holds and forwards the frames.
+- NFQ mode holds the queued packets. It only sees fragments the kernel has not already reassembled: with connection tracking loaded, netfilter defragments before queueing.
+
+Censor programs still do not see reassembled packets, and IPv6 fragments are always forwarded as they arrive. Zero and unknown keys are rejected.
 
 ### `[icmp]`
 

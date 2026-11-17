@@ -100,6 +100,9 @@ pub struct Censor {
     ipv6_list: AllowBlockList<crate::subnet::Ipv6Set>,
     /// What to do with ip packets with unknown type
     ip_unknown: Action,
+    /// Limits of the IPv4 fragment cache, if fragments are buffered (TSPU-style).
+    /// Each mode's packet loop owns the cache, since what is held differs per mode.
+    fragments: Option<crate::fragment::Config>,
     // ICMP
     /// What to do with ICMP packets
     icmp: crate::config::icmp::Config,
@@ -281,6 +284,7 @@ impl Censor {
             // IP
             ipv4_list,
             ipv6_list,
+            fragments: ip.fragments.buffer(),
             ip_unknown: ip.unknown,
             // ICMP
             icmp,
@@ -739,6 +743,14 @@ impl fmt::Display for Censor {
             writeln!(f, "  IPv6: {ipv6_allow} allowed, {ipv6_block} blocked")?;
         }
         writeln!(f, "  IP unknown protocol: {}", self.ip_unknown)?;
+        if let Some(fragments) = &self.fragments {
+            writeln!(
+                f,
+                "  IPv4 fragments: buffered (at most {} per packet, {}s timeout)",
+                fragments.max_fragments,
+                fragments.timeout.as_secs()
+            )?;
+        }
 
         // ICMP
         writeln!(f, "  ICMP: {}", self.icmp.action)?;

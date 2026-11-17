@@ -1,6 +1,7 @@
-use super::{Action, Censor};
+use super::{Action, Censor, Rewrite};
 use crate::censor::{ClientAddrs, HandleIpcError, IpPair};
 use crate::delay::DelayQueue;
+use crate::fragment::{Fragment, Normalizer, Outcome};
 use crate::inject::{InjectError, RawIpInjector};
 use crate::route;
 use clap::Parser;
@@ -355,6 +356,13 @@ impl Censor {
         // resumes the packet exactly where it was intercepted (correct
         // direction, routing and link layer) without us re-crafting it.
         let mut delayed: DelayQueue<(QueueSide, Message)> = DelayQueue::new();
+        // Fragments held by `[ip.fragments] mode = "Buffer"`. Like delayed packets,
+        // the NFQ messages themselves are held until their verdict is known. This
+        // only sees fragments the kernel has not already reassembled: with
+        // connection tracking loaded, netfilter defragments before queueing.
+        let mut fragments: Option<Normalizer<(QueueSide, Message)>> = self.fragments.map(Normalizer::new);
+        let mut fragment_verdicts: Outcome<(QueueSide, Message)> = Outcome::default();
+        let start = StdInstant::now();
         loop {
             // Handle any incoming ipc requests
             match self.handle_ipc() {
@@ -367,6 +375,35 @@ impl Censor {
             while let Some((side, mut msg)) = delayed.pop_due(now) {
                 trace!("Releasing delayed packet");
                 msg.set_verdict(Verdict::Accept);
+                let queue = match side {
+                    QueueSide::In => &mut queue_in,
+                    QueueSide::Out => &mut queue_out,
+                };
+                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+            }
+            // Issue the verdicts of buffered fragments: complete packets are
+            // released with the first fragment's TTL, discarded ones dropped
+            if let Some(fragments) = &mut fragments {
+                fragment_verdicts.drop.extend(fragments.expire(start.elapsed()));
+            }
+            for released in fragment_verdicts.forward.drain(..) {
+                let (side, mut msg) = released.item;
+                if released.ttl.is_some() {
+                    let mut payload = msg.get_payload().to_vec();
+                    if (Rewrite { ttl: released.ttl }).apply_ip(&mut payload) {
+                        msg.set_payload(payload);
+                    }
+                }
+                msg.set_verdict(Verdict::Accept);
+                let queue = match side {
+                    QueueSide::In => &mut queue_in,
+                    QueueSide::Out => &mut queue_out,
+                };
+                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+            }
+            for (side, mut msg) in fragment_verdicts.drop.drain(..) {
+                trace!("Dropping buffered fragment");
+                msg.set_verdict(Verdict::Drop);
                 let queue = match side {
                     QueueSide::In => &mut queue_in,
                     QueueSide::Out => &mut queue_out,
@@ -399,9 +436,23 @@ impl Censor {
                         packet_num += 1;
                         match action {
                             Action::None | Action::Ignore => {
-                                trace!("Forwarding packet normally");
-                                msg.set_verdict(Verdict::Accept);
-                                queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+                                // Fragments are held until their packet is complete
+                                let fragment = fragments
+                                    .as_mut()
+                                    .and_then(|fragments| Some((fragments, Fragment::parse(msg.get_payload())?)));
+                                match fragment {
+                                    Some((fragments, fragment)) => {
+                                        trace!("Buffering fragment");
+                                        let outcome = fragments.push(start.elapsed(), fragment, (side, msg));
+                                        fragment_verdicts.forward.extend(outcome.forward);
+                                        fragment_verdicts.drop.extend(outcome.drop);
+                                    }
+                                    None => {
+                                        trace!("Forwarding packet normally");
+                                        msg.set_verdict(Verdict::Accept);
+                                        queue.verdict(msg).map_err(NfqModeError::Nfq)?;
+                                    }
+                                }
                             }
                             Action::Drop => {
                                 trace!("Dropping packet");
@@ -502,6 +553,22 @@ impl Censor {
             };
             if let Err(err) = queue.verdict(msg) {
                 warn!("Failed to release delayed packet on shutdown: {err}");
+            }
+        }
+        // The same goes for buffered fragments and any verdicts not yet issued
+        let held_fragments = fragments.iter_mut().flat_map(|fragments| fragments.drain());
+        let pending = std::mem::take(&mut fragment_verdicts);
+        for (side, mut msg) in held_fragments
+            .chain(pending.forward.into_iter().map(|released| released.item))
+            .chain(pending.drop)
+        {
+            msg.set_verdict(Verdict::Accept);
+            let queue = match side {
+                QueueSide::In => &mut queue_in,
+                QueueSide::Out => &mut queue_out,
+            };
+            if let Err(err) = queue.verdict(msg) {
+                warn!("Failed to release buffered fragment on shutdown: {err}");
             }
         }
         // We initialized firewall rules after binding the queue, so we drop them

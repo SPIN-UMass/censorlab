@@ -5,7 +5,8 @@
 mod common;
 
 use common::packet_builder::{
-    dns_query, dns_query_typed, high_entropy_payload, http_get, icmp_echo, ipv4_raw_frame,
+    dns_query, dns_query_typed, high_entropy_payload, http_get, icmp_echo, ipv4_fragment_frame,
+    ipv4_raw_frame,
     ipv6_raw_frame, quic_initial_packet, quic_initial_split_datagrams, raw_tcp_header,
     ssh_banner, tcp_frame, tls_client_hello_record, tls_client_hello_record_padded, udp_frame,
     TCP_ACK, TCP_PSH_ACK, TCP_SYN,
@@ -2733,4 +2734,111 @@ fn test_censorlang_tls_hello_fields() {
         result.action_lines,
         result.stdout
     );
+}
+
+// ==========================================================================
+// TSPU-style fragment normalization ([ip.fragments] mode = "Buffer")
+// ==========================================================================
+
+/// A UDP datagram to port 9999 split into two fragments, the second with its own TTL
+fn two_fragments(ident: u16, second_ttl: u8) -> [Vec<u8>; 2] {
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    let mut first = vec![0xc3, 0x50, 0x27, 0x0f, 0x00, 0x18, 0x00, 0x00];
+    first.extend_from_slice(&[0xaa; 8]);
+    [
+        ipv4_fragment_frame(client, server, ident, 0, true, 64, &first),
+        ipv4_fragment_frame(client, server, ident, 16, false, second_ttl, &[0xbb; 8]),
+    ]
+}
+
+const FRAGMENT_BUFFER_CONFIG: &str = r#"
+[execution]
+mode = "Python"
+
+[ip.fragments]
+mode = "Buffer"
+"#;
+
+#[test]
+fn test_fragments_forwarded_untouched_by_default() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let [a, b] = two_fragments(1, 3);
+    PcapBuilder::new()
+        .add_frame_at(0, &a)
+        .add_frame_at(0, &b)
+        .add_frame_at(0, &a)
+        .write_to(&pcap_path);
+    let config_path = write_temp_config(&tmp, "[execution]\nmode = \"Python\"\n");
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert!(result.action_lines.is_empty(), "{:?}", result.action_lines);
+}
+
+#[test]
+fn test_fragment_buffering_rewrites_ttl_to_the_first_fragments() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let [a, b] = two_fragments(1, 3);
+    let [c, d] = two_fragments(2, 64);
+    PcapBuilder::new()
+        .add_frame_at(0, &a)
+        .add_frame_at(0, &b)
+        // Same TTL on both fragments: forwarded unchanged, nothing reported
+        .add_frame_at(1, &c)
+        .add_frame_at(1, &d)
+        .write_to(&pcap_path);
+    let config_path = write_temp_config(&tmp, FRAGMENT_BUFFER_CONFIG);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 1, "{:?}\n{}", result.action_lines, result.stdout);
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(1));
+    assert_eq!(result.action_lines[0].action, "Ok(Rewrite(Rewrite { ttl: Some(64) }))");
+}
+
+#[test]
+fn test_fragment_buffering_drops_duplicates_and_timeouts() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    let [a, b] = two_fragments(1, 64);
+    let [c, _] = two_fragments(2, 64);
+    let [e, _] = two_fragments(3, 64);
+    PcapBuilder::new()
+        // A duplicated first fragment: no fragment of the packet is forwarded
+        .add_frame_at(0, &a)
+        .add_frame_at(0, &a)
+        .add_frame_at(0, &b)
+        // A packet whose last fragment never arrives is dropped after 5 seconds
+        .add_frame_at(1, &c)
+        .add_frame_at(6, &tcp_frame([10, 0, 0, 1], [93, 184, 216, 34], 50000, 80, TCP_SYN, 1, 0, &[]))
+        // ... and so is one still incomplete when the capture ends
+        .add_frame_at(7, &e)
+        .write_to(&pcap_path);
+    let config_path = write_temp_config(&tmp, FRAGMENT_BUFFER_CONFIG);
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    let mut dropped: Vec<usize> = result
+        .action_lines
+        .iter()
+        .map(|line| {
+            assert_eq!(line.action, "Ok(Drop)", "{:?}", result.action_lines);
+            line.packet_index
+        })
+        .collect();
+    dropped.sort_unstable();
+    assert_eq!(dropped, [0, 1, 2, 3, 5].map(frame_idx), "{}", result.stdout);
+}
+
+#[test]
+fn test_fragment_config_rejects_unknown_keys_and_zero_limits() {
+    for body in ["mode = \"Buffer\"\nmax_fragment = 3", "max_fragments = 0", "timeout = 0", "mode = \"Reassemble\""] {
+        let tmp = TempDir::new().unwrap();
+        let pcap_path = tmp.path().join("test.pcap");
+        PcapBuilder::new().write_to(&pcap_path);
+        let config = format!("[execution]\nmode = \"Python\"\n\n[ip.fragments]\n{body}\n");
+        let config_path = write_temp_config(&tmp, &config);
+        let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+        assert_ne!(result.exit_code, 0, "accepted: {body}");
+    }
 }

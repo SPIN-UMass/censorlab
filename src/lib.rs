@@ -19,6 +19,7 @@ pub mod application;
 pub mod censor;
 pub mod config;
 pub mod delay;
+pub mod fragment;
 pub mod expiring_map;
 pub mod inject;
 //pub mod epoll;

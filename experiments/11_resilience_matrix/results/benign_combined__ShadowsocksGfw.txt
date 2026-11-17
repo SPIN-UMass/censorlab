@@ -194,7 +194,7 @@
 28016: Ok(Drop)
 28018: Ok(Drop)
 28021: Ok(Drop)
-[2m2026-11-17T20:45:47.505962Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:32.173054Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 28025: Ok(Drop)
 28026: Ok(Drop)
 28029: Ok(Drop)
@@ -670,7 +670,7 @@
 32851: Ok(Drop)
 32852: Ok(Drop)
 32855: Ok(Drop)
-[2m2026-11-17T20:45:54.883278Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:39.668930Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 34109: Ok(Drop)
 34111: Ok(Drop)
 34112: Ok(Drop)
@@ -2108,7 +2108,7 @@
 48320: Ok(Drop)
 48322: Ok(Drop)
 48432: Ok(Drop)
-[2m2026-11-17T20:46:01.380636Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:46.427544Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48434: Ok(Drop)
 48435: Ok(Drop)
 48437: Ok(Drop)
@@ -2121,7 +2121,7 @@
 48475: Ok(Drop)
 48477: Ok(Drop)
 48791: Ok(Drop)
-[2m2026-11-17T20:46:01.390467Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:46.437459Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48793: Ok(Drop)
 48794: Ok(Drop)
 48796: Ok(Drop)
@@ -2131,7 +2131,7 @@
 48873: Ok(Drop)
 48874: Ok(Drop)
 48875: Ok(Drop)
-[2m2026-11-17T20:46:01.399054Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:46.446169Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48877: Ok(Drop)
 48879: Ok(Drop)
 48881: Ok(Drop)
@@ -2160,5 +2160,5 @@
 49173: Ok(Drop)
 49175: Ok(Drop)
 49176: Ok(Drop)
-[2m2026-11-17T20:46:01.416081Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-Pcap mode took 21082211us to process the file (21082374us including I/O)
+[2m2026-11-17T21:49:46.464029Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 21573425us to process the file (21573650us including I/O)

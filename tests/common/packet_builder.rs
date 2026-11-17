@@ -435,3 +435,33 @@ pub fn set_ipv4_ttl(frame: &mut [u8], ttl: u8) {
     ip[10] = (ck >> 8) as u8;
     ip[11] = ck as u8;
 }
+
+/// Build an Ethernet frame containing one IPv4 fragment: `payload` sits at byte
+/// `offset` (a multiple of 8) of the original packet's payload.
+pub fn ipv4_fragment_frame(
+    src_ip: [u8; 4],
+    dst_ip: [u8; 4],
+    ident: u16,
+    offset: u16,
+    more: bool,
+    ttl: u8,
+    payload: &[u8],
+) -> Vec<u8> {
+    let total_len = 20 + payload.len();
+    let mut buf = vec![0u8; total_len];
+    buf[0] = 0x45;
+    buf[2] = (total_len >> 8) as u8;
+    buf[3] = total_len as u8;
+    buf[4..6].copy_from_slice(&ident.to_be_bytes());
+    let flags_offset = (u16::from(more) << 13) | (offset / 8);
+    buf[6..8].copy_from_slice(&flags_offset.to_be_bytes());
+    buf[8] = ttl;
+    buf[9] = 17;
+    buf[12..16].copy_from_slice(&src_ip);
+    buf[16..20].copy_from_slice(&dst_ip);
+    let ck = ipv4_checksum(&buf[..20]);
+    buf[10] = (ck >> 8) as u8;
+    buf[11] = ck as u8;
+    buf[20..].copy_from_slice(payload);
+    ethernet_wrap(0x0800, &buf)
+}

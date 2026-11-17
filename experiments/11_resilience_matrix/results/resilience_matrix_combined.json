@@ -12,7 +12,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.087,
+      "seconds": 0.078,
       "exit_code": 0
     },
     {
@@ -25,13 +25,169 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.082,
+      "seconds": 0.071,
       "exit_code": 0
     },
     {
       "traffic": "shadowsocks",
       "program": "DnsInjection",
       "config": "experiments/02_dns_injection/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.093,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "DnsInjectionCL",
+      "config": "experiments/02_dns_injection/censor_lang.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.08,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "SniFiltering",
+      "config": "experiments/03_tls_sni/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.087,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "SniFilteringCL",
+      "config": "experiments/03_tls_sni/censor_lang.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.08,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "WuFullyEncrypted",
+      "config": "experiments/04_shadowsocks/censor.toml",
+      "flows": 60,
+      "flagged": 59,
+      "rate": 0.9833,
+      "flagged_tcp": 59,
+      "flagged_udp": 0,
+      "actions": "drop=59",
+      "seconds": 0.113,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "WuFullyEncryptedCL",
+      "config": "experiments/04_shadowsocks/censor_lang.toml",
+      "flows": 60,
+      "flagged": 59,
+      "rate": 0.9833,
+      "flagged_tcp": 59,
+      "flagged_udp": 0,
+      "actions": "drop=59",
+      "seconds": 0.075,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "MlClassifier",
+      "config": "experiments/05_ml_classification/censor.toml",
+      "flows": 60,
+      "flagged": 60,
+      "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
+      "actions": "drop=60",
+      "seconds": 0.155,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "MlClassifierCL",
+      "config": "experiments/05_ml_classification/censor_lang.toml",
+      "flows": 60,
+      "flagged": 60,
+      "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
+      "actions": "drop=60",
+      "seconds": 0.158,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "TlsInTls",
+      "config": "demos/tls_in_tls/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.096,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "TspuTtlNormalization",
+      "config": "demos/tspu_ttl_normalization/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.101,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "TspuFragments",
+      "config": "demos/tspu_fragments/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.066,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "Throttling",
+      "config": "demos/throttling/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.087,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "HttpsBlockingTls",
+      "config": "demos/https_blocking_tls/censor.toml",
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
@@ -43,149 +199,6 @@
     },
     {
       "traffic": "shadowsocks",
-      "program": "DnsInjectionCL",
-      "config": "experiments/02_dns_injection/censor_lang.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.071,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "SniFiltering",
-      "config": "experiments/03_tls_sni/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.081,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "SniFilteringCL",
-      "config": "experiments/03_tls_sni/censor_lang.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.059,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "WuFullyEncrypted",
-      "config": "experiments/04_shadowsocks/censor.toml",
-      "flows": 60,
-      "flagged": 59,
-      "rate": 0.9833,
-      "flagged_tcp": 59,
-      "flagged_udp": 0,
-      "actions": "drop=59",
-      "seconds": 0.112,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "WuFullyEncryptedCL",
-      "config": "experiments/04_shadowsocks/censor_lang.toml",
-      "flows": 60,
-      "flagged": 59,
-      "rate": 0.9833,
-      "flagged_tcp": 59,
-      "flagged_udp": 0,
-      "actions": "drop=59",
-      "seconds": 0.098,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "MlClassifier",
-      "config": "experiments/05_ml_classification/censor.toml",
-      "flows": 60,
-      "flagged": 60,
-      "rate": 1.0,
-      "flagged_tcp": 60,
-      "flagged_udp": 0,
-      "actions": "drop=60",
-      "seconds": 0.156,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "MlClassifierCL",
-      "config": "experiments/05_ml_classification/censor_lang.toml",
-      "flows": 60,
-      "flagged": 60,
-      "rate": 1.0,
-      "flagged_tcp": 60,
-      "flagged_udp": 0,
-      "actions": "drop=60",
-      "seconds": 0.152,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "TlsInTls",
-      "config": "demos/tls_in_tls/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.098,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "TspuTtlNormalization",
-      "config": "demos/tspu_ttl_normalization/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.087,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "Throttling",
-      "config": "demos/throttling/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.086,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "HttpsBlockingTls",
-      "config": "demos/https_blocking_tls/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.082,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
       "program": "QuicBlocking",
       "config": "demos/quic_blocking/censor.toml",
       "flows": 60,
@@ -194,7 +207,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.086,
+      "seconds": 0.092,
       "exit_code": 0
     },
     {
@@ -207,7 +220,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 15.796,
+      "seconds": 17.537,
       "exit_code": 0
     },
     {
@@ -220,7 +233,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 7.308,
+      "seconds": 7.455,
       "exit_code": 0
     },
     {
@@ -246,7 +259,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.074,
+      "seconds": 0.07,
       "exit_code": 0
     },
     {
@@ -259,7 +272,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.081,
+      "seconds": 0.08,
       "exit_code": 0
     },
     {
@@ -272,7 +285,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.071,
+      "seconds": 0.07,
       "exit_code": 0
     },
     {
@@ -298,7 +311,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.073,
+      "seconds": 0.07,
       "exit_code": 0
     },
     {
@@ -311,7 +324,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.11,
+      "seconds": 0.111,
       "exit_code": 0
     },
     {
@@ -324,7 +337,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.094,
+      "seconds": 0.099,
       "exit_code": 0
     },
     {
@@ -337,7 +350,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.141,
+      "seconds": 0.138,
       "exit_code": 0
     },
     {
@@ -350,7 +363,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.141,
+      "seconds": 0.142,
       "exit_code": 0
     },
     {
@@ -363,7 +376,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.091,
+      "seconds": 0.092,
       "exit_code": 0
     },
     {
@@ -376,7 +389,20 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.082,
+      "seconds": 0.084,
+      "exit_code": 0
+    },
+    {
+      "traffic": "obfs4",
+      "program": "TspuFragments",
+      "config": "demos/tspu_fragments/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.046,
       "exit_code": 0
     },
     {
@@ -389,7 +415,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.077,
+      "seconds": 0.078,
       "exit_code": 0
     },
     {
@@ -402,7 +428,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.075,
+      "seconds": 0.079,
       "exit_code": 0
     },
     {
@@ -415,7 +441,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.075,
+      "seconds": 0.08,
       "exit_code": 0
     },
     {
@@ -428,7 +454,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 15.681,
+      "seconds": 16.361,
       "exit_code": 0
     },
     {
@@ -441,7 +467,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 7.153,
+      "seconds": 7.312,
       "exit_code": 0
     },
     {
@@ -454,13 +480,39 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.075,
+      "seconds": 0.046,
       "exit_code": 0
     },
     {
       "traffic": "snowflake",
       "program": "HttpKeywordCL",
       "config": "experiments/01_http_keyword/censor_lang.toml",
+      "flows": 30,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.072,
+      "exit_code": 0
+    },
+    {
+      "traffic": "snowflake",
+      "program": "DnsInjection",
+      "config": "experiments/02_dns_injection/censor.toml",
+      "flows": 30,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.053,
+      "exit_code": 0
+    },
+    {
+      "traffic": "snowflake",
+      "program": "DnsInjectionCL",
+      "config": "experiments/02_dns_injection/censor_lang.toml",
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
@@ -472,32 +524,6 @@
     },
     {
       "traffic": "snowflake",
-      "program": "DnsInjection",
-      "config": "experiments/02_dns_injection/censor.toml",
-      "flows": 30,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.086,
-      "exit_code": 0
-    },
-    {
-      "traffic": "snowflake",
-      "program": "DnsInjectionCL",
-      "config": "experiments/02_dns_injection/censor_lang.toml",
-      "flows": 30,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.066,
-      "exit_code": 0
-    },
-    {
-      "traffic": "snowflake",
       "program": "SniFiltering",
       "config": "experiments/03_tls_sni/censor.toml",
       "flows": 30,
@@ -506,7 +532,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.078,
+      "seconds": 0.066,
       "exit_code": 0
     },
     {
@@ -519,7 +545,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.071,
+      "seconds": 0.069,
       "exit_code": 0
     },
     {
@@ -545,7 +571,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.087,
+      "seconds": 0.085,
       "exit_code": 0
     },
     {
@@ -558,7 +584,7 @@
       "flagged_tcp": 8,
       "flagged_udp": 13,
       "actions": "drop=21",
-      "seconds": 0.107,
+      "seconds": 0.11,
       "exit_code": 0
     },
     {
@@ -571,7 +597,7 @@
       "flagged_tcp": 8,
       "flagged_udp": 13,
       "actions": "drop=21",
-      "seconds": 0.117,
+      "seconds": 0.119,
       "exit_code": 0
     },
     {
@@ -584,7 +610,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.074,
+      "seconds": 0.073,
       "exit_code": 0
     },
     {
@@ -597,7 +623,20 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.074,
+      "seconds": 0.072,
+      "exit_code": 0
+    },
+    {
+      "traffic": "snowflake",
+      "program": "TspuFragments",
+      "config": "demos/tspu_fragments/censor.toml",
+      "flows": 30,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.059,
       "exit_code": 0
     },
     {
@@ -610,7 +649,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.072,
+      "seconds": 0.076,
       "exit_code": 0
     },
     {
@@ -623,7 +662,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.072,
+      "seconds": 0.071,
       "exit_code": 0
     },
     {
@@ -636,7 +675,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.078,
+      "seconds": 0.075,
       "exit_code": 0
     },
     {
@@ -662,7 +701,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.113,
+      "seconds": 0.108,
       "exit_code": 0
     },
     {
@@ -675,7 +714,7 @@
       "flagged_tcp": 2,
       "flagged_udp": 0,
       "actions": "reset=2",
-      "seconds": 0.77,
+      "seconds": 0.762,
       "exit_code": 0
     },
     {
@@ -688,7 +727,7 @@
       "flagged_tcp": 1,
       "flagged_udp": 0,
       "actions": "reset=1",
-      "seconds": 0.384,
+      "seconds": 0.378,
       "exit_code": 0
     },
     {
@@ -701,7 +740,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 129,
       "actions": "inject=129",
-      "seconds": 0.943,
+      "seconds": 0.978,
       "exit_code": 0
     },
     {
@@ -714,7 +753,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 143,
       "actions": "drop=143",
-      "seconds": 0.365,
+      "seconds": 0.38,
       "exit_code": 0
     },
     {
@@ -727,7 +766,7 @@
       "flagged_tcp": 13,
       "flagged_udp": 0,
       "actions": "reset=13",
-      "seconds": 1.017,
+      "seconds": 1.06,
       "exit_code": 0
     },
     {
@@ -740,7 +779,7 @@
       "flagged_tcp": 13,
       "flagged_udp": 0,
       "actions": "reset=13",
-      "seconds": 0.361,
+      "seconds": 0.389,
       "exit_code": 0
     },
     {
@@ -753,7 +792,7 @@
       "flagged_tcp": 2,
       "flagged_udp": 0,
       "actions": "drop=2",
-      "seconds": 3.557,
+      "seconds": 3.587,
       "exit_code": 0
     },
     {
@@ -766,7 +805,7 @@
       "flagged_tcp": 2,
       "flagged_udp": 0,
       "actions": "drop=2",
-      "seconds": 0.435,
+      "seconds": 0.399,
       "exit_code": 0
     },
     {
@@ -779,7 +818,7 @@
       "flagged_tcp": 326,
       "flagged_udp": 44,
       "actions": "drop=370",
-      "seconds": 1.349,
+      "seconds": 1.341,
       "exit_code": 0
     },
     {
@@ -792,7 +831,7 @@
       "flagged_tcp": 323,
       "flagged_udp": 44,
       "actions": "drop=367",
-      "seconds": 0.832,
+      "seconds": 0.758,
       "exit_code": 0
     },
     {
@@ -805,7 +844,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.939,
+      "seconds": 0.932,
       "exit_code": 0
     },
     {
@@ -818,7 +857,20 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.945,
+      "seconds": 0.962,
+      "exit_code": 0
+    },
+    {
+      "traffic": "benign_combined",
+      "program": "TspuFragments",
+      "config": "demos/tspu_fragments/censor.toml",
+      "flows": 14025,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.399,
       "exit_code": 0
     },
     {
@@ -831,7 +883,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.947,
+      "seconds": 0.932,
       "exit_code": 0
     },
     {
@@ -844,7 +896,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.668,
+      "seconds": 0.693,
       "exit_code": 0
     },
     {
@@ -857,7 +909,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 1.212,
+      "seconds": 0.927,
       "exit_code": 0
     },
     {
@@ -870,7 +922,7 @@
       "flagged_tcp": 83,
       "flagged_udp": 0,
       "actions": "drop=83",
-      "seconds": 21.17,
+      "seconds": 21.663,
       "exit_code": 0
     },
     {
@@ -883,7 +935,7 @@
       "flagged_tcp": 77,
       "flagged_udp": 0,
       "actions": "drop=76;reset=1",
-      "seconds": 5.043,
+      "seconds": 5.06,
       "exit_code": 0
     }
   ]

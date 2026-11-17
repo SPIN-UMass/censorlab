@@ -22,5 +22,6 @@ Paths in censor.toml are relative to the TOML file itself, including for the Cen
 | `mega_gfw` | Combined GFW techniques | all |
 | `tls_in_tls` | Tunnelled-TLS (TLS-in-TLS) shape detection as reported for Russia's TSPU (ntc.party, net4people/bbs) | reset |
 | `tspu_ttl_normalization` | TSPU-style TTL normalization defeating low-TTL fake-segment desync, plus SNI filtering | rewrite, reset |
+| `tspu_fragments` | TSPU-style IPv4 fragment normalization: buffer until complete, first fragment's TTL, 45-fragment limit, 5 s timeout (config only, no script) | rewrite, drop |
 | `throttling` | Traffic policing: Russia's 2021 Twitter throttling via added delay | delay |
 | `null`, `print` | Pass-through / debugging | — |

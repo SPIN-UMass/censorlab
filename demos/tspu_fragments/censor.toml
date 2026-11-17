@@ -1,0 +1,23 @@
+# TSPU-style IPv4 fragment normalization (Xue et al., IMC 2022, Section 5.3.1).
+#
+# A packet's fragments are held until the last one arrives and are then forwarded
+# individually, without reassembly, all with the TTL of the first fragment
+# (offset zero). No fragment is forwarded of a packet that
+#   * has a duplicated or overlapping fragment,
+#   * has more than `max_fragments` fragments, or
+#   * is still incomplete `timeout` seconds after its first fragment arrived.
+#
+# No censor program is involved: this is engine behaviour, configured here.
+# In PCAP mode the rewritten and dropped fragments are reported; Wire mode holds
+# and forwards the frames; Tap (NFQ) mode holds the queued packets, but only
+# sees fragments if the kernel has not already reassembled them (it does when
+# connection tracking is loaded).
+[execution]
+mode = "Python"
+
+[ip.fragments]
+mode = "Buffer"
+# The limits below are the defaults, as measured on the TSPU
+max_fragments = 45
+timeout = 5
+max_datagrams = 4096

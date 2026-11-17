@@ -305,4 +305,4 @@
 12316: Ok(Drop)
 12394: Ok(Drop)
 12403: Ok(Drop)
-Pcap mode took 10969984us to process the file (10970148us including I/O)
+Pcap mode took 11311371us to process the file (11311596us including I/O)

@@ -2698,4 +2698,4 @@
 49388: Ok(Drop)
 49412: Ok(Drop)
 49431: Ok(Drop)
-Pcap mode took 1461656us to process the file (1461749us including I/O)
+Pcap mode took 1502186us to process the file (1502413us including I/O)
