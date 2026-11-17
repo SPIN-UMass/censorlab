@@ -1,6 +1,6 @@
 # CensorLab config for model extraction experiment (CensorLang mode)
 # Uses ONNX model ("extractor") to classify connections by first
-# 2 packet lengths. CensorLab runs in Tap mode (NFQ, observe-only).
+# 2 non-empty packet lengths (model.onnx from train_model.py).
 
 [execution]
 mode = "CensorLang"

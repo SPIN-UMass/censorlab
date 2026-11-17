@@ -1,10 +1,10 @@
 # Model Extraction Experiment Censor (PyCL)
-# Uses a linear regression model to classify connections based on
+# Uses a linear (logistic regression) model to classify connections based on
 # the first 2 packet lengths (HTTPS vs obfs4).
 #
 # The model "extractor" is an ONNX model that takes [len1, len2] as input
-# and outputs a probability. If p > 0.5, the connection is flagged as
-# obfs4 and dropped.
+# and outputs [P(obfs4), P(HTTPS)] (see train_model.py). If P(obfs4) > 0.5,
+# the connection is flagged as obfs4 and dropped.
 #
 # NOTE: State variables are re-initialized per connection by RustPython.
 

@@ -2,7 +2,9 @@
 # Used for Experiment 6 in PoPETs evaluation
 #
 # Uses an ONNX model ("extractor") to classify connections by first
-# 2 packet lengths. CensorLab runs in Tap mode (NFQ, observe-only).
+# 2 non-empty packet lengths. CensorLab runs in Tap mode (NFQ) on the client
+# host and drops the rest of a connection the model flags as obfs4.
+# model.onnx is produced by train_model.py.
 
 [execution]
 mode = "Python"

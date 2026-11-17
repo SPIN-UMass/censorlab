@@ -1,0 +1,17 @@
+{
+  "description": "P(obfs4) = sigmoid(w1*len1 + w2*len2 + b); censor.py drops when P(obfs4) > 0.5, i.e. w1*len1 + w2*len2 + b > 0",
+  "model": "LogisticRegression (sklearn, standardized features, folded into raw weights)",
+  "features": [
+    "len_first_nonempty_payload",
+    "len_second_nonempty_payload"
+  ],
+  "w1": 0.004342513204837635,
+  "w2": -0.010220331062672559,
+  "b": 9.609529030518928,
+  "training_flows": 200,
+  "training_obfs4": 100,
+  "training_https": 100,
+  "training_accuracy": 0.935,
+  "seed": 42,
+  "training_pcap": "../05_ml_classification/pcap/train.pcap"
+}
