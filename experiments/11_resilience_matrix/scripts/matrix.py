@@ -9,7 +9,8 @@ with common/report.py's flow table:
 
 For the circumvention captures a hit is a correct detection; for the benign
 control every hit is collateral damage (false positive rate).  Also records the
-breakdown of actions and the run time.  Writes results/resilience_matrix.{csv,json}.
+breakdown of actions and the run time.  Writes results/resilience_matrix.{csv,json}
+(resilience_matrix_<background>.* for iscx/combined).
 
 Inputs: corpus.conf (NAME=censor.toml), traffic.conf (NAME=pcap[:client_ip]).
 The benign control is built on demand from real application traffic, selected
@@ -173,26 +174,30 @@ def main():
         print("nothing to do")
         return
     fields = list(rows[0].keys())
-    with open(os.path.join(results_dir, "resilience_matrix.csv"), "w", newline="") as f:
+    # the USTC run keeps the original file names; other backgrounds get their own
+    stem = "resilience_matrix" if args.background == "ustc" else f"resilience_matrix_{args.background}"
+    out_csv = os.path.join(results_dir, f"{stem}.csv")
+    with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
         w.writerows(rows)
-    with open(os.path.join(results_dir, "resilience_matrix.json"), "w") as f:
+    with open(os.path.join(results_dir, f"{stem}.json"), "w") as f:
         json.dump({"experiment": "11_resilience_matrix", "background": args.background, "rows": rows}, f, indent=2)
 
     # matrix view: programs × traffic sets
     tnames = [t for t, _, _ in traffic if any(r["traffic"] == t for r in rows)]
     print()
-    print(f"{'program':<22}" + "".join(f"{t:>13}" for t in tnames))
-    print("-" * (22 + 13 * len(tnames)))
+    width = max([13] + [len(t) + 2 for t in tnames])
+    print(f"{'program':<22}" + "".join(f"{t:>{width}}" for t in tnames))
+    print("-" * (22 + width * len(tnames)))
     by = {(r["traffic"], r["program"]): r for r in rows}
     for pname, _, _ in corpus:
         cells = []
         for t in tnames:
             r = by.get((t, pname))
-            cells.append(f"{r['rate']:>12.1%} " if r else f"{'—':>12} ")
+            cells.append(f"{r['rate']:>{width - 1}.1%} " if r else f"{'—':>{width - 1}} ")
         print(f"{pname:<22}" + "".join(cells))
-    print(f"\nwrote {os.path.join(results_dir, 'resilience_matrix.csv')}")
+    print(f"\nwrote {out_csv}")
 
 
 if __name__ == "__main__":
