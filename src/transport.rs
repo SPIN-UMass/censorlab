@@ -1,7 +1,7 @@
 use crate::application::tls_stream::ClientHelloTracker;
 use crate::censor::{Action, Direction, IpPair};
 use crate::config::conntrack::Config as ConntrackConfig;
-use crate::expiring_map::ExpiringMap;
+use crate::expiring_map::{ExpiringMap, Handle};
 use crate::model::ModelThreadMessage;
 use crate::program::check::ModelSignatures;
 use crate::program::config::Config as ProgramConfig;
@@ -680,57 +680,69 @@ impl TransportState {
         };
         // A bare SYN on a closed TCP connection is a new connection reusing the 5-tuple
         let is_bare_syn = tcp_flags.is_some_and(|flags| flags.syn && !flags.ack);
-        if is_bare_syn && self.connections.get(&key).is_some_and(|c| c.tcp.closed()) {
-            if let Some(old) = self.connections.remove(&key) {
+        // The connection is looked up once; its handle stays valid until the
+        // eviction pass at the end
+        let mut conn = self.connections.find(&key);
+        if is_bare_syn
+            && conn.is_some_and(|conn| {
+                self.connections.get_at(conn).is_some_and(|c| c.tcp.closed())
+            })
+        {
+            if let Some((_, old)) = conn.and_then(|conn| self.connections.remove_at(conn)) {
                 self.teardown(vec![old.env], Vec::new());
             }
+            conn = None;
         }
-        if !self.connections.contains_key(&key) {
-            // Initialize the per-connection state
-            let env = match self.execution_mode {
-                ExecutionMode::Python => {
-                    // New connection means we should initialize a new Python scope
-                    let scope = self.vm.enter(|vm| vm.new_scope_with_builtins());
-                    ExecutionEnvironment::Python {
-                        scope,
-                        state: PythonConnState::Uninitialized,
+        let conn = match conn {
+            Some(conn) => conn,
+            None => {
+                // Initialize the per-connection state
+                let env = match self.execution_mode {
+                    ExecutionMode::Python => {
+                        // New connection means we should initialize a new Python scope
+                        let scope = self.vm.enter(|vm| vm.new_scope_with_builtins());
+                        ExecutionEnvironment::Python {
+                            scope,
+                            state: PythonConnState::Uninitialized,
+                        }
                     }
-                }
-                ExecutionMode::CensorLang => {
-                    let env = ProgramEnv::new(
-                        packet.connection_identifier(),
-                        &self.censorlang_config,
-                    );
-                    ExecutionEnvironment::CensorLang { env }
-                }
-            };
-            let info = ConnectionInfo {
-                env,
-                is_first: true,
-                tcp: TcpLifecycle::default(),
-                client_ip: ips.src(),
-                tls_hello: ClientHelloTracker::new(),
-            };
-            // The real deadline is set once the packet has been processed
-            self.connections.insert(key.clone(), info, now);
-        }
+                    ExecutionMode::CensorLang => {
+                        let env = ProgramEnv::new(
+                            packet.connection_identifier(),
+                            &self.censorlang_config,
+                        );
+                        ExecutionEnvironment::CensorLang { env }
+                    }
+                };
+                let info = ConnectionInfo {
+                    env,
+                    is_first: true,
+                    tcp: TcpLifecycle::default(),
+                    client_ip: ips.src(),
+                    tls_hello: ClientHelloTracker::new(),
+                };
+                // The real deadline is set once the packet has been processed
+                self.connections.insert_handle(key.clone(), info, now).0
+            }
+        };
         // Track the TLS ClientHello across segments; the result rides on the packet.
         // The tracker lives in ConnectionInfo, so it is reset along with the rest of
         // the connection state on 5-tuple reuse or expiry.
-        let tls_hello = &mut self
+        let info = self
             .connections
-            .get_mut(&key)
-            .expect("connection was inserted above")
-            .tls_hello;
-        packet.tls = tls_hello.observe_packet(&packet);
+            .get_mut_at(conn)
+            .expect("connection was inserted above");
+        packet.tls = info.tls_hello.observe_packet(&packet);
         // Copy of is_first for the execution
-        let is_first_cl = self.connections.get(&key).is_some_and(|c| c.is_first);
+        let is_first_cl = info.is_first;
+        let client_ip = info.client_ip;
 
         // Update per-host state for the source IP
         let src_ip = ips.src();
         let dst_ip = ips.dst();
+        let src_host = self.touch_host(src_ip, now);
         let (host_num_connections, host_num_packets) = {
-            let host = self.touch_host(src_ip, now);
+            let host = self.hosts.get_mut_at(src_host).expect("host was touched");
             host.num_packets += 1;
             if is_first_cl {
                 host.num_connections += 1;
@@ -738,19 +750,30 @@ impl TransportState {
             (host.num_connections, host.num_packets)
         };
         // Get dst host counters (don't increment -- dst didn't send this packet)
+        let dst_host = self.touch_host(dst_ip, now);
         let (dst_host_num_connections, dst_host_num_packets) = {
-            let dst_host = self.touch_host(dst_ip, now);
+            let dst_host = self.hosts.get_at(dst_host).expect("host was touched");
             (dst_host.num_connections, dst_host.num_packets)
         };
         // Per-host persistent Python dicts
         let host_dicts = match self.execution_mode {
-            ExecutionMode::Python => Some((self.host_py_state(src_ip), self.host_py_state(dst_ip))),
+            ExecutionMode::Python => {
+                Some((self.host_py_state(src_host), self.host_py_state(dst_host)))
+            }
             ExecutionMode::CensorLang => None,
         };
+        // The connection's client is one of this packet's endpoints
+        let client_host = if client_ip == src_ip {
+            Some(src_host)
+        } else if client_ip == dst_ip {
+            Some(dst_host)
+        } else {
+            self.hosts.find(&client_ip)
+        };
 
-        let ConnectionInfo { env, client_ip, .. } = self
+        let ConnectionInfo { env, .. } = self
             .connections
-            .get_mut(&key)
+            .get_mut_at(conn)
             .expect("connection was inserted above");
         // If the connection is set up for a Python environment, use that
         let action = match env {
@@ -849,9 +872,8 @@ impl TransportState {
                     // directions of a connection share one bank (the counters
                     // above stay keyed on the packet's sender, like PyCL's `host`).
                     // Both endpoints' host states were touched above.
-                    let host = self
-                        .hosts
-                        .get_mut(&*client_ip)
+                    let host = client_host
+                        .and_then(|client_host| self.hosts.get_mut_at(client_host))
                         .expect("both endpoint hosts were touched above");
                     let program_action = env.process(
                         &packet,
@@ -881,7 +903,7 @@ impl TransportState {
         // Update the connection lifecycle now that the script has seen this packet
         let info = self
             .connections
-            .get_mut(&key)
+            .get_mut_at(conn)
             .expect("connection is only removed below");
         info.is_first = false;
         if let Some(flags) = tcp_flags {
@@ -902,7 +924,7 @@ impl TransportState {
             TransportProtocol::Udp => self.conntrack.udp_idle_timeout,
         };
         self.connections
-            .set_deadline(&key, now.saturating_add(timeout.get().saturating_mul(MICROS_PER_SEC)));
+            .set_deadline_at(conn, now.saturating_add(timeout.get().saturating_mul(MICROS_PER_SEC)));
         self.enforce_limits();
         Ok(action)
     }
@@ -938,29 +960,30 @@ impl TransportState {
         }
     }
 
-    /// Get (creating if needed) the state for host `ip` and mark it as seen at `now`
-    fn touch_host(&mut self, ip: IpAddress, now: Micros) -> &mut HostState {
+    /// Get (creating if needed) the state for host `ip` and mark it as seen at
+    /// `now`. The handle stays valid until the next eviction pass.
+    fn touch_host(&mut self, ip: IpAddress, now: Micros) -> Handle {
         let deadline = self.host_deadline(now);
-        if !self.hosts.set_deadline(&ip, deadline) {
-            let config = &self.censorlang_config;
-            let host = HostState {
-                num_connections: 0,
-                num_packets: 0,
-                registers: Registers::new(
-                    config.program.num_registers.into(),
-                    config.env.relax_register_types,
-                ),
-                py_state: None,
-            };
-            self.hosts.insert(ip, host, deadline);
+        if let Some(host) = self.hosts.find(&ip) {
+            self.hosts.set_deadline_at(host, deadline);
+            return host;
         }
-        self.hosts.get_mut(&ip).expect("host was inserted above")
+        let config = &self.censorlang_config;
+        let host = HostState {
+            num_connections: 0,
+            num_packets: 0,
+            registers: Registers::new(
+                config.program.num_registers.into(),
+                config.env.relax_register_types,
+            ),
+            py_state: None,
+        };
+        self.hosts.insert_handle(ip, host, deadline).0
     }
 
-    /// Get (creating if needed) the persistent Python dict for host `ip`,
-    /// which must already be tracked
-    fn host_py_state(&mut self, ip: IpAddress) -> PyObjectRef {
-        let host = self.hosts.get_mut(&ip).expect("host was touched");
+    /// Get (creating if needed) the persistent Python dict for a tracked host
+    fn host_py_state(&mut self, host: Handle) -> PyObjectRef {
+        let host = self.hosts.get_mut_at(host).expect("host was touched");
         host.py_state
             .get_or_insert_with(|| self.vm.enter(|vm| vm.ctx.new_dict().to_pyobject(vm)))
             .clone()
