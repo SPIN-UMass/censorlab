@@ -49,6 +49,8 @@ async fn main() -> Result<(), CensorlabError> {
         // Use verbosity
         //.with_max_level(args.verbosity)
         .with_env_filter(env_filter)
+        // stdout, kept in order with the queued PCAP-mode decision lines
+        .with_writer(censorlab::output::OrderedStdout)
         // completes the builder.
         .finish();
     // Set the global subscriber

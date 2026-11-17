@@ -680,6 +680,11 @@ impl TransportState {
         direction: Direction,
         mut packet: Packet,
     ) -> Result<Action, SmoltcpError> {
+        if self.code.is_some() {
+            // The script (including `__del__` on teardown) may write to
+            // stdout: queued PCAP decisions go first (see crate::output)
+            let _ = crate::output::flush();
+        }
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.
         packet.set_direction(direction);

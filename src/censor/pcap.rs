@@ -34,6 +34,8 @@ impl Censor {
     pub fn run_pcap(mut self, args: Args) -> Result<(), PcapModeError> {
         // Total timer includes file I/O (for cross-tool comparisons)
         let start_total = Instant::now();
+        // Decisions are queued; write out whatever is left however we return
+        let _flush = crate::output::FlushGuard;
         // Open the pcap
         let pcap_file = File::open(args.pcap_path)?;
         let mut pcap_reader = pcap_parser::create_reader(usize::from(u16::MAX), pcap_file)
@@ -113,7 +115,6 @@ impl Censor {
                     }
                 },
             };
-            let data = data.to_vec();
             if let Some(timestamp) = timestamp {
                 self.transport_state.set_packet_time(timestamp);
             }
@@ -122,10 +123,14 @@ impl Censor {
             match action {
                 Ok(Action::None) => {}
                 Ok(Action::Ignore) => {}
-                action => println!("{}: {:?}", packet_index, action),
+                // Queued: written in blocks (see crate::output)
+                action => crate::output::line(format_args!("{}: {:?}", packet_index, action))
+                    .map_err(PcapModeError::Output)?,
             }
             pcap_reader.consume(size);
         }
+        // The timings include writing out the decisions
+        crate::output::flush().map_err(PcapModeError::Output)?;
         println!(
             "Pcap mode took {}us to process the file ({}us including I/O)",
             start_processing.elapsed().as_micros(),
@@ -185,6 +190,8 @@ mod tests {
 pub enum PcapModeError {
     #[error("Error opening pcap")]
     Open(#[from] io::Error),
+    #[error("Error writing decisions to stdout")]
+    Output(io::Error),
     #[error("Error reading pcap block")]
     Pcap(String),
     #[error("Error updating model")]
