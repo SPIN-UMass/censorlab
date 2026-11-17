@@ -296,6 +296,7 @@ pub mod arp {
 pub mod ip {
     use super::{Action, Deserialize, List};
     use crate::subnet::IpNet;
+    use std::num::{NonZeroU64, NonZeroUsize};
 
     #[derive(Default, Deserialize)]
     /// Config related to IP handling
@@ -313,6 +314,57 @@ pub mod ip {
         /// What to do if we run into an unknown next-protocol-header field
         #[serde(default)]
         pub unknown: Action,
+        /// How IPv4 fragments are forwarded
+        #[serde(default)]
+        pub fragments: Fragments,
+    }
+
+    /// What to do with IPv4 fragments that the other rules let through
+    #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+    pub enum FragmentMode {
+        /// Forward each fragment as it arrives
+        #[default]
+        Forward,
+        /// Hold a packet's fragments until all have arrived, then forward them with
+        /// the first fragment's TTL; drop malformed and incomplete packets (TSPU-style)
+        Buffer,
+    }
+
+    /// Config related to IPv4 fragment handling. The limits apply in `Buffer` mode
+    /// and default to the values measured on Russia's TSPU.
+    #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+    #[serde(default, deny_unknown_fields)]
+    pub struct Fragments {
+        pub mode: FragmentMode,
+        /// Most fragments accepted for one packet (default: 45)
+        pub max_fragments: NonZeroUsize,
+        /// Seconds an incomplete packet's fragments are held (default: 5)
+        pub timeout: NonZeroU64,
+        /// Most packets buffered at once; the oldest is dropped beyond that (default: 4096)
+        pub max_datagrams: NonZeroUsize,
+    }
+
+    impl Default for Fragments {
+        fn default() -> Self {
+            let limits = crate::fragment::Config::default();
+            Self {
+                mode: FragmentMode::default(),
+                max_fragments: NonZeroUsize::new(limits.max_fragments).unwrap_or(NonZeroUsize::MIN),
+                timeout: NonZeroU64::new(limits.timeout.as_secs()).unwrap_or(NonZeroU64::MIN),
+                max_datagrams: NonZeroUsize::new(limits.max_datagrams).unwrap_or(NonZeroUsize::MIN),
+            }
+        }
+    }
+
+    impl Fragments {
+        /// The fragment cache limits, if fragments are to be buffered
+        pub fn buffer(&self) -> Option<crate::fragment::Config> {
+            (self.mode == FragmentMode::Buffer).then(|| crate::fragment::Config {
+                max_fragments: self.max_fragments.get(),
+                timeout: std::time::Duration::from_secs(self.timeout.get()),
+                max_datagrams: self.max_datagrams.get(),
+            })
+        }
     }
 }
 

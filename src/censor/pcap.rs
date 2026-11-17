@@ -1,15 +1,16 @@
-use super::{Action, Censor, ClientAddrs};
+use super::{Action, Censor, ClientAddrs, Rewrite};
+use crate::fragment::{Fragment, Normalizer, Outcome};
 
 use clap::Parser;
 use ort::Error as OrtError;
 use pcap_parser::pcapng::Block;
 use pcap_parser::{PcapBlockOwned, PcapError};
-use smoltcp::wire::IpAddress;
+use smoltcp::wire::{Error as SmoltcpError, IpAddress};
 use std::fs::File;
 use std::io;
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 #[derive(Debug, Parser)]
@@ -52,6 +53,10 @@ impl Censor {
         // PCAP-NG: (resolution in units/sec, offset in seconds) per interface id
         let mut interfaces: Vec<(u64, i64)> = Vec::new();
         let mut packet_index = 0;
+        // Fragments held by `[ip.fragments] mode = "Buffer"`, by packet index,
+        // and the capture time their timeouts follow
+        let mut fragments: Option<Normalizer<usize>> = self.fragments.map(Normalizer::new);
+        let mut fragment_time = Duration::ZERO;
         loop {
             // IPC is intentionally not supported in PCAP mode: PCAP processes
             // static capture files, so live model updates and shutdown signals
@@ -119,12 +124,35 @@ impl Censor {
             }
             let mut context = (&mut context).into();
             let action = self.process_frame(&data, &mut context);
+            if let Some(timestamp) = timestamp {
+                fragment_time = fragment_time.max(Duration::from_micros(timestamp));
+            }
+            if let Some(fragments) = &mut fragments {
+                // Queues that timed out before this packet
+                report_fragments(Outcome {
+                    forward: Vec::new(),
+                    drop: fragments.expire(fragment_time),
+                });
+            }
             match action {
-                Ok(Action::None) => {}
-                Ok(Action::Ignore) => {}
+                // Fragments the rules let through are held until their packet is complete
+                Ok(Action::None | Action::Ignore) => {
+                    if let Some(fragments) = &mut fragments {
+                        if let Some(fragment) = Fragment::parse_ethernet(&data) {
+                            report_fragments(fragments.push(fragment_time, fragment, packet_index));
+                        }
+                    }
+                }
                 action => println!("{}: {:?}", packet_index, action),
             }
             pcap_reader.consume(size);
+        }
+        if let Some(fragments) = &mut fragments {
+            // Packets still incomplete when the capture ends were never forwarded
+            report_fragments(Outcome {
+                forward: Vec::new(),
+                drop: fragments.drain(),
+            });
         }
         println!(
             "Pcap mode took {}us to process the file ({}us including I/O)",
@@ -134,6 +162,22 @@ impl Censor {
         Ok(())
     }
 }
+/// Report what fragment buffering did to the packets with these indices, in the
+/// format of the actions a censor program returns. Fragments forwarded unchanged
+/// are not reported, like any other forwarded packet.
+fn report_fragments(outcome: Outcome<usize>) {
+    for released in outcome.forward {
+        if let Some(ttl) = released.ttl {
+            let action: Result<Action, SmoltcpError> = Ok(Action::Rewrite(Rewrite { ttl: Some(ttl) }));
+            println!("{}: {:?}", released.item, action);
+        }
+    }
+    for packet_index in outcome.drop {
+        let action: Result<Action, SmoltcpError> = Ok(Action::Drop);
+        println!("{}: {:?}", packet_index, action);
+    }
+}
+
 /// Legacy pcap record timestamp in microseconds
 fn legacy_ts_micros(ts_sec: u32, ts_frac: u32, nanos: bool) -> u64 {
     let frac_micros = if nanos { ts_frac / 1000 } else { ts_frac };

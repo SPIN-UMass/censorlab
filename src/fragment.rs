@@ -16,7 +16,7 @@
 //!
 //! Only IPv4 is handled; IPv6 fragments are not recognized by
 //! [`Fragment::parse`] and so are never buffered.
-use smoltcp::wire::Ipv4Packet;
+use smoltcp::wire::{EthernetFrame, EthernetProtocol, Ipv4Packet};
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
@@ -88,6 +88,15 @@ impl Fragment {
             more,
             ttl: bytes[8],
         })
+    }
+
+    /// Recognize an IPv4 fragment inside an Ethernet frame
+    pub fn parse_ethernet(frame: &[u8]) -> Option<Self> {
+        let eth = EthernetFrame::new_checked(frame).ok()?;
+        match eth.ethertype() {
+            EthernetProtocol::Ipv4 => Self::parse(eth.payload()),
+            _ => None,
+        }
     }
 
     fn end(&self) -> u32 {
@@ -349,6 +358,12 @@ mod tests {
             Fragment::parse(&ipv4(7, 1400, 100, false, 3)),
             Some(frag(7, 1400, 100, false, 3))
         );
+        let mut frame = vec![0u8; 12];
+        frame.extend_from_slice(&[0x08, 0x00]);
+        frame.extend_from_slice(&ipv4(7, 1400, 100, false, 3));
+        assert_eq!(Fragment::parse_ethernet(&frame), Some(frag(7, 1400, 100, false, 3)));
+        frame[12..14].copy_from_slice(&[0x86, 0xdd]);
+        assert_eq!(Fragment::parse_ethernet(&frame), None);
         assert_eq!(Fragment::parse(&[]), None);
         assert_eq!(Fragment::parse(&[0x45, 0, 0]), None);
         // IPv6 is not handled
