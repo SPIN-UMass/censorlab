@@ -1083,6 +1083,7 @@ Fields read packet metadata. Accessing a field from the wrong protocol (e.g. `fi
 
 | Field                            | Type  | Description |
 |----------------------------------|-------|-------------|
+| `field:transport.payload.len`    | int   | TCP or UDP payload length |
 | `field:transport.payload.entropy`| float | Shannon entropy of payload (0.0–1.0) |
 
 ### TLS ClientHello (TCP-reassembled)

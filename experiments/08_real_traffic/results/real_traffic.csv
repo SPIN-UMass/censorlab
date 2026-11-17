@@ -203,15 +203,15 @@ scenario,mix,background,background_packets,total_packets,tool,status,wall_median
 05_ml_classification,bg390k,ustc,390000,391200,PyCL,measured,10338789,490478.3,53899,10284890,10100000,910932,26.291,38036,3,1.0,1.0,117809,3016,ONNX model classification
 05_ml_classification,bg390k,ustc,390000,391200,CensorLang,measured,2735388,28109.2,81099,2654289,2700000,259600,6.785,147384,3,1.0,1.0,117809,702,ONNX model classification
 05_ml_classification,bg390k,ustc,390000,391200,Scapy,measured,212674634,2712130.3,1206722,211467912,1902750000,2526540,540.562,1850,3,1.0,1.0,117809,100048,ONNX model classification (onnxruntime)
-05_ml_classification,bg0,combined,0,1200,PyCL,measured,155155,7930.8,56226,98929,160000,33084,82.441,12130,3,1.0,1.0,0,0,ONNX model classification
-05_ml_classification,bg0,combined,0,1200,CensorLang,measured,150013,9202.7,82316,67697,160000,31456,56.414,17726,3,1.0,1.0,0,0,ONNX model classification
-05_ml_classification,bg0,combined,0,1200,Scapy,measured,1855015,24604.7,1209641,645374,10910000,120916,537.812,1859,3,1.0,1.0,0,0,ONNX model classification (onnxruntime)
-05_ml_classification,bg10k,combined,10000,11200,PyCL,measured,356780,13959.1,53615,303165,360000,51932,27.068,36944,3,1.0,1.0,2559,14,ONNX model classification
-05_ml_classification,bg10k,combined,10000,11200,CensorLang,measured,245218,46696.7,82386,162832,250000,37600,14.539,68783,3,1.0,1.0,2559,13,ONNX model classification
-05_ml_classification,bg10k,combined,10000,11200,Scapy,measured,6569880,32015.1,1215116,5354764,50810000,216144,478.104,2092,3,1.0,1.0,2559,2538,ONNX model classification (onnxruntime)
-05_ml_classification,bg90k,combined,90000,91200,PyCL,measured,2120743,9408.3,40652,2080091,2100000,218000,22.808,43844,3,1.0,1.0,27009,211,ONNX model classification
-05_ml_classification,bg90k,combined,90000,91200,CensorLang,measured,793344,8746.1,84131,709213,790000,82304,7.776,128593,3,1.0,1.0,27009,73,ONNX model classification
-05_ml_classification,bg90k,combined,90000,91200,Scapy,measured,49239681,629633.1,1230799,48008882,291150000,715856,526.413,1900,3,1.0,1.0,27009,16608,ONNX model classification (onnxruntime)
-05_ml_classification,bg390k,combined,390000,391200,PyCL,measured,7276034,831145.7,57219,7218815,7130000,490864,18.453,54192,3,1.0,1.0,75140,362,ONNX model classification
-05_ml_classification,bg390k,combined,390000,391200,CensorLang,measured,2878391,22633.2,85652,2792739,2860000,181792,7.139,140078,3,1.0,1.0,75140,142,ONNX model classification
-05_ml_classification,bg390k,combined,390000,391200,Scapy,measured,197692090,850551.6,1263934,196428156,1128740000,3265608,502.117,1992,3,1.0,1.0,75140,59259,ONNX model classification (onnxruntime)
+05_ml_classification,bg0,combined,0,1200,PyCL,measured,144218,791.0,57374,86844,150000,33076,72.37,13818,3,1.0,1.0,0,0,ONNX model classification
+05_ml_classification,bg0,combined,0,1200,CensorLang,measured,150769,2420.8,82963,67806,160000,31448,56.505,17698,3,1.0,1.0,0,0,ONNX model classification
+05_ml_classification,bg0,combined,0,1200,Scapy,measured,1838319,19736.6,1245287,593032,9550000,120916,494.193,2023,3,1.0,1.0,0,0,ONNX model classification (onnxruntime)
+05_ml_classification,bg10k,combined,10000,11200,PyCL,measured,357350,16144.3,55754,301596,360000,51924,26.928,37136,3,1.0,1.0,2559,14,ONNX model classification
+05_ml_classification,bg10k,combined,10000,11200,CensorLang,measured,245816,8954.4,60841,184975,260000,37544,16.516,60549,3,1.0,1.0,2559,14,ONNX model classification
+05_ml_classification,bg10k,combined,10000,11200,Scapy,measured,6771502,29773.9,1300105,5471397,54320000,216144,488.518,2047,3,1.0,1.0,2559,2538,ONNX model classification (onnxruntime)
+05_ml_classification,bg90k,combined,90000,91200,PyCL,measured,2038007,70831.1,58084,1979923,2020000,217988,21.71,46062,3,1.0,1.0,27009,211,ONNX model classification
+05_ml_classification,bg90k,combined,90000,91200,CensorLang,measured,1039611,12281.1,82981,956630,1030000,88064,10.489,95335,3,1.0,1.0,27009,211,ONNX model classification
+05_ml_classification,bg90k,combined,90000,91200,Scapy,measured,48476672,1214481.8,1181546,47295126,279000000,715848,518.587,1928,3,1.0,1.0,27009,16608,ONNX model classification (onnxruntime)
+05_ml_classification,bg390k,combined,390000,391200,PyCL,measured,6907675,137381.7,56273,6851402,6830000,490864,17.514,57098,3,1.0,1.0,75140,362,ONNX model classification
+05_ml_classification,bg390k,combined,390000,391200,CensorLang,measured,3491327,24542.5,83746,3407581,3450000,191416,8.711,114803,3,1.0,1.0,75140,357,ONNX model classification
+05_ml_classification,bg390k,combined,390000,391200,Scapy,measured,193473795,1518047.9,1225068,192248727,1115360000,3264592,491.433,2035,3,1.0,1.0,75140,59259,ONNX model classification (onnxruntime)

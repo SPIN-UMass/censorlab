@@ -109,6 +109,7 @@ pub Field: Field = {
   "udp.length" => Field::Udp(UdpField::Length),
   "udp.checksum" => Field::Udp(UdpField::Checksum),
   "direction" => Field::Direction,
+  "transport.payload.len" => Field::PayloadLength,
   "transport.payload.entropy" => Field::PayloadEntropy,
   "transport.payload.avg_popcount" => Field::PayloadAveragePopcount,
   "transport.payload.printable_fraction" => Field::PayloadPrintableFraction,

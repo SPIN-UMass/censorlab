@@ -31,7 +31,7 @@
       "errors": 0,
       "total": 100,
       "background_flows": 75140,
-      "background_flagged": 142,
+      "background_flagged": 357,
       "note": "ONNX model classification"
     },
     {

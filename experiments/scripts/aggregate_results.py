@@ -427,7 +427,7 @@ def resilience_macros(rows):
     lines.append("% Experiment 11: resilience matrix (corpus program × traffic set)")
     lines.append("% ============================================================")
     lines.append("% Command format: \\Res<Program><Traffic>Rate (percent of flows acted on),")
-    lines.append("%                 \\Res<Program><Traffic>Flagged, \\Res<Traffic>Flows")
+    lines.append("%                 \\Res<Program><Traffic>Flagged[Tcp|Udp], \\Res<Traffic>Flows")
     lines.append("")
     seen_traffic = set()
     for r in rows:
@@ -437,6 +437,9 @@ def resilience_macros(rows):
         rate = 100 * r["flagged"] / r["flows"] if r["flows"] else 0.0
         lines.append(f"\\newcommand{{\\{base}Rate}}{{{rate:.1f}}}")
         lines.append(f"\\newcommand{{\\{base}Flagged}}{{{r['flagged']}}}")
+        for proto in ("tcp", "udp"):
+            if f"flagged_{proto}" in r:
+                lines.append(f"\\newcommand{{\\{base}Flagged{proto.capitalize()}}}{{{r[f'flagged_{proto}']}}}")
         if r["traffic"] not in seen_traffic:
             seen_traffic.add(r["traffic"])
             lines.append(f"\\newcommand{{\\Res{t}Flows}}{{{r['flows']}}}")

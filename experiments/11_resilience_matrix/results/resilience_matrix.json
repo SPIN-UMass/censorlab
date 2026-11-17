@@ -1,5 +1,6 @@
 {
   "experiment": "11_resilience_matrix",
+  "background": "ustc",
   "rows": [
     {
       "traffic": "shadowsocks",
@@ -8,6 +9,8 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
       "seconds": 0.089,
       "exit_code": 0
@@ -19,8 +22,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.081,
+      "seconds": 0.085,
       "exit_code": 0
     },
     {
@@ -30,8 +35,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.085,
+      "seconds": 0.09,
       "exit_code": 0
     },
     {
@@ -41,8 +48,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.075,
+      "seconds": 0.079,
       "exit_code": 0
     },
     {
@@ -52,8 +61,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.087,
+      "seconds": 0.088,
       "exit_code": 0
     },
     {
@@ -63,8 +74,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.076,
+      "seconds": 0.081,
       "exit_code": 0
     },
     {
@@ -74,8 +87,10 @@
       "flows": 60,
       "flagged": 59,
       "rate": 0.9833,
+      "flagged_tcp": 59,
+      "flagged_udp": 0,
       "actions": "drop=59",
-      "seconds": 0.109,
+      "seconds": 0.113,
       "exit_code": 0
     },
     {
@@ -85,8 +100,10 @@
       "flows": 60,
       "flagged": 59,
       "rate": 0.9833,
+      "flagged_tcp": 59,
+      "flagged_udp": 0,
       "actions": "drop=59",
-      "seconds": 0.08,
+      "seconds": 0.094,
       "exit_code": 0
     },
     {
@@ -96,8 +113,10 @@
       "flows": 60,
       "flagged": 60,
       "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.154,
+      "seconds": 0.158,
       "exit_code": 0
     },
     {
@@ -105,10 +124,12 @@
       "program": "MlClassifierCL",
       "config": "experiments/05_ml_classification/censor_lang.toml",
       "flows": 60,
-      "flagged": 50,
-      "rate": 0.8333,
-      "actions": "drop=50",
-      "seconds": 0.162,
+      "flagged": 60,
+      "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
+      "actions": "drop=60",
+      "seconds": 0.159,
       "exit_code": 0
     },
     {
@@ -118,8 +139,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.102,
+      "seconds": 0.098,
       "exit_code": 0
     },
     {
@@ -129,8 +152,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.094,
+      "seconds": 0.088,
       "exit_code": 0
     },
     {
@@ -140,8 +165,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.089,
+      "seconds": 0.083,
       "exit_code": 0
     },
     {
@@ -151,8 +178,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.087,
+      "seconds": 0.081,
       "exit_code": 0
     },
     {
@@ -162,8 +191,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.087,
+      "seconds": 0.083,
       "exit_code": 0
     },
     {
@@ -173,8 +204,10 @@
       "flows": 60,
       "flagged": 60,
       "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 16.234,
+      "seconds": 15.818,
       "exit_code": 0
     },
     {
@@ -184,8 +217,10 @@
       "flows": 60,
       "flagged": 60,
       "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 7.27,
+      "seconds": 7.331,
       "exit_code": 0
     },
     {
@@ -195,8 +230,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.083,
+      "seconds": 0.081,
       "exit_code": 0
     },
     {
@@ -206,8 +243,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.075,
+      "seconds": 0.073,
       "exit_code": 0
     },
     {
@@ -217,8 +256,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.082,
+      "seconds": 0.081,
       "exit_code": 0
     },
     {
@@ -228,8 +269,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.073,
+      "seconds": 0.074,
       "exit_code": 0
     },
     {
@@ -239,6 +282,8 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
       "seconds": 0.082,
       "exit_code": 0
@@ -250,8 +295,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.073,
+      "seconds": 0.078,
       "exit_code": 0
     },
     {
@@ -261,8 +308,10 @@
       "flows": 60,
       "flagged": 60,
       "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.113,
+      "seconds": 0.112,
       "exit_code": 0
     },
     {
@@ -272,6 +321,8 @@
       "flows": 60,
       "flagged": 60,
       "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
       "actions": "drop=60",
       "seconds": 0.094,
       "exit_code": 0
@@ -283,6 +334,8 @@
       "flows": 60,
       "flagged": 60,
       "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
       "actions": "drop=60",
       "seconds": 0.138,
       "exit_code": 0
@@ -292,10 +345,12 @@
       "program": "MlClassifierCL",
       "config": "experiments/05_ml_classification/censor_lang.toml",
       "flows": 60,
-      "flagged": 48,
-      "rate": 0.8,
-      "actions": "drop=48",
-      "seconds": 0.132,
+      "flagged": 60,
+      "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
+      "actions": "drop=60",
+      "seconds": 0.142,
       "exit_code": 0
     },
     {
@@ -305,8 +360,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.092,
+      "seconds": 0.09,
       "exit_code": 0
     },
     {
@@ -316,8 +373,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.083,
+      "seconds": 0.087,
       "exit_code": 0
     },
     {
@@ -327,8 +386,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.081,
+      "seconds": 0.082,
       "exit_code": 0
     },
     {
@@ -338,8 +399,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.076,
+      "seconds": 0.08,
       "exit_code": 0
     },
     {
@@ -349,8 +412,10 @@
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.079,
+      "seconds": 0.08,
       "exit_code": 0
     },
     {
@@ -360,8 +425,10 @@
       "flows": 60,
       "flagged": 60,
       "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 16.207,
+      "seconds": 15.679,
       "exit_code": 0
     },
     {
@@ -371,8 +438,10 @@
       "flows": 60,
       "flagged": 60,
       "rate": 1.0,
+      "flagged_tcp": 60,
+      "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 7.161,
+      "seconds": 7.172,
       "exit_code": 0
     },
     {
@@ -382,8 +451,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.078,
+      "seconds": 0.074,
       "exit_code": 0
     },
     {
@@ -393,8 +464,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.061,
+      "seconds": 0.071,
       "exit_code": 0
     },
     {
@@ -404,6 +477,8 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
       "seconds": 0.076,
       "exit_code": 0
@@ -415,8 +490,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.07,
+      "seconds": 0.068,
       "exit_code": 0
     },
     {
@@ -426,8 +503,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.076,
+      "seconds": 0.077,
       "exit_code": 0
     },
     {
@@ -437,8 +516,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.075,
+      "seconds": 0.071,
       "exit_code": 0
     },
     {
@@ -448,8 +529,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.081,
+      "seconds": 0.084,
       "exit_code": 0
     },
     {
@@ -459,8 +542,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.085,
+      "seconds": 0.087,
       "exit_code": 0
     },
     {
@@ -470,8 +555,10 @@
       "flows": 30,
       "flagged": 21,
       "rate": 0.7,
+      "flagged_tcp": 8,
+      "flagged_udp": 13,
       "actions": "drop=21",
-      "seconds": 0.107,
+      "seconds": 0.114,
       "exit_code": 0
     },
     {
@@ -479,10 +566,12 @@
       "program": "MlClassifierCL",
       "config": "experiments/05_ml_classification/censor_lang.toml",
       "flows": 30,
-      "flagged": 0,
-      "rate": 0.0,
-      "actions": "",
-      "seconds": 0.09,
+      "flagged": 21,
+      "rate": 0.7,
+      "flagged_tcp": 8,
+      "flagged_udp": 13,
+      "actions": "drop=21",
+      "seconds": 0.119,
       "exit_code": 0
     },
     {
@@ -492,8 +581,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.073,
+      "seconds": 0.076,
       "exit_code": 0
     },
     {
@@ -503,8 +594,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.085,
+      "seconds": 0.073,
       "exit_code": 0
     },
     {
@@ -514,6 +607,8 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
       "seconds": 0.072,
       "exit_code": 0
@@ -525,8 +620,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.079,
+      "seconds": 0.072,
       "exit_code": 0
     },
     {
@@ -536,8 +633,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.077,
+      "seconds": 0.075,
       "exit_code": 0
     },
     {
@@ -547,8 +646,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.081,
+      "seconds": 0.071,
       "exit_code": 0
     },
     {
@@ -558,8 +659,10 @@
       "flows": 30,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.106,
+      "seconds": 0.12,
       "exit_code": 0
     },
     {
@@ -569,8 +672,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.93,
+      "seconds": 0.928,
       "exit_code": 0
     },
     {
@@ -580,8 +685,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.474,
+      "seconds": 0.468,
       "exit_code": 0
     },
     {
@@ -591,8 +698,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 1.278,
+      "seconds": 1.275,
       "exit_code": 0
     },
     {
@@ -602,8 +711,10 @@
       "flows": 23828,
       "flagged": 1,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 1,
       "actions": "drop=1",
-      "seconds": 0.474,
+      "seconds": 0.461,
       "exit_code": 0
     },
     {
@@ -613,8 +724,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 1.404,
+      "seconds": 1.399,
       "exit_code": 0
     },
     {
@@ -624,8 +737,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.488,
+      "seconds": 0.47,
       "exit_code": 0
     },
     {
@@ -635,8 +750,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 5.437,
+      "seconds": 5.36,
       "exit_code": 0
     },
     {
@@ -646,8 +763,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.48,
+      "seconds": 0.482,
       "exit_code": 0
     },
     {
@@ -657,8 +776,10 @@
       "flows": 23828,
       "flagged": 300,
       "rate": 0.0126,
+      "flagged_tcp": 300,
+      "flagged_udp": 0,
       "actions": "drop=300",
-      "seconds": 1.673,
+      "seconds": 1.551,
       "exit_code": 0
     },
     {
@@ -668,8 +789,10 @@
       "flows": 23828,
       "flagged": 300,
       "rate": 0.0126,
+      "flagged_tcp": 300,
+      "flagged_udp": 0,
       "actions": "drop=300",
-      "seconds": 0.724,
+      "seconds": 0.788,
       "exit_code": 0
     },
     {
@@ -679,8 +802,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 1.153,
+      "seconds": 1.108,
       "exit_code": 0
     },
     {
@@ -690,8 +815,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 1.229,
+      "seconds": 1.211,
       "exit_code": 0
     },
     {
@@ -701,8 +828,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 1.233,
+      "seconds": 1.215,
       "exit_code": 0
     },
     {
@@ -712,8 +841,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.804,
+      "seconds": 0.791,
       "exit_code": 0
     },
     {
@@ -723,8 +854,10 @@
       "flows": 23828,
       "flagged": 0,
       "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
       "actions": "",
-      "seconds": 1.289,
+      "seconds": 1.2,
       "exit_code": 0
     },
     {
@@ -734,8 +867,10 @@
       "flows": 23828,
       "flagged": 111,
       "rate": 0.0047,
+      "flagged_tcp": 111,
+      "flagged_udp": 0,
       "actions": "drop=111",
-      "seconds": 11.374,
+      "seconds": 11.074,
       "exit_code": 0
     },
     {
@@ -745,8 +880,10 @@
       "flows": 23828,
       "flagged": 111,
       "rate": 0.0047,
+      "flagged_tcp": 111,
+      "flagged_udp": 0,
       "actions": "drop=111",
-      "seconds": 4.773,
+      "seconds": 4.687,
       "exit_code": 0
     }
   ]
