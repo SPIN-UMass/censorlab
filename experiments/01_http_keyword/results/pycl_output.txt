@@ -498,4 +498,4 @@
 9955: Ok(Reset { src_mac: [170, 187, 204, 221, 238, 1], dst_mac: [170, 187, 204, 221, 238, 2], ips: V4 { src: 10.0.0.1, dst: 10.0.0.2 }, ipid: Some(1), src_port: 10995, dst_port: 80, seq: SeqNumber(1001), ack: SeqNumber(2001), is_ack: true, seg_len: 72 })
 9965: Ok(Reset { src_mac: [170, 187, 204, 221, 238, 1], dst_mac: [170, 187, 204, 221, 238, 2], ips: V4 { src: 10.0.0.1, dst: 10.0.0.2 }, ipid: Some(1), src_port: 10996, dst_port: 80, seq: SeqNumber(1001), ack: SeqNumber(2001), is_ack: true, seg_len: 80 })
 9985: Ok(Reset { src_mac: [170, 187, 204, 221, 238, 1], dst_mac: [170, 187, 204, 221, 238, 2], ips: V4 { src: 10.0.0.1, dst: 10.0.0.2 }, ipid: Some(1), src_port: 10998, dst_port: 80, seq: SeqNumber(1001), ack: SeqNumber(2001), is_ack: true, seg_len: 78 })
-Pcap mode took 137585us to process the file (137732us including I/O)
+Pcap mode took 140329us to process the file (140469us including I/O)
