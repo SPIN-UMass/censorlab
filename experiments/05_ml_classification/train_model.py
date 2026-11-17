@@ -34,7 +34,9 @@ def extract_flows(pcap_path, labels_path):
 
     Each flow is represented by 20 features:
       [len_0, len_1, ..., len_9, dir_0, dir_1, ..., dir_9]
-    where dir is 0.0 for client->server and 1.0 for server->client.
+    where dir is 1.0 for client->server and -1.0 for server->client, the
+    values of CensorLab's `direction` field that the censor programs feed
+    the model. Flows shorter than the window are padded with 0.0.
     """
     packets = rdpcap(pcap_path)
 
@@ -61,11 +63,11 @@ def extract_flows(pcap_path, labels_path):
                 continue
             payload = bytes(pkt[TCP].payload)
             lengths.append(float(len(payload)))
-            # Direction: 0.0 = client->server, 1.0 = server->client
+            # Direction as CensorLab reports it: 1 = client->server, -1 = server->client
             if pkt["IP"].src == client_ip:
-                directions.append(0.0)
-            else:
                 directions.append(1.0)
+            else:
+                directions.append(-1.0)
 
         # Pad or truncate to WINDOW_SIZE
         lengths = (lengths[:WINDOW_SIZE] +

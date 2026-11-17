@@ -1131,4 +1131,4 @@
 1672: Ok(Drop)
 1673: Ok(Drop)
 1674: Ok(Drop)
-Pcap mode took 61088us to process the file (61148us including I/O)
+Pcap mode took 64765us to process the file (64842us including I/O)
