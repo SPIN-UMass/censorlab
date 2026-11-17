@@ -1,9 +1,9 @@
 25033: Ok(Reset { src_mac: [152, 144, 150, 160, 88, 47], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.150, dst: 216.58.219.238 }, ipid: Some(42314), src_port: 47386, dst_port: 443, seq: SeqNumber(1925431211), ack: SeqNumber(2108568926), is_ack: true, seg_len: 199 })
 25811: Ok(Reset { src_mac: [152, 144, 150, 160, 88, 47], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.150, dst: 216.58.219.206 }, ipid: Some(21929), src_port: 59295, dst_port: 443, seq: SeqNumber(93408797), ack: SeqNumber(-701935871), is_ack: true, seg_len: 197 })
 25820: Ok(Reset { src_mac: [152, 144, 150, 160, 88, 47], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.150, dst: 216.58.219.238 }, ipid: Some(2435), src_port: 47390, dst_port: 443, seq: SeqNumber(-124251589), ack: SeqNumber(-1765591095), is_ack: true, seg_len: 199 })
-[2m2026-11-17T20:45:28.653742Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:13.128825Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 29555: Ok(Reset { src_mac: [184, 172, 111, 54, 28, 162], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.87, dst: 74.125.226.174 }, ipid: Some(31391), src_port: 64878, dst_port: 443, seq: SeqNumber(-1934417381), ack: SeqNumber(1181742708), is_ack: true, seg_len: 217 })
-[2m2026-11-17T20:45:28.704309Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:13.177200Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 35984: Ok(Reset { src_mac: [152, 144, 150, 160, 88, 47], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.150, dst: 104.156.81.217 }, ipid: Some(1576), src_port: 49394, dst_port: 443, seq: SeqNumber(1275823201), ack: SeqNumber(-2015365937), is_ack: true, seg_len: 204 })
 36211: Ok(Reset { src_mac: [152, 144, 150, 160, 88, 47], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.150, dst: 23.235.33.217 }, ipid: Some(45758), src_port: 40229, dst_port: 443, seq: SeqNumber(1902915983), ack: SeqNumber(-2109551925), is_ack: true, seg_len: 211 })
 41268: Ok(Reset { src_mac: [152, 144, 150, 160, 88, 47], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.150, dst: 173.252.100.27 }, ipid: Some(54456), src_port: 56772, dst_port: 443, seq: SeqNumber(-2087046740), ack: SeqNumber(-1081825806), is_ack: true, seg_len: 517 })
@@ -13,8 +13,8 @@
 43060: Ok(Reset { src_mac: [184, 172, 111, 54, 28, 162], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.87, dst: 74.125.226.161 }, ipid: Some(7296), src_port: 23387, dst_port: 443, seq: SeqNumber(-801803596), ack: SeqNumber(-1796092208), is_ack: true, seg_len: 186 })
 43998: Ok(Reset { src_mac: [152, 144, 150, 160, 88, 47], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.150, dst: 216.58.219.229 }, ipid: Some(14712), src_port: 40471, dst_port: 443, seq: SeqNumber(1370556149), ack: SeqNumber(-74929511), is_ack: true, seg_len: 517 })
 46015: Ok(Reset { src_mac: [152, 144, 150, 160, 88, 47], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.150, dst: 173.252.100.27 }, ipid: Some(4311), src_port: 56637, dst_port: 443, seq: SeqNumber(-106162622), ack: SeqNumber(1165640848), is_ack: true, seg_len: 208 })
-[2m2026-11-17T20:45:28.867766Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T20:45:28.872866Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T20:45:28.873796Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T20:45:28.877799Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-Pcap mode took 943195us to process the file (943288us including I/O)
+[2m2026-11-17T21:49:13.332782Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:13.337923Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:13.338880Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T21:49:13.342880Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 970498us to process the file (970673us including I/O)
