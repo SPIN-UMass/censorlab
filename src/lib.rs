@@ -25,6 +25,8 @@ pub mod inject;
 //pub mod epoll;
 pub mod ipc;
 pub mod model;
+pub mod output;
+pub mod packet_log;
 pub mod program;
 pub mod route;
 pub mod subnet;
