@@ -61,11 +61,11 @@ def process_pcap(pcap_path, model_path):
                 lens.append(float(len(payload)))
             else:
                 lens.append(0.0)
-            # Direction: 0.0 = client->server, 1.0 = server->client
+            # Direction as CensorLab reports it: 1 = client->server, -1 = server->client
             if pkt[IP].src == CLIENT_IP:
-                dirs.append(0.0)
-            else:
                 dirs.append(1.0)
+            else:
+                dirs.append(-1.0)
 
         # Pad or truncate to WINDOW_SIZE
         lens = (lens[:WINDOW_SIZE] + [0.0] * max(0, WINDOW_SIZE - len(lens)))

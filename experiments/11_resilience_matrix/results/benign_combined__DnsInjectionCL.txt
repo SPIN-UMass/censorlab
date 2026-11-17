@@ -22,7 +22,7 @@
 27845: Ok(Drop)
 27846: Ok(Drop)
 27853: Ok(Drop)
-[2m2026-11-17T21:49:12.212473Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:36.766943Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 29548: Ok(Drop)
 29549: Ok(Drop)
 29679: Ok(Drop)
@@ -37,7 +37,7 @@
 31947: Ok(Drop)
 32896: Ok(Drop)
 32897: Ok(Drop)
-[2m2026-11-17T21:49:12.235319Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:36.789999Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 35973: Ok(Drop)
 35974: Ok(Drop)
 35975: Ok(Drop)
@@ -354,8 +354,8 @@
 46542: Ok(Drop)
 46570: Ok(Drop)
 46572: Ok(Drop)
-[2m2026-11-17T21:49:12.302786Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T21:49:12.304318Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T21:49:12.304662Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T21:49:12.305989Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-Pcap mode took 308206us to process the file (308313us including I/O)
+[2m2026-11-17T23:00:36.857378Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:36.858939Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:36.859256Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:36.860605Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 307251us to process the file (307354us including I/O)

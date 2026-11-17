@@ -3065,7 +3065,7 @@
 28001: Ok(Drop)
 28004: Ok(Drop)
 28005: Ok(Drop)
-[2m2026-11-17T21:49:19.614000Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:44.331555Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 28023: Ok(Drop)
 28025: Ok(Drop)
 28026: Ok(Drop)
@@ -4280,6 +4280,25 @@
 29672: Ok(Drop)
 29677: Ok(Drop)
 29678: Ok(Drop)
+29695: Ok(Drop)
+29696: Ok(Drop)
+29697: Ok(Drop)
+29698: Ok(Drop)
+29699: Ok(Drop)
+29700: Ok(Drop)
+29701: Ok(Drop)
+29702: Ok(Drop)
+29703: Ok(Drop)
+29704: Ok(Drop)
+29705: Ok(Drop)
+29708: Ok(Drop)
+29709: Ok(Drop)
+29710: Ok(Drop)
+29711: Ok(Drop)
+29712: Ok(Drop)
+29713: Ok(Drop)
+29714: Ok(Drop)
+29715: Ok(Drop)
 29716: Ok(Drop)
 29717: Ok(Drop)
 29718: Ok(Drop)
@@ -4316,6 +4335,14 @@
 29749: Ok(Drop)
 29750: Ok(Drop)
 29751: Ok(Drop)
+29754: Ok(Drop)
+29756: Ok(Drop)
+29760: Ok(Drop)
+29761: Ok(Drop)
+29762: Ok(Drop)
+29763: Ok(Drop)
+29764: Ok(Drop)
+29769: Ok(Drop)
 29770: Ok(Drop)
 29771: Ok(Drop)
 29772: Ok(Drop)
@@ -5030,6 +5057,11 @@
 30588: Ok(Drop)
 30589: Ok(Drop)
 30590: Ok(Drop)
+30591: Ok(Drop)
+30592: Ok(Drop)
+30593: Ok(Drop)
+30594: Ok(Drop)
+30595: Ok(Drop)
 30596: Ok(Drop)
 30597: Ok(Drop)
 30598: Ok(Drop)
@@ -7156,7 +7188,7 @@
 32953: Ok(Drop)
 32970: Ok(Drop)
 32978: Ok(Drop)
-[2m2026-11-17T21:49:19.683383Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:44.413989Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 32980: Ok(Drop)
 32981: Ok(Drop)
 32982: Ok(Drop)
@@ -17996,7 +18028,7 @@
 48423: Ok(Drop)
 48427: Ok(Drop)
 48431: Ok(Drop)
-[2m2026-11-17T21:49:19.893326Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:44.644995Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48436: Ok(Drop)
 48437: Ok(Drop)
 48438: Ok(Drop)
@@ -18084,7 +18116,7 @@
 48779: Ok(Drop)
 48786: Ok(Drop)
 48791: Ok(Drop)
-[2m2026-11-17T21:49:19.899732Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:44.651322Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48793: Ok(Drop)
 48794: Ok(Drop)
 48795: Ok(Drop)
@@ -18114,7 +18146,7 @@
 48873: Ok(Drop)
 48874: Ok(Drop)
 48875: Ok(Drop)
-[2m2026-11-17T21:49:19.900955Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:44.652519Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48877: Ok(Drop)
 48878: Ok(Drop)
 48879: Ok(Drop)
@@ -18231,7 +18263,7 @@
 49181: Ok(Drop)
 49182: Ok(Drop)
 49187: Ok(Drop)
-[2m2026-11-17T21:49:19.906008Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-17T23:00:44.657384Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 49193: Ok(Drop)
 49200: Ok(Drop)
 49201: Ok(Drop)
@@ -18242,4 +18274,4 @@
 49212: Ok(Drop)
 49227: Ok(Drop)
 49228: Ok(Drop)
-Pcap mode took 651989us to process the file (652072us including I/O)
+Pcap mode took 721511us to process the file (721573us including I/O)
