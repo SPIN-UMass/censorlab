@@ -151,6 +151,7 @@ def main():
             print(f"  [skip] {tname}: {tpath} missing (run scripts/capture.sh)")
             continue
         flows = FlowTable(pcap)
+        flow_proto = {flow: key[0] for key, flow in flows.key_to_flow.items()}
         client_ip = client or most_common_client(pcap)
         print(f"== {tname}: {len(flows.pkt_to_flow)} packets, {flows.num_flows} flows, client {client_ip}")
         for pname, ppath, _ in corpus:
@@ -161,10 +162,12 @@ def main():
                 f.write(out)
             positives = adapt_censorlab(log, flows)
             actions = collections.Counter(positives.values())
+            by_proto = collections.Counter(flow_proto[f] for f in positives)
             rate = len(positives) / flows.num_flows if flows.num_flows else 0.0
             rows.append({
                 "traffic": tname, "program": pname, "config": ppath,
                 "flows": flows.num_flows, "flagged": len(positives), "rate": round(rate, 4),
+                "flagged_tcp": by_proto["tcp"], "flagged_udp": by_proto["udp"],
                 "actions": ";".join(f"{k}={v}" for k, v in sorted(actions.items())),
                 "seconds": round(secs, 3), "exit_code": rc,
             })

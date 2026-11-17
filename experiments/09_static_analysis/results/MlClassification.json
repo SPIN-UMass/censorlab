@@ -1,13 +1,13 @@
 {
-  "source_lines": 24,
-  "lines": 24,
-  "max_lines_per_packet": 24,
+  "source_lines": 23,
+  "lines": 23,
+  "max_lines_per_packet": 23,
   "regexes": 0,
   "subnets": 0,
   "fields": [
     "direction",
     "env.num_packets",
-    "tcp.payload.len"
+    "transport.payload.len"
   ],
   "models": [
     "classifier"
@@ -33,8 +33,8 @@
   "per_host_register_bytes": 0,
   "per_host_allocated_register_bytes": 272,
   "per_packet": {
-    "conditions": 24,
-    "reads": 69,
+    "conditions": 23,
+    "reads": 67,
     "writes": 1,
     "copies": 1,
     "arithmetic": 0,
@@ -43,7 +43,7 @@
     "subnet": 0,
     "model_inputs": 20,
     "model_calls": 1,
-    "returns": 2
+    "returns": 1
   },
   "ends_with_unconditional_return": false
 }
