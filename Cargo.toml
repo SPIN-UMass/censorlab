@@ -14,7 +14,7 @@ coz = "0.1"
 fnv = "1.0"
 if-addrs = "0.15"
 iptables = "0.6"
-lalrpop-util = { version = "0.21", features = ["lexer", "unicode"] }
+lalrpop-util = { version = "0.23", features = ["lexer", "unicode"] }
 libc = "*"
 mac_address = "1.1"
 ndarray = "0.17"
@@ -42,7 +42,7 @@ hkdf = "0.12"
 sha2 = "0.10"
 
 [build-dependencies]
-lalrpop = "0.21"
+lalrpop = "0.23"
 
 [features]
 default = []
