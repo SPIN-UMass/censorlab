@@ -2164,8 +2164,8 @@ mod tests {
             src: s, dst: d, ..
         } = packet.ip.version
         {
-            assert_eq!(s, Ipv6Address::from_bytes(&src));
-            assert_eq!(d, Ipv6Address::from_bytes(&dst));
+            assert_eq!(s, Ipv6Address::from(src));
+            assert_eq!(d, Ipv6Address::from(dst));
         } else {
             panic!("expected IPv6");
         }

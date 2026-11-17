@@ -26,9 +26,9 @@
 //! Initial protection of unknown versions is unknown, so we never guess.
 
 use super::tls;
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::Aes128;
-use aes_gcm::aead::AeadInPlace;
+use aes_gcm::aead::AeadInOut;
 use aes_gcm::{Aes128Gcm, Nonce, Tag};
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -358,14 +358,14 @@ impl InitialKeys {
     fn client(version: QuicVersion, dcid: &[u8]) -> Self {
         let (key, iv, hp) = derive_client_initial_secrets(version, dcid);
         Self {
-            aead: Aes128Gcm::new(GenericArray::from_slice(&key)),
+            aead: Aes128Gcm::new(&key.into()),
             iv,
-            hp: Aes128::new(GenericArray::from_slice(&hp)),
+            hp: Aes128::new(&hp.into()),
         }
     }
 
-    fn hp_mask(&self, sample: &[u8]) -> [u8; 16] {
-        let mut block = GenericArray::clone_from_slice(sample);
+    fn hp_mask(&self, sample: &[u8; SAMPLE_LEN]) -> [u8; 16] {
+        let mut block = (*sample).into();
         self.hp.encrypt_block(&mut block);
         block.into()
     }
@@ -405,7 +405,8 @@ fn open_initial(
     // The sample starts 4 bytes after the packet number offset and the
     // packet must contain it entirely (RFC 9001 Section 5.4.2).
     let sample = packet
-        .get(pn_offset + 4..pn_offset + 4 + SAMPLE_LEN)
+        .get(pn_offset + 4..)
+        .and_then(|rest| rest.first_chunk::<SAMPLE_LEN>())
         .ok_or(QuicParseError::InvalidLength)?;
     let mask = keys.hp_mask(sample);
     let first = packet[0] ^ (mask[0] & 0x0f);
@@ -422,14 +423,16 @@ fn open_initial(
 
     let body = &packet[pn_offset + pn_len..];
     // pn_offset + 4 + 16 <= len guarantees body.len() >= TAG_LEN
-    let (ciphertext, tag) = body.split_at(body.len() - TAG_LEN);
+    let (ciphertext, tag) = body
+        .split_last_chunk::<TAG_LEN>()
+        .ok_or(QuicParseError::InvalidLength)?;
     let mut plaintext = ciphertext.to_vec();
     keys.aead
-        .decrypt_in_place_detached(
-            Nonce::from_slice(&keys.nonce(pn)),
+        .decrypt_inout_detached(
+            &Nonce::from(keys.nonce(pn)),
             &header,
-            &mut plaintext,
-            Tag::from_slice(tag),
+            plaintext.as_mut_slice().into(),
+            &Tag::from(*tag),
         )
         .map_err(|_| QuicParseError::DecryptionFailed)?;
 
@@ -708,13 +711,20 @@ pub fn seal_client_initial(
     let keys = InitialKeys::client(version, dcid);
     let tag = keys
         .aead
-        .encrypt_in_place_detached(Nonce::from_slice(&keys.nonce(pn)), &header, &mut plaintext)
+        .encrypt_inout_detached(
+            &Nonce::from(keys.nonce(pn)),
+            &header,
+            plaintext.as_mut_slice().into(),
+        )
         .expect("AES-GCM encryption cannot fail for these sizes");
     let mut packet = header;
     packet.extend_from_slice(&plaintext);
     packet.extend_from_slice(&tag);
 
-    let mask = keys.hp_mask(&packet[pn_offset + 4..pn_offset + 4 + SAMPLE_LEN]);
+    let sample = packet[pn_offset + 4..]
+        .first_chunk::<SAMPLE_LEN>()
+        .expect("packet contains the header protection sample");
+    let mask = keys.hp_mask(sample);
     packet[0] ^= mask[0] & 0x0f;
     for i in 0..pn_len {
         packet[pn_offset + i] ^= mask[1 + i];

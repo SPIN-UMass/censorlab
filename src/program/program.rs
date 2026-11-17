@@ -678,10 +678,10 @@ impl Line {
                         .get(*index)
                         .ok_or(LineExecutionError::SubnetIndex(*index))?;
                     let addr: std::net::IpAddr = match (&packet.ip.version, endpoint) {
-                        (IpVersionMetadata::V4 { src, .. }, Endpoint::Src) => std::net::Ipv4Addr::from(src.0).into(),
-                        (IpVersionMetadata::V4 { dst, .. }, Endpoint::Dst) => std::net::Ipv4Addr::from(dst.0).into(),
-                        (IpVersionMetadata::V6 { src, .. }, Endpoint::Src) => std::net::Ipv6Addr::from(src.0).into(),
-                        (IpVersionMetadata::V6 { dst, .. }, Endpoint::Dst) => std::net::Ipv6Addr::from(dst.0).into(),
+                        (IpVersionMetadata::V4 { src, .. }, Endpoint::Src) => (*src).into(),
+                        (IpVersionMetadata::V4 { dst, .. }, Endpoint::Dst) => (*dst).into(),
+                        (IpVersionMetadata::V6 { src, .. }, Endpoint::Src) => (*src).into(),
+                        (IpVersionMetadata::V6 { dst, .. }, Endpoint::Dst) => (*dst).into(),
                     };
                     registers.set(out, &Value::Bool(net.contains(addr)))?;
                 }
