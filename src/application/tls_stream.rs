@@ -203,7 +203,14 @@ impl ClientHelloTracker {
     }
 }
 
+/// Places a segment's payload into the buffer (see [`insert`])
+type InsertFn = fn(Box<Buffer>, TcpSeqNumber, &[u8]) -> Phase;
+
 fn step(phase: Phase, seg: &Segment<'_>) -> Phase {
+    step_with(phase, seg, insert)
+}
+
+fn step_with(phase: Phase, seg: &Segment<'_>, insert: InsertFn) -> Phase {
     // Sequence number of the first payload byte (SYN occupies one).
     let data_seq = if seg.syn { seg.seq + 1 } else { seg.seq };
     match phase {
@@ -277,23 +284,70 @@ fn insert(
             return Phase::Ambiguous;
         }
     }
-    if buf.data.len() < end {
-        buf.data.resize(end, 0);
-        buf.have.resize(end, false);
+    let held = buf.data.len();
+    if held == 0 && offset == 0 {
+        // The first bytes of the stream: feed them to the recogniser straight
+        // from the packet, and only buffer them if the ClientHello continues
+        // (most streams are recognised or rejected by their first segment)
+        let Buffer {
+            client,
+            base,
+            mut data,
+            mut have,
+            defrag,
+            ..
+        } = *buf;
+        return match defrag.push(bytes) {
+            DefragStep::Done(Ok(mut info)) => {
+                info.tcp_segments = 1;
+                Phase::Complete(Arc::new(info))
+            }
+            DefragStep::Done(Err(e)) => Phase::Failed(e),
+            DefragStep::NeedMore(_) if bytes.len() >= STREAM_WINDOW => {
+                Phase::Failed(TlsParseError::BufferLimit)
+            }
+            DefragStep::NeedMore(defrag) => {
+                data.extend_from_slice(bytes);
+                have.resize(bytes.len(), true);
+                Phase::Buffering(Box::new(Buffer {
+                    client,
+                    base,
+                    data,
+                    have,
+                    fed: bytes.len(),
+                    segments: 1,
+                    defrag,
+                }))
+            }
+        };
     }
-    let mut new_bytes = false;
-    for (pos, &b) in (offset..end).zip(bytes) {
-        if !buf.have[pos] {
-            buf.have[pos] = true;
-            buf.data[pos] = b;
-            new_bytes = true;
+    let new_bytes = if offset >= held {
+        // Nothing held at or after `offset` (the in-order case): append
+        buf.data.resize(offset, 0);
+        buf.data.extend_from_slice(bytes);
+        buf.have.resize(offset, false);
+        buf.have.resize(end, true);
+        !bytes.is_empty()
+    } else {
+        if held < end {
+            buf.data.resize(end, 0);
+            buf.have.resize(end, false);
         }
-    }
+        let mut new_bytes = false;
+        for (pos, &b) in (offset..end).zip(bytes) {
+            if !buf.have[pos] {
+                buf.have[pos] = true;
+                buf.data[pos] = b;
+                new_bytes = true;
+            }
+        }
+        new_bytes
+    };
     if new_bytes {
         buf.segments += 1;
     }
 
-    let contiguous = buf.fed + buf.have[buf.fed..].iter().take_while(|h| **h).count();
+    let contiguous = buf.fed + buf.have[buf.fed..].iter().position(|h| !*h).unwrap_or(buf.have.len() - buf.fed);
     if contiguous == buf.fed {
         return Phase::Buffering(buf);
     }
@@ -658,5 +712,119 @@ mod tests {
         payload.extend_from_slice(&stream);
         let obs = t.observe(client_seg(998, &payload));
         assert_eq!(obs.hello.unwrap().sni_str(), Some("trim.example"));
+    }
+
+    /// The original byte-by-byte [`insert`], kept as the reference for the
+    /// optimised one
+    fn reference_insert(mut buf: Box<Buffer>, seq: TcpSeqNumber, payload: &[u8]) -> Phase {
+        let (offset, bytes) = if seq >= buf.base {
+            (seq - buf.base, payload)
+        } else {
+            let skip = buf.base - seq;
+            if skip >= payload.len() {
+                return Phase::Buffering(buf);
+            }
+            (0, &payload[skip..])
+        };
+        if offset >= STREAM_WINDOW {
+            return Phase::Buffering(buf);
+        }
+        let end = (offset + bytes.len()).min(STREAM_WINDOW);
+        let bytes = &bytes[..end - offset];
+        let held_end = end.min(buf.have.len());
+        for pos in offset..held_end {
+            if buf.have[pos] && buf.data[pos] != bytes[pos - offset] {
+                return Phase::Ambiguous;
+            }
+        }
+        if buf.data.len() < end {
+            buf.data.resize(end, 0);
+            buf.have.resize(end, false);
+        }
+        let mut new_bytes = false;
+        for (pos, &b) in (offset..end).zip(bytes) {
+            if !buf.have[pos] {
+                buf.have[pos] = true;
+                buf.data[pos] = b;
+                new_bytes = true;
+            }
+        }
+        if new_bytes {
+            buf.segments += 1;
+        }
+        let contiguous = buf.fed + buf.have[buf.fed..].iter().take_while(|h| **h).count();
+        if contiguous == buf.fed {
+            return Phase::Buffering(buf);
+        }
+        let Buffer { client, base, data, have, fed, segments, defrag } = *buf;
+        match defrag.push(&data[fed..contiguous]) {
+            DefragStep::Done(Ok(mut info)) => {
+                info.tcp_segments = segments;
+                Phase::Complete(Arc::new(info))
+            }
+            DefragStep::Done(Err(e)) => Phase::Failed(e),
+            DefragStep::NeedMore(_) if contiguous >= STREAM_WINDOW => {
+                Phase::Failed(TlsParseError::BufferLimit)
+            }
+            DefragStep::NeedMore(defrag) => Phase::Buffering(Box::new(Buffer {
+                client,
+                base,
+                data,
+                have,
+                fed: contiguous,
+                segments,
+                defrag,
+            })),
+        }
+    }
+
+    /// Everything about a phase, including buffer and recogniser state
+    fn describe(phase: &Phase) -> String {
+        format!("{phase:?}")
+    }
+
+    #[test]
+    fn optimised_insert_matches_reference() {
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut rand = move |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n as u64) as usize
+        };
+        let hello = records(&hello_msg("diff.example", 300), 200);
+        for _ in 0..2000 {
+            // A stream that is a ClientHello, a corrupted one, or junk
+            let mut stream = match rand(3) {
+                0 => hello.clone(),
+                1 => {
+                    let mut s = hello.clone();
+                    let i = rand(s.len());
+                    s[i] ^= 0x5a;
+                    s
+                }
+                _ => (0..rand(3000) + 1).map(|_| rand(256) as u8).collect(),
+            };
+            if rand(4) == 0 {
+                stream.truncate(rand(stream.len()) + 1);
+            }
+            let (mut a, mut b) = (tracker_with_syn(1000).phase, tracker_with_syn(1000).phase);
+            for _ in 0..rand(12) + 1 {
+                // A random (possibly overlapping, out-of-order or conflicting) segment
+                let start = rand(stream.len() + 40).saturating_sub(20);
+                let len = rand(700) + 1;
+                let mut payload: Vec<u8> = (start..start + len)
+                    .map(|i| stream.get(i).copied().unwrap_or(0))
+                    .collect();
+                if rand(10) == 0 {
+                    let i = rand(payload.len());
+                    payload[i] ^= 1;
+                }
+                let seg = client_seg(1001u32.wrapping_add(start as u32).wrapping_sub(5), &payload);
+                a = step_with(a, &seg, insert);
+                b = step_with(b, &seg, reference_insert);
+                assert_eq!(describe(&a), describe(&b));
+            }
+        }
     }
 }
