@@ -218,6 +218,12 @@ pub mod execution {
         /// (default: Allow, i.e. fail open). Failures are always logged.
         #[serde(default)]
         pub on_script_error: ScriptErrorPolicy,
+        /// Python mode: run an eligible script's module body once at startup
+        /// and give each connection a copy of the resulting globals, instead
+        /// of running the body per connection (default: true). Scripts that
+        /// are not eligible always run the body per connection.
+        #[serde(default = "default_python_module_cache")]
+        pub python_module_cache: bool,
     }
 
     // Hand-written so Config::default() (used when no config file is given, or
@@ -231,10 +237,14 @@ pub mod execution {
                 reset_repeat: default_reset_repeat(),
                 censorlang: Default::default(),
                 on_script_error: ScriptErrorPolicy::default(),
+                python_module_cache: default_python_module_cache(),
             }
         }
     }
 
+    fn default_python_module_cache() -> bool {
+        true
+    }
     fn default_hash_seed() -> u32 {
         1337
     }
