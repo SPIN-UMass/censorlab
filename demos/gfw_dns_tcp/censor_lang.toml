@@ -1,0 +1,5 @@
+# The GFW's censorship of DNS over TCP: CensorLang approximation.
+# See censor.toml for the sources and dns_tcp.py for the description.
+[execution]
+mode = "CensorLang"
+script = "dns_tcp.cl"

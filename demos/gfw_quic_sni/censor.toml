@@ -1,0 +1,17 @@
+# The GFW's SNI-based blocking of QUIC (since 2024-04-07).
+#
+# Source: Zohaib, Zao, Sippe, Alaraj, Houmansadr, Durumeric, Wustrow. "Exposing and
+# Circumventing SNI-based QUIC Censorship of the Great Firewall of China."
+# USENIX Security 2025.
+# https://gfw.report/publications/usenixsecurity25/en/
+[execution]
+mode = "Python"
+script = "quic_sni.py"
+
+# The GFW drops for 180 s after the trigger, a fixed window.  CensorLab scripts
+# have no clock, so the closest available is this idle timeout: the flow, and
+# the script's flag, are forgotten 180 s after the flow's last packet.
+# (The GFW's own flow table forgets a UDP flow after 60 s; a single timeout
+# cannot model both, so new-flow detection is also 180 s here.)
+[conntrack]
+udp_idle_timeout = 180

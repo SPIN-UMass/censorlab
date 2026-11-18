@@ -1,0 +1,19 @@
+# The GFW's blocking of TLS 1.3 Encrypted SNI (ESNI).
+#
+# Sources:
+#   Bock, iyouport, Anonymous, Merino, Fifield, Houmansadr, Levin. "Exposing
+#   and Circumventing China's Censorship of ESNI." GFW Report / Geneva, 2020.
+#   https://geneva.cs.umd.edu/posts/china-censors-esni/esni/
+#   Bock, Bharadwaj, Singh, Levin. "Your Censor is My Censor: Weaponizing
+#   Censorship Infrastructure for Availability Attacks." WOOT 2021 (Section IV).
+#   https://geneva.cs.umd.edu/papers/woot21-weaponizing-availability.pdf
+[execution]
+mode = "Python"
+script = "esni.py"
+
+# The GFW keeps dropping for 120 s (180 s from some vantage points), a fixed
+# window that later packets do not extend.  CensorLab scripts have no clock, so
+# the closest available is this idle timeout: the connection, and the script's
+# flag, are forgotten 120 s after the connection's last packet.
+[conntrack]
+tcp_idle_timeout = 120

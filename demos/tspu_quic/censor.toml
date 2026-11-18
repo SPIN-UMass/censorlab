@@ -1,0 +1,15 @@
+# TSPU blocking of QUIC by version fingerprint (Russia, since 2022-03-04).
+# PyCL version; censor_lang.toml runs the same logic in CensorLang.
+#
+# Source: Xue, Mixon-Baca, ValdikSS, Ablove, Kujath, Crandall, Ensafi. "TSPU:
+# Russia's Decentralized Censorship System." IMC 2022 (Section 5.2, Table 2,
+# Appendix A).
+# https://ensa.fi/papers/tspu-imc22.pdf
+[execution]
+mode = "Python"
+script = "tspu_quic.py"
+
+# Table 2: the TSPU's QUIC blocking state times out after 420 s without
+# traffic.  CensorLab forgets a UDP flow (and the script's flag) likewise.
+[conntrack]
+udp_idle_timeout = 420

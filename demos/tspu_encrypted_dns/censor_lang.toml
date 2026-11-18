@@ -1,0 +1,9 @@
+# Blocking of public DNS, DoT and DoH resolvers: CensorLang version.
+# See censor.toml for the source and encrypted_dns.py for the description.
+[execution]
+mode = "CensorLang"
+script = "encrypted_dns.cl"
+
+[udp.ip_port_blocklist]
+list = ["8.8.8.8:53"]
+action = "Drop"

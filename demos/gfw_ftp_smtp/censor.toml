@@ -1,0 +1,14 @@
+# The GFW's keyword censorship of FTP and SMTP.
+# PyCL version; censor_lang.toml runs the same logic in CensorLang.
+#
+# Sources:
+#   Bock, Hughey, Merino, Arya, Liscinsky, Pogosian, Levin. "Come as You Are:
+#   Helping Unmodified Clients Bypass Censorship with Server-side Evasion."
+#   SIGCOMM 2020 (Sections 4.2 and 5.1).
+#   https://geneva.cs.umd.edu/papers/come-as-you-are.pdf
+#   Bock, Bharadwaj, Singh, Levin. "Your Censor is My Censor: Weaponizing
+#   Censorship Infrastructure for Availability Attacks." WOOT 2021 (Section III).
+#   https://geneva.cs.umd.edu/papers/woot21-weaponizing-availability.pdf
+[execution]
+mode = "Python"
+script = "ftp_smtp.py"

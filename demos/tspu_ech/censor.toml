@@ -1,0 +1,10 @@
+# Russia's blocking of Cloudflare Encrypted Client Hello (since 2024-11-05).
+#
+# Source: net4people/bbs issue #417, "Blocking of Cloudflare ECH in Russia,
+# 2024-11-05" (summary of ntc.party reports; the blocking was acknowledged by
+# Russia's Public Communications Network Monitoring and Control Center on
+# 2024-11-07).
+# https://github.com/net4people/bbs/issues/417
+[execution]
+mode = "Python"
+script = "ech.py"

@@ -1,0 +1,8 @@
+# TSPU blocking of QUIC by version fingerprint: CensorLang version.
+# See censor.toml for the source and tspu_quic.py for the description.
+[execution]
+mode = "CensorLang"
+script = "tspu_quic.cl"
+
+[conntrack]
+udp_idle_timeout = 420

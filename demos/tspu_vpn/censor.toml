@@ -1,0 +1,11 @@
+# Blocking of WireGuard and OpenVPN after the handshake (Russia, 2023-08).
+# PyCL version; censor_lang.toml covers the UDP cases in CensorLang.
+#
+# Source: user reports from ntc.party collected in net4people/bbs issue #274,
+# "OpenVPN and WireGuard blocking reported in multiple ISPs in Russia,
+# 2023-08-07".  These are community observations, not a measurement study.
+# https://github.com/net4people/bbs/issues/274
+# https://ntc.party/t/openvpn-31-05-2023/4576/108
+[execution]
+mode = "Python"
+script = "vpn.py"

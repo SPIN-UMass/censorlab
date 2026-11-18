@@ -1,0 +1,19 @@
+# Iran's protocol filter ("protocol whitelister").
+#
+# Source: Bock, Fax, Reese, Singh, Levin. "Detecting and Evading
+# Censorship-in-Depth: A Case Study of Iran's Protocol Filter." FOCI 2020.
+# https://www.usenix.org/conference/foci20/presentation/bock
+# The residual behaviour (4-tuple, 60 s, timer restarts) is also in Table I of
+# Bock, Bharadwaj, Singh, Levin. "Your Censor is My Censor: Weaponizing
+# Censorship Infrastructure for Availability Attacks." WOOT 2021.
+# https://geneva.cs.umd.edu/papers/woot21-weaponizing-availability.pdf
+[execution]
+mode = "Python"
+script = "protocol_filter.py"
+
+# "Once tripped, the filter will continue to drop the offending flow's network
+# traffic for 60 seconds, but each time an additional packet is sent in a flow,
+# the 60 second timer resets."  CensorLab forgets a connection (and with it the
+# script's blackhole flag) once it has been idle this long.
+[conntrack]
+tcp_idle_timeout = 60
