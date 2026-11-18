@@ -28,7 +28,9 @@ use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
-use crate::packet_log::error;
+use crate::packet_log::{error, info};
+use crate::program::module_purity;
+use crate::program::module_snapshot::ModuleSnapshot;
 
 /// Connection key is an identifier that will always resolve to the same value for a connection
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -162,6 +164,8 @@ pub struct TransportState {
     censorlang_config: ProgramConfig,
     /// Interned names of the per-packet script globals
     py_names: PyNames,
+    /// The cached module environment (Python mode, eligible scripts only)
+    module_snapshot: Option<ModuleSnapshot>,
 }
 
 #[derive(Debug)]
@@ -305,11 +309,13 @@ fn format_exception(vm: &vm::VirtualMachine, exc: &PyBaseExceptionRef) -> String
     out.trim_end().to_owned()
 }
 
-/// Run the censor script's module body in `scope` (with `model` defined) and
+/// Run the censor script's module body in `scope` (with `model` defined), or
+/// instantiate its cached environment there when there is a `snapshot`, and
 /// return its `process` function, which must exist and be callable.
 fn init_python_scope(
     vm: &vm::VirtualMachine,
     code: PyRef<PyCode>,
+    snapshot: Option<&ModuleSnapshot>,
     scope: &Scope,
     loaded_models: Models,
 ) -> Result<PyObjectRef, String> {
@@ -318,8 +324,11 @@ fn init_python_scope(
         .globals
         .set_item(MODEL, model, vm)
         .map_err(|err| format_exception(vm, &err))?;
-    vm.run_code_obj(code, scope.clone())
-        .map_err(|err| format_exception(vm, &err))?;
+    match snapshot {
+        Some(snapshot) => snapshot.instantiate(vm, scope),
+        None => vm.run_code_obj(code, scope.clone()).map(drop),
+    }
+    .map_err(|err| format_exception(vm, &err))?;
     let process = scope
         .globals
         .get_item_opt(PROCESS, vm)
@@ -603,10 +612,12 @@ impl TransportState {
             ExecutionMode::Python => execution_config.script.as_ref(),
             ExecutionMode::CensorLang => None,
         };
+        let mut module_snapshot = None;
         let code = if let Some(script_path) = python_script {
             let source = std::fs::read_to_string(script_path)
                 .map_err(TransportStateInitError::ReadScript)?;
             let filename = script_path.display().to_string();
+            let snapshot_filename = filename.clone();
             // Compile the script, then validate it once up front by running its
             // module body in a throwaway scope: a broken script (exception in
             // the module body, no callable `process`) fails here, at startup,
@@ -620,13 +631,48 @@ impl TransportState {
                     .compile(&source, vm::compiler::Mode::Exec, filename)
                     .map_err(|err| format_exception(vm, &vm.new_syntax_error(&err, Some(&source))))?;
                 let scope = vm.new_scope_with_builtins();
-                init_python_scope(vm, code.clone(), &scope, loaded_models.clone())?;
-                Ok::<_, String>(code)
+                init_python_scope(vm, code.clone(), None, &scope, loaded_models.clone())?;
+                Ok::<_, String>((code, scope))
             });
-            Some(validated.map_err(|msg| TransportStateInitError::InvalidScript {
+            let (code, scope) = validated.map_err(|msg| TransportStateInitError::InvalidScript {
                 path: script_path.clone(),
                 msg,
-            })?)
+            })?;
+            // The validation run doubles as the run whose result every
+            // connection gets a copy of, if the script allows that
+            module_snapshot = if execution_config.python_module_cache {
+                let snapshot = vm.enter(|vm| {
+                    let module = module_purity::recognize(&source, &snapshot_filename)?;
+                    let definitions = vm
+                        .compile(&module.definitions_source, vm::compiler::Mode::Exec, snapshot_filename)
+                        .map_err(|err| format!("definitions module does not compile: {err}"))?;
+                    ModuleSnapshot::capture(vm, &scope.globals, &module, definitions)
+                });
+                match snapshot {
+                    Ok(snapshot) => {
+                        info!(
+                            "{}: module environment cached; connections get a copy instead of \
+                             running the module body",
+                            script_path.display()
+                        );
+                        Some(snapshot)
+                    }
+                    Err(reason) => {
+                        info!(
+                            "{}: module body runs for every connection (not cacheable: {reason})",
+                            script_path.display()
+                        );
+                        None
+                    }
+                }
+            } else {
+                info!(
+                    "{}: module body runs for every connection (python_module_cache = false)",
+                    script_path.display()
+                );
+                None
+            };
+            Some(code)
         } else {
             None
         };
@@ -666,6 +712,7 @@ impl TransportState {
             censorlang_program,
             censorlang_config: execution_config.censorlang,
             py_names,
+            module_snapshot,
         })
     }
     /// Processes the tcp packet based on its metadata and our internal state
@@ -818,6 +865,7 @@ impl TransportState {
                 packet.set_direction(direction);
                 let names = self.py_names;
                 let (code, models) = (&self.code, &self.loaded_models);
+                let snapshot = self.module_snapshot.as_ref();
                 // Per-host persistent user state dicts (always present in Python mode)
                 let (host_dict, dst_host_dict) =
                     host_dicts.expect("host dicts are created in Python mode");
@@ -849,7 +897,7 @@ impl TransportState {
                     let initialized_now = matches!(state, PythonConnState::Uninitialized);
                     if initialized_now {
                         let code = code.clone().expect("checked above");
-                        *state = match init_python_scope(vm, code, scope, models.clone()) {
+                        *state = match init_python_scope(vm, code, snapshot, scope, models.clone()) {
                             Ok(process) => PythonConnState::Ready(process),
                             Err(msg) => {
                                 error!(

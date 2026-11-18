@@ -225,6 +225,9 @@ Controls which scripting engine to use and global execution parameters. The whol
 | `hash_seed`     | integer  | `1337`     | Hash seed for Python VM reproducibility |
 | `reset_repeat`  | integer  | `5`        | Number of times to repeat sending a TCP RST packet |
 | `on_script_error` | string | `"Allow"` | Python mode: what to do with a packet when the script raises (`"Allow"` or `"Drop"`). Failures are always logged; a script whose module body raises or that lacks a callable `process` is rejected at startup |
+| `python_module_cache` | bool | `true` | Python mode: run the script's module body once at startup and give each connection a copy of the resulting globals, instead of running the body for every connection (see below). `false` always runs the body per connection |
+
+A script's module body (its top-level code) sets up each connection's globals. With `python_module_cache` (the default), CensorLab checks at startup whether the body is *pure*: it only imports CensorLab's modules, defines top-level functions (no decorators, literal defaults), assigns names, and runs `if`/`for` over expressions built from literals, the script's own names, side-effect-free builtins (`len`, `range`, `bytes`, `set`, `sorted`, ...), methods of builtin types (`lower`, `append`, `translate`, ...) and `rust.regex`/`subnet`/`ip_in`. It must not mention `packet`, `host`, `dst_host` or `model`, print, log, or call its own functions. If it is pure and the globals it leaves are plain data (numbers, strings, bytes, tuples, lists, dicts, sets, compiled regexes, its functions, imports), each new connection gets a copy: immutable values are shared, lists/dicts/sets are deep-copied, and the functions are re-created over the connection's own globals, so `global` statements keep working per connection. Otherwise the body runs for every connection as before. Which one a script got (and why not) is logged at startup.
 
 ## Layer Filtering
 
