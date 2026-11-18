@@ -685,6 +685,9 @@ impl TransportState {
             // stdout: queued PCAP decisions go first (see crate::output)
             let _ = crate::output::flush();
         }
+        // The packet's time is the connection-tracking clock's: capture time
+        // in PCAP mode, seconds since startup in the live modes.
+        packet.timestamp = Some(self.now() as f64 / 1e6);
         // Record the direction on the packet itself so that every execution
         // environment (PyCL and CensorLang) sees the same `direction` field.
         packet.set_direction(direction);
