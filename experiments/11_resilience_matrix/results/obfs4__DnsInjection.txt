@@ -1,1 +1,1 @@
-Pcap mode took 34010us to process the file (34185us including I/O)
+Pcap mode took 17275us to process the file (17453us including I/O)
