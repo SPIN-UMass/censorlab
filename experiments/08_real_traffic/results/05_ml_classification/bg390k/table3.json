@@ -8,30 +8,30 @@
   "rows": [
     {
       "tool": "PyCL",
-      "tpr": 1.0,
+      "tpr": 0.98,
       "tnr": 1.0,
-      "tp": 50,
-      "fn": 0,
+      "tp": 49,
+      "fn": 1,
       "fp": 0,
       "tn": 50,
       "errors": 0,
       "total": 100,
       "background_flows": 117809,
-      "background_flagged": 3016,
+      "background_flagged": 2651,
       "note": "ONNX model classification"
     },
     {
       "tool": "CensorLang",
-      "tpr": 1.0,
+      "tpr": 0.98,
       "tnr": 1.0,
-      "tp": 50,
-      "fn": 0,
+      "tp": 49,
+      "fn": 1,
       "fp": 0,
       "tn": 50,
       "errors": 0,
       "total": 100,
       "background_flows": 117809,
-      "background_flagged": 702,
+      "background_flagged": 2651,
       "note": "ONNX model classification"
     },
     {
