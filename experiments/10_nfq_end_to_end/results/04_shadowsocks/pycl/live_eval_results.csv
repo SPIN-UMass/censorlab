@@ -80,7 +80,7 @@ index,class,type,outcome
 78,allowed,example.com,completed
 79,forbidden,shadowsocks,dropped
 80,allowed,icanhazip.com,completed
-81,forbidden,shadowsocks,completed
+81,forbidden,shadowsocks,dropped
 82,forbidden,shadowsocks,dropped
 83,allowed,example.com,completed
 84,forbidden,shadowsocks,dropped

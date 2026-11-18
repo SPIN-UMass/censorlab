@@ -19,26 +19,26 @@ scenario,mix,background,background_packets,total_packets,tool,status,wall_median
 01_http_keyword,bg390k,ustc,390000,400000,Zeek,measured,17079707,395795.9,514591,16565116,19640000,1125168,41.413,24147,3,1.0,1.0,117809,0,detection-only (passive)
 01_http_keyword,bg390k,ustc,390000,400000,Scapy,measured,174793828,1641465.9,1206598,173587230,172930000,2534288,433.968,2304,3,1.0,1.0,117809,0,
 01_http_keyword,bg390k,ustc,390000,400000,OpenGFW,measured,3940250,61126.3,1036751,2903499,12770000,711892,7.259,137765,3,1.0,1.0,117809,0,http.req.path analyzer
-01_http_keyword,bg0,combined,0,10000,PyCL,measured,190744,2102.2,52246,138498,200000,28660,13.85,72203,3,1.0,1.0,0,0,
-01_http_keyword,bg0,combined,0,10000,CensorLang,measured,129288,2612.8,58230,71058,140000,24524,7.106,140730,3,1.0,1.0,0,0,
-01_http_keyword,bg0,combined,0,10000,Zeek,measured,1034687,104421.9,525960,508727,980000,137704,50.873,19657,3,1.0,1.0,0,0,detection-only (passive)
-01_http_keyword,bg0,combined,0,10000,Scapy,measured,4326534,20879.6,1028791,3297743,4259999,118472,329.774,3032,3,1.0,1.0,0,0,
-01_http_keyword,bg0,combined,0,10000,OpenGFW,measured,1160423,3998.0,1036567,123856,340000,34468,12.386,80739,3,1.0,1.0,0,0,http.req.path analyzer
-01_http_keyword,bg10k,combined,10000,20000,PyCL,measured,333461,4481.5,52781,280680,350000,45044,14.034,71256,3,1.0,1.0,2559,0,
-01_http_keyword,bg10k,combined,10000,20000,CensorLang,measured,204381,2047.0,59685,144696,210000,28620,7.235,138221,3,1.0,1.0,2559,0,
-01_http_keyword,bg10k,combined,10000,20000,Zeek,measured,1078179,6816.7,527409,550770,1160000,160748,27.538,36313,3,1.0,1.0,2559,0,detection-only (passive)
-01_http_keyword,bg10k,combined,10000,20000,Scapy,measured,8551285,51700.3,1021968,7529317,8450000,214728,376.466,2656,3,1.0,1.0,2559,0,
-01_http_keyword,bg10k,combined,10000,20000,OpenGFW,measured,1279793,5518.8,1036042,243751,730000,55972,12.188,82051,3,1.0,1.0,2559,0,http.req.path analyzer
-01_http_keyword,bg90k,combined,90000,100000,PyCL,measured,1407647,30155.0,52670,1354977,1400000,179636,13.55,73802,3,1.0,1.0,27009,1,
-01_http_keyword,bg90k,combined,90000,100000,CensorLang,measured,705618,3079.0,60174,645444,710000,69632,6.454,154932,3,1.0,1.0,27009,0,
-01_http_keyword,bg90k,combined,90000,100000,Zeek,measured,2966206,38211.0,520555,2445651,3530000,282692,24.457,40889,3,1.0,1.0,27009,0,detection-only (passive)
-01_http_keyword,bg90k,combined,90000,100000,Scapy,measured,47464524,180409.3,1036951,46427573,46930000,723168,464.276,2154,3,1.0,1.0,27009,1,
-01_http_keyword,bg90k,combined,90000,100000,OpenGFW,measured,1873426,1568.5,1036364,837062,2930000,176228,8.371,119465,3,1.0,1.0,27009,0,http.req.path analyzer
-01_http_keyword,bg390k,combined,390000,400000,PyCL,measured,5214771,52807.0,53436,5161335,5170000,423008,12.903,77499,3,1.0,1.0,75140,4,
-01_http_keyword,bg390k,combined,390000,400000,CensorLang,measured,2493763,12266.5,58351,2435412,2490000,158728,6.089,164243,3,1.0,1.0,75140,0,
-01_http_keyword,bg390k,combined,390000,400000,Zeek,measured,9134823,183267.4,513571,8621252,10640000,693324,21.553,46397,3,1.0,1.0,75140,0,detection-only (passive)
-01_http_keyword,bg390k,combined,390000,400000,Scapy,measured,200758468,717876.9,1029044,199729424,198560000,3296996,499.324,2003,3,1.0,1.0,75140,4,
-01_http_keyword,bg390k,combined,390000,400000,OpenGFW,measured,3849076,31332.4,1036509,2812567,13130000,640400,7.031,142219,3,1.0,1.0,75140,0,http.req.path analyzer
+01_http_keyword,bg0,combined,0,10000,PyCL,measured,124703,1170.7,31695,93008,110000,25896,9.301,107518,3,1.0,1.0,0,0,
+01_http_keyword,bg0,combined,0,10000,CensorLang,measured,65373,1166.3,35079,30294,50000,22312,3.029,330098,3,1.0,1.0,0,0,
+01_http_keyword,bg0,combined,0,10000,Zeek,measured,871239,40919.0,522114,349125,910000,137688,34.913,28643,3,1.0,1.0,0,0,detection-only (passive)
+01_http_keyword,bg0,combined,0,10000,Scapy,measured,4476560,129080.6,999611,3476949,4400000,118496,347.695,2876,3,1.0,1.0,0,0,
+01_http_keyword,bg0,combined,0,10000,OpenGFW,measured,1158823,11603.1,1036505,122318,330000,33892,12.232,81754,3,1.0,1.0,0,0,http.req.path analyzer
+01_http_keyword,bg10k,combined,10000,20000,PyCL,measured,208652,20922.8,31318,177334,200000,40744,8.867,112782,3,1.0,1.0,2559,0,
+01_http_keyword,bg10k,combined,10000,20000,CensorLang,measured,91702,1583.5,34322,57380,80000,26408,2.869,348554,3,1.0,1.0,2559,0,
+01_http_keyword,bg10k,combined,10000,20000,Zeek,measured,1120024,18784.2,518228,601796,1190000,160748,30.09,33234,3,1.0,1.0,2559,0,detection-only (passive)
+01_http_keyword,bg10k,combined,10000,20000,Scapy,measured,8535378,190341.3,1072092,7463286,8430000,214752,373.164,2680,3,1.0,1.0,2559,0,
+01_http_keyword,bg10k,combined,10000,20000,OpenGFW,measured,1274557,15303.7,1036505,238052,720000,56420,11.903,84015,3,1.0,1.0,2559,0,http.req.path analyzer
+01_http_keyword,bg90k,combined,90000,100000,PyCL,measured,778617,3294.9,33369,745248,750000,161104,7.452,134184,3,1.0,1.0,27009,1,
+01_http_keyword,bg90k,combined,90000,100000,CensorLang,measured,249030,7768.3,34644,214386,230000,63864,2.144,466448,3,1.0,1.0,27009,0,
+01_http_keyword,bg90k,combined,90000,100000,Zeek,measured,2913531,22774.0,507095,2406436,3490000,282780,24.064,41555,3,1.0,1.0,27009,0,detection-only (passive)
+01_http_keyword,bg90k,combined,90000,100000,Scapy,measured,48636964,871053.2,1055717,47581247,48070000,723168,475.812,2102,3,1.0,1.0,27009,1,
+01_http_keyword,bg90k,combined,90000,100000,OpenGFW,measured,1872327,16361.0,1034787,837540,2960000,172132,8.375,119397,3,1.0,1.0,27009,0,http.req.path analyzer
+01_http_keyword,bg390k,combined,390000,400000,PyCL,measured,2739881,37154.8,31533,2708348,2700000,359588,6.771,147692,3,1.0,1.0,75140,4,
+01_http_keyword,bg390k,combined,390000,400000,CensorLang,measured,796725,3468.9,35817,760908,780000,108868,1.902,525688,3,1.0,1.0,75140,0,
+01_http_keyword,bg390k,combined,390000,400000,Zeek,measured,8709408,429040.1,483355,8226053,10130000,693320,20.565,48626,3,1.0,1.0,75140,0,detection-only (passive)
+01_http_keyword,bg390k,combined,390000,400000,Scapy,measured,200878087,4144590.9,1051694,199826393,198679999,3296996,499.566,2002,3,1.0,1.0,75140,4,
+01_http_keyword,bg390k,combined,390000,400000,OpenGFW,measured,3802131,58489.9,1036621,2765510,13110000,645692,6.914,144639,3,1.0,1.0,75140,0,http.req.path analyzer
 02_dns_injection,bg0,ustc,0,100,PyCL,measured,64821,2845.3,55392,9429,80000,22664,94.29,10606,3,1.0,1.0,0,0,
 02_dns_injection,bg0,ustc,0,100,CensorLang,measured,64066,1322.2,59434,4632,80000,22248,46.32,21589,3,1.0,1.0,0,0,drop-only (no injection)
 02_dns_injection,bg0,ustc,0,100,Zeek,measured,503791,6058.2,485510,18281,490000,129020,182.81,5470,3,1.0,1.0,0,0,detection-only (passive)
@@ -67,34 +67,34 @@ scenario,mix,background,background_packets,total_packets,tool,status,wall_median
 02_dns_injection,bg390k,ustc,390000,390100,Suricata,measured,832359,7566.7,141744,690615,860000,110472,1.77,564859,3,1.0,1.0,117809,0,dns.query buffer; drop-only (no injection)
 02_dns_injection,bg390k,ustc,390000,390100,Snort,measured,2547281,45293.9,191320,2355961,2499999,296308,6.039,165580,3,1.0,1.0,117809,0,regex on DNS wire format; drop-only (no injection)
 02_dns_injection,bg390k,ustc,390000,390100,OpenGFW,measured,4051495,42978.4,1035504,3015991,11950000,693460,7.731,129344,3,1.0,1.0,117809,0,dns analyzer; drop-only (no injection)
-02_dns_injection,bg0,combined,0,100,PyCL,measured,65526,1075.1,53655,11871,80000,24108,118.71,8424,3,1.0,1.0,0,0,
-02_dns_injection,bg0,combined,0,100,CensorLang,measured,60917,591.3,57127,3790,70000,22988,37.9,26385,3,1.0,1.0,0,0,drop-only (no injection)
-02_dns_injection,bg0,combined,0,100,Zeek,measured,520151,23801.5,516788,3363,500000,128364,33.63,29735,3,1.0,1.0,0,0,detection-only (passive)
-02_dns_injection,bg0,combined,0,100,Scapy,measured,1083575,42653.2,1056455,27120,1050000,73840,271.2,3687,3,1.0,1.0,0,0,
-02_dns_injection,bg0,combined,0,100,Suricata,measured,156038,7989.9,143507,12531,130000,42888,125.31,7980,3,1.0,1.0,0,0,dns.query buffer; drop-only (no injection)
-02_dns_injection,bg0,combined,0,100,Snort,measured,187957,3045.0,185406,2551,150000,45044,25.51,39200,3,1.0,1.0,0,0,regex on DNS wire format; drop-only (no injection)
-02_dns_injection,bg0,combined,0,100,OpenGFW,measured,1041093,1722.2,1036557,4536,40000,22116,45.36,22046,3,1.0,1.0,0,0,dns analyzer; drop-only (no injection)
-02_dns_injection,bg10k,combined,10000,10100,PyCL,measured,248686,3968.1,54939,193747,260000,41516,19.183,52130,3,1.0,1.0,2559,7,
-02_dns_injection,bg10k,combined,10000,10100,CensorLang,measured,139343,1088.7,56525,82818,150000,28108,8.2,121954,3,1.0,1.0,2559,10,drop-only (no injection)
-02_dns_injection,bg10k,combined,10000,10100,Zeek,measured,684757,4972.7,509625,175132,700000,148408,17.34,57671,3,1.0,1.0,2559,7,detection-only (passive)
-02_dns_injection,bg10k,combined,10000,10100,Scapy,measured,5047783,96527.8,1012202,4035581,4970000,169872,399.562,2503,3,1.0,1.0,2559,7,
-02_dns_injection,bg10k,combined,10000,10100,Suricata,measured,198251,3125.1,145637,52614,170000,44500,5.209,191964,3,1.0,1.0,2559,7,dns.query buffer; drop-only (no injection)
-02_dns_injection,bg10k,combined,10000,10100,Snort,measured,260267,3155.6,190109,70158,220000,52748,6.946,143961,3,1.0,1.0,2559,0,regex on DNS wire format; drop-only (no injection)
-02_dns_injection,bg10k,combined,10000,10100,OpenGFW,measured,1158689,5826.3,1036643,122046,400000,52836,12.084,82756,3,1.0,1.0,2559,7,dns analyzer; drop-only (no injection)
-02_dns_injection,bg90k,combined,90000,90100,PyCL,measured,1651731,24080.7,53066,1598665,1640000,196156,17.743,56360,3,1.0,1.0,27009,37,
-02_dns_injection,bg90k,combined,90000,90100,CensorLang,measured,633409,4018.0,58712,574697,640000,68476,6.378,156778,3,1.0,1.0,27009,52,drop-only (no injection)
-02_dns_injection,bg90k,combined,90000,90100,Zeek,measured,2975377,22118.5,506254,2469123,3460000,337092,27.404,36491,3,1.0,1.0,27009,37,detection-only (passive)
-02_dns_injection,bg90k,combined,90000,90100,Scapy,measured,43240144,230521.1,1019429,42220715,42380000,678288,468.598,2134,3,1.0,1.0,27009,37,
-02_dns_injection,bg90k,combined,90000,90100,Suricata,measured,310330,3595.7,145406,164924,290000,52180,1.83,546312,3,1.0,1.0,27009,37,dns.query buffer; drop-only (no injection)
-02_dns_injection,bg90k,combined,90000,90100,Snort,measured,600778,2764.8,188514,412264,560000,95756,4.576,218549,3,1.0,1.0,27009,0,regex on DNS wire format; drop-only (no injection)
-02_dns_injection,bg90k,combined,90000,90100,OpenGFW,measured,2130268,26566.3,1036114,1094154,3280000,136292,12.144,82347,3,1.0,1.0,27009,37,dns analyzer; drop-only (no injection)
-02_dns_injection,bg390k,combined,390000,390100,PyCL,measured,5956993,109049.9,52805,5904188,5910000,439060,15.135,66072,3,1.0,1.0,75140,62,
-02_dns_injection,bg390k,combined,390000,390100,CensorLang,measured,2421223,17488.2,56265,2364958,2420000,158344,6.062,164950,3,1.0,1.0,75140,90,drop-only (no injection)
-02_dns_injection,bg390k,combined,390000,390100,Zeek,measured,8760365,220078.1,521095,8239270,10040000,758492,21.121,47346,3,1.0,1.0,75140,62,detection-only (passive)
-02_dns_injection,bg390k,combined,390000,390100,Scapy,measured,172433909,1904927.4,1011308,171422601,170570000,3254672,439.432,2276,3,1.0,1.0,75140,62,
-02_dns_injection,bg390k,combined,390000,390100,Suricata,measured,787903,6116.8,145645,642258,810000,81364,1.646,607388,3,1.0,1.0,75140,62,dns.query buffer; drop-only (no injection)
-02_dns_injection,bg390k,combined,390000,390100,Snort,measured,1844398,8514.8,187193,1657205,1800000,216076,4.248,235396,3,1.0,1.0,75140,6,regex on DNS wire format; drop-only (no injection)
-02_dns_injection,bg390k,combined,390000,390100,OpenGFW,measured,4157838,101959.3,1036868,3120970,13400000,669284,8.0,124993,3,1.0,1.0,75140,62,dns analyzer; drop-only (no injection)
+02_dns_injection,bg0,combined,0,100,PyCL,measured,39990,548.9,33424,6566,30000,22312,65.66,15230,3,1.0,1.0,0,0,
+02_dns_injection,bg0,combined,0,100,CensorLang,measured,36393,453.6,35054,1339,20000,21288,13.39,74683,3,1.0,1.0,0,0,drop-only (no injection)
+02_dns_injection,bg0,combined,0,100,Zeek,measured,519740,4612.6,507251,12489,510000,127844,124.89,8007,3,1.0,1.0,0,0,detection-only (passive)
+02_dns_injection,bg0,combined,0,100,Scapy,measured,1083847,9305.9,1039229,44618,1060000,73840,446.18,2241,3,1.0,1.0,0,0,
+02_dns_injection,bg0,combined,0,100,Suricata,measured,156906,2270.0,144346,12560,130000,42888,125.6,7962,3,1.0,1.0,0,0,dns.query buffer; drop-only (no injection)
+02_dns_injection,bg0,combined,0,100,Snort,measured,190709,1805.0,188480,2229,150000,45044,22.29,44863,3,1.0,1.0,0,0,regex on DNS wire format; drop-only (no injection)
+02_dns_injection,bg0,combined,0,100,OpenGFW,measured,1039999,103.8,1035568,4431,30000,22628,44.31,22568,3,1.0,1.0,0,0,dns analyzer; drop-only (no injection)
+02_dns_injection,bg10k,combined,10000,10100,PyCL,measured,120222,814.1,33185,87037,100000,37672,8.618,116043,3,1.0,1.0,2559,7,
+02_dns_injection,bg10k,combined,10000,10100,CensorLang,measured,70499,1775.1,35761,34738,50000,25384,3.439,290748,3,1.0,1.0,2559,10,drop-only (no injection)
+02_dns_injection,bg10k,combined,10000,10100,Zeek,measured,671397,9960.7,510830,160567,690000,147944,15.898,62902,3,1.0,1.0,2559,7,detection-only (passive)
+02_dns_injection,bg10k,combined,10000,10100,Scapy,measured,5131186,53128.3,1040807,4090379,5050000,169872,404.988,2469,3,1.0,1.0,2559,7,
+02_dns_injection,bg10k,combined,10000,10100,Suricata,measured,192716,6599.8,145297,47419,170000,44500,4.695,212995,3,1.0,1.0,2559,7,dns.query buffer; drop-only (no injection)
+02_dns_injection,bg10k,combined,10000,10100,Snort,measured,255472,137.3,189351,66121,210000,52748,6.547,152750,3,1.0,1.0,2559,0,regex on DNS wire format; drop-only (no injection)
+02_dns_injection,bg10k,combined,10000,10100,OpenGFW,measured,1163410,2364.9,1037371,126039,410000,53348,12.479,80134,3,1.0,1.0,2559,7,dns analyzer; drop-only (no injection)
+02_dns_injection,bg90k,combined,90000,90100,PyCL,measured,654322,3184.7,32136,622186,630000,175516,6.906,144812,3,1.0,1.0,27009,37,
+02_dns_injection,bg90k,combined,90000,90100,CensorLang,measured,231254,17748.2,34862,196392,220000,61848,2.18,458776,3,1.0,1.0,27009,52,drop-only (no injection)
+02_dns_injection,bg90k,combined,90000,90100,Zeek,measured,2981380,77523.8,507426,2473954,3480000,336068,27.458,36419,3,1.0,1.0,27009,37,detection-only (passive)
+02_dns_injection,bg90k,combined,90000,90100,Scapy,measured,42745884,587637.7,1051773,41694111,42260000,678288,462.754,2161,3,1.0,1.0,27009,37,
+02_dns_injection,bg90k,combined,90000,90100,Suricata,measured,314760,1254.9,142774,171986,300000,52180,1.909,523880,3,1.0,1.0,27009,37,dns.query buffer; drop-only (no injection)
+02_dns_injection,bg90k,combined,90000,90100,Snort,measured,620942,34000.3,186558,434384,570000,95756,4.821,207420,3,1.0,1.0,27009,0,regex on DNS wire format; drop-only (no injection)
+02_dns_injection,bg90k,combined,90000,90100,OpenGFW,measured,2143563,19900.7,1035363,1108200,3230000,137828,12.3,81303,3,1.0,1.0,27009,37,dns analyzer; drop-only (no injection)
+02_dns_injection,bg390k,combined,390000,390100,PyCL,measured,2855345,342972.9,33648,2821697,2810000,375680,7.233,138250,3,1.0,1.0,75140,62,
+02_dns_injection,bg390k,combined,390000,390100,CensorLang,measured,771270,8913.2,34595,736675,750000,108676,1.888,529542,3,1.0,1.0,75140,90,drop-only (no injection)
+02_dns_injection,bg390k,combined,390000,390100,Zeek,measured,8632159,525944.7,507239,8124920,9910000,759448,20.828,48013,3,1.0,1.0,75140,62,detection-only (passive)
+02_dns_injection,bg390k,combined,390000,390100,Scapy,measured,170499401,1903441.7,1086853,169412548,168609999,3255184,434.28,2303,3,1.0,1.0,75140,62,
+02_dns_injection,bg390k,combined,390000,390100,Suricata,measured,787103,7887.7,146090,641013,810000,81364,1.643,608568,3,1.0,1.0,75140,62,dns.query buffer; drop-only (no injection)
+02_dns_injection,bg390k,combined,390000,390100,Snort,measured,1855662,10749.9,186058,1669604,1810000,216076,4.28,233648,3,1.0,1.0,75140,6,regex on DNS wire format; drop-only (no injection)
+02_dns_injection,bg390k,combined,390000,390100,OpenGFW,measured,4014407,57357.9,1035969,2978438,12560000,667300,7.635,130975,3,1.0,1.0,75140,62,dns analyzer; drop-only (no injection)
 03_tls_sni,bg0,ustc,0,10000,PyCL,measured,204356,2539.7,55677,148679,210000,27960,14.868,67259,3,1.0,1.0,0,0,
 03_tls_sni,bg0,ustc,0,10000,CensorLang,measured,121222,689.1,60892,60330,130000,22868,6.033,165755,3,1.0,1.0,0,0,regex on raw payload (no TLS parsing)
 03_tls_sni,bg0,ustc,0,10000,Zeek,measured,672056,23540.9,496514,175542,690000,132540,17.554,56966,3,1.0,1.0,0,0,detection-only (passive)
@@ -123,34 +123,34 @@ scenario,mix,background,background_packets,total_packets,tool,status,wall_median
 03_tls_sni,bg390k,ustc,390000,400000,Suricata,measured,878262,21688.1,146732,731530,920000,115116,1.829,546799,3,1.0,1.0,117809,0,tls.sni buffer; reject = RST in IPS mode
 03_tls_sni,bg390k,ustc,390000,400000,Snort,measured,2559087,92904.1,183306,2375781,2509999,296696,5.939,168366,3,1.0,1.0,117809,0,regex on ClientHello payload (no SNI buffer); reject = RST inline
 03_tls_sni,bg390k,ustc,390000,400000,OpenGFW,measured,3873189,8704.1,1034837,2838352,12690000,712916,7.096,140927,3,1.0,1.0,117809,0,tls.req.sni analyzer
-03_tls_sni,bg0,combined,0,10000,PyCL,measured,225004,262.9,52282,172722,230000,29228,17.272,57897,3,1.0,1.0,0,0,
-03_tls_sni,bg0,combined,0,10000,CensorLang,measured,133831,1002.8,58940,74891,140000,24524,7.489,133527,3,1.0,1.0,0,0,regex on raw payload (no TLS parsing)
-03_tls_sni,bg0,combined,0,10000,Zeek,measured,689353,10397.6,518306,171047,710000,132500,17.105,58463,3,1.0,1.0,0,0,detection-only (passive)
-03_tls_sni,bg0,combined,0,10000,Scapy,measured,4249740,86066.5,1022881,3226859,4190000,118848,322.686,3099,3,1.0,1.0,0,0,
-03_tls_sni,bg0,combined,0,10000,Suricata,measured,222896,2518.5,151396,71500,210000,48020,7.15,139860,3,1.0,1.0,0,0,tls.sni buffer; reject = RST in IPS mode
-03_tls_sni,bg0,combined,0,10000,Snort,measured,232859,2426.7,184307,48552,200000,46068,4.855,205965,3,1.0,1.0,0,0,regex on ClientHello payload (no SNI buffer); reject = RST inline
-03_tls_sni,bg0,combined,0,10000,OpenGFW,measured,1159933,16105.4,1036531,123402,340000,34404,12.34,81036,3,1.0,1.0,0,0,tls.req.sni analyzer
-03_tls_sni,bg10k,combined,10000,20000,PyCL,measured,463269,8596.2,51482,411787,470000,45612,20.589,48569,3,1.0,1.0,2559,4,
-03_tls_sni,bg10k,combined,10000,20000,CensorLang,measured,212579,1829.5,59829,152750,230000,28980,7.638,130933,3,1.0,1.0,2559,4,regex on raw payload (no TLS parsing)
-03_tls_sni,bg10k,combined,10000,20000,Zeek,measured,867825,20550.7,517851,349974,930000,155048,17.499,57147,3,1.0,1.0,2559,4,detection-only (passive)
-03_tls_sni,bg10k,combined,10000,20000,Scapy,measured,8672429,87962.2,1044158,7628271,8560000,215080,381.414,2622,3,1.0,1.0,2559,4,
-03_tls_sni,bg10k,combined,10000,20000,Suricata,measured,246493,6795.9,146479,100014,230000,50132,5.001,199972,3,1.0,1.0,2559,4,tls.sni buffer; reject = RST in IPS mode
-03_tls_sni,bg10k,combined,10000,20000,Snort,measured,291683,981.7,186100,105583,260000,53772,5.279,189424,3,1.0,1.0,2559,0,regex on ClientHello payload (no SNI buffer); reject = RST inline
-03_tls_sni,bg10k,combined,10000,20000,OpenGFW,measured,1268051,9799.9,1037987,230064,740000,55908,11.503,86932,3,1.0,1.0,2559,4,tls.req.sni analyzer
-03_tls_sni,bg90k,combined,90000,100000,PyCL,measured,1938646,48295.0,52026,1886620,1930000,180108,18.866,53005,3,1.0,1.0,27009,10,
-03_tls_sni,bg90k,combined,90000,100000,CensorLang,measured,712436,31851.9,60272,652164,720000,70052,6.522,153336,3,1.0,1.0,27009,10,regex on raw payload (no TLS parsing)
-03_tls_sni,bg90k,combined,90000,100000,Zeek,measured,2838314,79112.0,517253,2321061,3390000,276564,23.211,43084,3,1.0,1.0,27009,10,detection-only (passive)
-03_tls_sni,bg90k,combined,90000,100000,Scapy,measured,46885938,354069.6,1019167,45866771,46360000,723520,458.668,2180,3,1.0,1.0,27009,10,
-03_tls_sni,bg90k,combined,90000,100000,Suricata,measured,336866,3093.5,144945,191921,350000,58324,1.919,521048,3,1.0,1.0,27009,10,tls.sni buffer; reject = RST in IPS mode
-03_tls_sni,bg90k,combined,90000,100000,Snort,measured,637789,21163.5,186946,450843,590000,93708,4.508,221807,3,1.0,1.0,27009,0,regex on ClientHello payload (no SNI buffer); reject = RST inline
-03_tls_sni,bg90k,combined,90000,100000,OpenGFW,measured,1856771,21763.9,1036206,820565,2910000,170084,8.206,121867,3,1.0,1.0,27009,10,tls.req.sni analyzer
-03_tls_sni,bg390k,combined,390000,400000,PyCL,measured,6237749,102670.5,51936,6185813,6180000,423472,15.465,64664,3,1.0,1.0,75140,23,
-03_tls_sni,bg390k,combined,390000,400000,CensorLang,measured,2505173,14035.9,59899,2445274,2490000,158960,6.113,163581,3,1.0,1.0,75140,23,regex on raw payload (no TLS parsing)
-03_tls_sni,bg390k,combined,390000,400000,Zeek,measured,9056916,230272.0,527371,8529545,10460000,689788,21.324,46896,3,1.0,1.0,75140,23,detection-only (passive)
-03_tls_sni,bg390k,combined,390000,400000,Scapy,measured,182046854,2674044.3,1045919,181000935,179980000,3297856,452.502,2210,3,1.0,1.0,75140,23,
-03_tls_sni,bg390k,combined,390000,400000,Suricata,measured,806259,7679.2,145600,660659,860000,84948,1.652,605456,3,1.0,1.0,75140,23,tls.sni buffer; reject = RST in IPS mode
-03_tls_sni,bg390k,combined,390000,400000,Snort,measured,1898114,26024.1,188225,1709889,1850000,217100,4.275,233933,3,1.0,1.0,75140,2,regex on ClientHello payload (no SNI buffer); reject = RST inline
-03_tls_sni,bg390k,combined,390000,400000,OpenGFW,measured,3848124,25912.1,1037411,2810713,13220000,639060,7.027,142313,3,1.0,1.0,75140,23,tls.req.sni analyzer
+03_tls_sni,bg0,combined,0,10000,PyCL,measured,141175,16857.0,32197,108978,130000,26408,10.898,91762,3,1.0,1.0,0,0,
+03_tls_sni,bg0,combined,0,10000,CensorLang,measured,69426,1251.1,35135,34291,50000,22312,3.429,291622,3,1.0,1.0,0,0,regex on raw payload (no TLS parsing)
+03_tls_sni,bg0,combined,0,10000,Zeek,measured,660074,3415.6,519363,140711,680000,131988,14.071,71068,3,1.0,1.0,0,0,detection-only (passive)
+03_tls_sni,bg0,combined,0,10000,Scapy,measured,4247190,240994.0,1051998,3195192,4180000,118848,319.519,3130,3,1.0,1.0,0,0,
+03_tls_sni,bg0,combined,0,10000,Suricata,measured,208699,18192.4,144165,64534,200000,48020,6.453,154957,3,1.0,1.0,0,0,tls.sni buffer; reject = RST in IPS mode
+03_tls_sni,bg0,combined,0,10000,Snort,measured,242379,1617.1,185776,56603,200000,46068,5.66,176669,3,1.0,1.0,0,0,regex on ClientHello payload (no SNI buffer); reject = RST inline
+03_tls_sni,bg0,combined,0,10000,OpenGFW,measured,1170985,11150.4,1035948,135037,340000,33892,13.504,74054,3,1.0,1.0,0,0,tls.req.sni analyzer
+03_tls_sni,bg10k,combined,10000,20000,PyCL,measured,242151,36297.3,32495,209656,230000,41256,10.483,95394,3,1.0,1.0,2559,4,
+03_tls_sni,bg10k,combined,10000,20000,CensorLang,measured,100935,1291.6,35918,65017,90000,26920,3.251,307612,3,1.0,1.0,2559,4,regex on raw payload (no TLS parsing)
+03_tls_sni,bg10k,combined,10000,20000,Zeek,measured,868433,12042.4,510591,357842,930000,154548,17.892,55891,3,1.0,1.0,2559,4,detection-only (passive)
+03_tls_sni,bg10k,combined,10000,20000,Scapy,measured,8822685,146615.1,1048408,7774277,8700000,215104,388.714,2573,3,1.0,1.0,2559,4,
+03_tls_sni,bg10k,combined,10000,20000,Suricata,measured,246541,26063.6,144500,102041,230000,50644,5.102,196000,3,1.0,1.0,2559,4,tls.sni buffer; reject = RST in IPS mode
+03_tls_sni,bg10k,combined,10000,20000,Snort,measured,293059,12220.1,188297,104762,250000,53772,5.238,190909,3,1.0,1.0,2559,0,regex on ClientHello payload (no SNI buffer); reject = RST inline
+03_tls_sni,bg10k,combined,10000,20000,OpenGFW,measured,1270417,12817.1,1035548,234869,760000,56420,11.743,85154,3,1.0,1.0,2559,4,tls.req.sni analyzer
+03_tls_sni,bg90k,combined,90000,100000,PyCL,measured,851488,128021.2,31973,819515,830000,161524,8.195,122023,3,1.0,1.0,27009,10,
+03_tls_sni,bg90k,combined,90000,100000,CensorLang,measured,267759,8293.5,35265,232494,250000,64292,2.325,430119,3,1.0,1.0,27009,10,regex on raw payload (no TLS parsing)
+03_tls_sni,bg90k,combined,90000,100000,Zeek,measured,2970991,153133.4,520050,2450941,3490000,276476,24.509,40801,3,1.0,1.0,27009,10,detection-only (passive)
+03_tls_sni,bg90k,combined,90000,100000,Scapy,measured,46711779,2128551.2,1096446,45615333,46190000,723520,456.153,2192,3,1.0,1.0,27009,10,
+03_tls_sni,bg90k,combined,90000,100000,Suricata,measured,336289,2914.6,140952,195337,340000,58324,1.953,511936,3,1.0,1.0,27009,10,tls.sni buffer; reject = RST in IPS mode
+03_tls_sni,bg90k,combined,90000,100000,Snort,measured,625684,5349.8,190428,435256,580000,93708,4.353,229750,3,1.0,1.0,27009,0,regex on ClientHello payload (no SNI buffer); reject = RST inline
+03_tls_sni,bg90k,combined,90000,100000,OpenGFW,measured,1847774,23556.8,1035964,811810,2820000,170596,8.118,123182,3,1.0,1.0,27009,10,tls.req.sni analyzer
+03_tls_sni,bg390k,combined,390000,400000,PyCL,measured,3218424,399264.3,32406,3186018,3170000,360012,7.965,125549,3,1.0,1.0,75140,23,
+03_tls_sni,bg390k,combined,390000,400000,CensorLang,measured,820623,10933.0,34223,786400,800000,109296,1.966,508647,3,1.0,1.0,75140,23,regex on raw payload (no TLS parsing)
+03_tls_sni,bg390k,combined,390000,400000,Zeek,measured,8579107,781345.7,516880,8062227,9970000,690252,20.156,49614,3,1.0,1.0,75140,23,detection-only (passive)
+03_tls_sni,bg390k,combined,390000,400000,Scapy,measured,179886212,1404538.3,1054968,178831244,177820000,3297344,447.078,2237,3,1.0,1.0,75140,23,
+03_tls_sni,bg390k,combined,390000,400000,Suricata,measured,872989,51653.0,145758,727231,900000,84948,1.818,550032,3,1.0,1.0,75140,23,tls.sni buffer; reject = RST in IPS mode
+03_tls_sni,bg390k,combined,390000,400000,Snort,measured,1855161,35621.4,188066,1667095,1810000,217100,4.168,239938,3,1.0,1.0,75140,2,regex on ClientHello payload (no SNI buffer); reject = RST inline
+03_tls_sni,bg390k,combined,390000,400000,OpenGFW,measured,3823923,14953.9,1035423,2788500,12889999,641028,6.971,143446,3,1.0,1.0,75140,23,tls.req.sni analyzer
 04_shadowsocks,bg0,ustc,0,10000,PyCL,measured,309448,26659.2,56073,253375,320000,40652,25.337,39467,3,1.0,1.0,0,0,
 04_shadowsocks,bg0,ustc,0,10000,CensorLang,measured,117939,17222.7,77567,40372,130000,22832,4.037,247696,3,1.0,1.0,0,0,
 04_shadowsocks,bg0,ustc,0,10000,Zeek,measured,730755,3834.2,530508,200247,760000,133864,20.025,49938,3,1.0,1.0,0,0,"fingerprint-only (passive, no entropy/popcount)"
@@ -171,26 +171,26 @@ scenario,mix,background,background_packets,total_packets,tool,status,wall_median
 04_shadowsocks,bg390k,ustc,390000,400000,Zeek,measured,19817736,534308.4,507294,19310442,22780000,1131336,48.276,20714,3,1.0,1.0,117809,19956,"fingerprint-only (passive, no entropy/popcount)"
 04_shadowsocks,bg390k,ustc,390000,400000,Scapy,measured,185641696,1829771.4,1086555,184555141,183630000,2546104,461.388,2167,3,1.0,1.0,117809,266,
 04_shadowsocks,bg390k,ustc,390000,400000,OpenGFW,measured,3813878,104167.0,1034384,2779494,10309998,624900,6.949,143911,3,1.0,1.0,117809,631,built-in fet analyzer (Wu et al. heuristics)
-04_shadowsocks,bg0,combined,0,10000,PyCL,measured,411892,13907.5,54288,357604,420000,46684,35.76,27964,3,1.0,1.0,0,0,
-04_shadowsocks,bg0,combined,0,10000,CensorLang,measured,137450,9628.5,78195,59255,150000,24068,5.926,168762,3,1.0,1.0,0,0,
-04_shadowsocks,bg0,combined,0,10000,Zeek,measured,731688,4135.0,512940,218748,760000,133684,21.875,45715,3,1.0,1.0,0,0,"fingerprint-only (passive, no entropy/popcount)"
-04_shadowsocks,bg0,combined,0,10000,Scapy,measured,4720853,30416.7,1014029,3706824,4650000,121916,370.682,2698,3,1.0,1.0,0,0,
-04_shadowsocks,bg0,combined,0,10000,OpenGFW,measured,1126983,8057.3,1035266,91717,270000,32452,9.172,109031,3,1.0,1.0,0,0,built-in fet analyzer (Wu et al. heuristics)
-04_shadowsocks,bg10k,combined,10000,20000,PyCL,measured,1065371,17988.0,53667,1011704,1060000,105052,50.585,19769,3,1.0,1.0,2559,0,
-04_shadowsocks,bg10k,combined,10000,20000,CensorLang,measured,205292,12298.1,78925,126367,220000,28568,6.318,158269,3,1.0,1.0,2559,0,
-04_shadowsocks,bg10k,combined,10000,20000,Zeek,measured,966112,15048.8,525186,440926,1040000,156572,22.046,45359,3,1.0,1.0,2559,0,"fingerprint-only (passive, no entropy/popcount)"
-04_shadowsocks,bg10k,combined,10000,20000,Scapy,measured,9147790,205401.1,1019682,8128108,9030000,218176,406.405,2461,3,1.0,1.0,2559,0,
-04_shadowsocks,bg10k,combined,10000,20000,OpenGFW,measured,1232006,8102.9,1035442,196564,650000,52356,9.828,101748,3,1.0,1.0,2559,0,built-in fet analyzer (Wu et al. heuristics)
-04_shadowsocks,bg90k,combined,90000,100000,PyCL,measured,6862730,84389.6,54013,6808717,6780000,587240,68.087,14687,3,1.0,1.0,27009,0,
-04_shadowsocks,bg90k,combined,90000,100000,CensorLang,measured,717149,5184.5,76226,640923,730000,69504,6.409,156025,3,1.0,1.0,27009,0,
-04_shadowsocks,bg90k,combined,90000,100000,Zeek,measured,3253713,91719.5,529500,2724213,3850000,280068,27.242,36708,3,1.0,1.0,27009,2015,"fingerprint-only (passive, no entropy/popcount)"
-04_shadowsocks,bg90k,combined,90000,100000,Scapy,measured,48969670,812730.4,1044955,47924715,48400000,726592,479.247,2087,3,1.0,1.0,27009,0,
-04_shadowsocks,bg90k,combined,90000,100000,OpenGFW,measured,1838115,65898.8,1035815,802300,2550000,172676,8.023,124642,3,1.0,1.0,27009,0,built-in fet analyzer (Wu et al. heuristics)
-04_shadowsocks,bg390k,combined,390000,400000,PyCL,measured,19501533,136408.5,53566,19447967,19270000,1528868,48.62,20568,3,1.0,1.0,75140,4,
-04_shadowsocks,bg390k,combined,390000,400000,CensorLang,measured,2568055,18289.2,79085,2488970,2560000,158588,6.222,160709,3,1.0,1.0,75140,5,
-04_shadowsocks,bg390k,combined,390000,400000,Zeek,measured,10995969,208195.4,526139,10469830,12460000,700584,26.175,38205,3,1.0,1.0,75140,11812,"fingerprint-only (passive, no entropy/popcount)"
-04_shadowsocks,bg390k,combined,390000,400000,Scapy,measured,189041352,2326748.7,1038225,188003127,186940000,3306048,470.008,2128,3,1.0,1.0,75140,4,
-04_shadowsocks,bg390k,combined,390000,400000,OpenGFW,measured,3787476,36785.6,1035892,2751584,11360000,611560,6.879,145371,3,1.0,1.0,75140,4,built-in fet analyzer (Wu et al. heuristics)
+04_shadowsocks,bg0,combined,0,10000,PyCL,measured,145946,1096.3,34728,111218,130000,30096,11.122,89914,3,1.0,1.0,0,0,
+04_shadowsocks,bg0,combined,0,10000,CensorLang,measured,63584,547.5,33892,29692,50000,21800,2.969,336791,3,1.0,1.0,0,0,
+04_shadowsocks,bg0,combined,0,10000,Zeek,measured,733263,6068.0,509025,224238,760000,133668,22.424,44595,3,1.0,1.0,0,0,"fingerprint-only (passive, no entropy/popcount)"
+04_shadowsocks,bg0,combined,0,10000,Scapy,measured,4714954,93401.0,1048259,3666695,4640000,121916,366.67,2727,3,1.0,1.0,0,0,
+04_shadowsocks,bg0,combined,0,10000,OpenGFW,measured,1122684,1329.4,1035381,87303,260000,32900,8.73,114544,3,1.0,1.0,0,0,built-in fet analyzer (Wu et al. heuristics)
+04_shadowsocks,bg10k,combined,10000,20000,PyCL,measured,236139,2308.9,34860,201279,220000,51600,10.064,99365,3,1.0,1.0,2559,0,
+04_shadowsocks,bg10k,combined,10000,20000,CensorLang,measured,90552,1004.1,34388,56164,80000,26408,2.808,356100,3,1.0,1.0,2559,0,
+04_shadowsocks,bg10k,combined,10000,20000,Zeek,measured,978313,15011.2,502319,475994,1050000,156556,23.8,42017,3,1.0,1.0,2559,0,"fingerprint-only (passive, no entropy/popcount)"
+04_shadowsocks,bg10k,combined,10000,20000,Scapy,measured,9667540,282977.2,1089128,8578412,9530000,218176,428.921,2331,3,1.0,1.0,2559,0,
+04_shadowsocks,bg10k,combined,10000,20000,OpenGFW,measured,1228173,971.1,1036111,192062,620000,53380,9.603,104133,3,1.0,1.0,2559,0,built-in fet analyzer (Wu et al. heuristics)
+04_shadowsocks,bg90k,combined,90000,100000,PyCL,measured,934683,22308.7,32403,902280,910000,225616,9.023,110830,3,1.0,1.0,27009,0,
+04_shadowsocks,bg90k,combined,90000,100000,CensorLang,measured,268871,4721.1,34566,234305,260000,63672,2.343,426794,3,1.0,1.0,27009,0,
+04_shadowsocks,bg90k,combined,90000,100000,Zeek,measured,3207834,48333.1,501101,2706733,3800000,280164,27.067,36945,3,1.0,1.0,27009,2015,"fingerprint-only (passive, no entropy/popcount)"
+04_shadowsocks,bg90k,combined,90000,100000,Scapy,measured,48458319,863744.4,1070240,47388079,47890000,727104,473.881,2110,3,1.0,1.0,27009,0,
+04_shadowsocks,bg90k,combined,90000,100000,OpenGFW,measured,1794886,25461.3,1034295,760591,2550000,175748,7.606,131477,3,1.0,1.0,27009,0,built-in fet analyzer (Wu et al. heuristics)
+04_shadowsocks,bg390k,combined,390000,400000,PyCL,measured,2862545,408301.6,35942,2826603,2820000,531004,7.067,141513,3,1.0,1.0,75140,4,
+04_shadowsocks,bg390k,combined,390000,400000,CensorLang,measured,874445,12730.0,34441,840004,840000,108672,2.1,476188,3,1.0,1.0,75140,5,
+04_shadowsocks,bg390k,combined,390000,400000,Zeek,measured,11780514,886041.0,529160,11251354,13160000,699484,28.128,35551,3,1.0,1.0,75140,11812,"fingerprint-only (passive, no entropy/popcount)"
+04_shadowsocks,bg390k,combined,390000,400000,Scapy,measured,185313547,5108304.4,1053328,184260219,183170000,3306048,460.651,2171,3,1.0,1.0,75140,4,
+04_shadowsocks,bg390k,combined,390000,400000,OpenGFW,measured,3720773,56205.0,1034285,2686488,10740000,606328,6.716,148893,3,1.0,1.0,75140,4,built-in fet analyzer (Wu et al. heuristics)
 05_ml_classification,bg0,ustc,0,1200,PyCL,measured,146071,1268.3,55038,91033,160000,30392,75.861,13182,3,1.0,1.0,0,0,ONNX model classification
 05_ml_classification,bg0,ustc,0,1200,CensorLang,measured,143239,18820.3,79087,64152,150000,29276,53.46,18706,3,1.0,1.0,0,0,ONNX model classification
 05_ml_classification,bg0,ustc,0,1200,Scapy,measured,1780263,60829.7,1177908,602355,8860000,121636,501.962,1992,3,1.0,1.0,0,0,ONNX model classification (onnxruntime)
@@ -203,15 +203,15 @@ scenario,mix,background,background_packets,total_packets,tool,status,wall_median
 05_ml_classification,bg390k,ustc,390000,391200,PyCL,measured,10338789,490478.3,53899,10284890,10100000,910932,26.291,38036,3,1.0,1.0,117809,3016,ONNX model classification
 05_ml_classification,bg390k,ustc,390000,391200,CensorLang,measured,2735388,28109.2,81099,2654289,2700000,259600,6.785,147384,3,1.0,1.0,117809,702,ONNX model classification
 05_ml_classification,bg390k,ustc,390000,391200,Scapy,measured,212674634,2712130.3,1206722,211467912,1902750000,2526540,540.562,1850,3,1.0,1.0,117809,100048,ONNX model classification (onnxruntime)
-05_ml_classification,bg0,combined,0,1200,PyCL,measured,144218,791.0,57374,86844,150000,33076,72.37,13818,3,1.0,1.0,0,0,ONNX model classification
-05_ml_classification,bg0,combined,0,1200,CensorLang,measured,150769,2420.8,82963,67806,160000,31448,56.505,17698,3,1.0,1.0,0,0,ONNX model classification
-05_ml_classification,bg0,combined,0,1200,Scapy,measured,1838319,19736.6,1245287,593032,9550000,120916,494.193,2023,3,1.0,1.0,0,0,ONNX model classification (onnxruntime)
-05_ml_classification,bg10k,combined,10000,11200,PyCL,measured,357350,16144.3,55754,301596,360000,51924,26.928,37136,3,1.0,1.0,2559,14,ONNX model classification
-05_ml_classification,bg10k,combined,10000,11200,CensorLang,measured,245816,8954.4,60841,184975,260000,37544,16.516,60549,3,1.0,1.0,2559,14,ONNX model classification
-05_ml_classification,bg10k,combined,10000,11200,Scapy,measured,6771502,29773.9,1300105,5471397,54320000,216144,488.518,2047,3,1.0,1.0,2559,2538,ONNX model classification (onnxruntime)
-05_ml_classification,bg90k,combined,90000,91200,PyCL,measured,2038007,70831.1,58084,1979923,2020000,217988,21.71,46062,3,1.0,1.0,27009,211,ONNX model classification
-05_ml_classification,bg90k,combined,90000,91200,CensorLang,measured,1039611,12281.1,82981,956630,1030000,88064,10.489,95335,3,1.0,1.0,27009,211,ONNX model classification
-05_ml_classification,bg90k,combined,90000,91200,Scapy,measured,48476672,1214481.8,1181546,47295126,279000000,715848,518.587,1928,3,1.0,1.0,27009,16608,ONNX model classification (onnxruntime)
-05_ml_classification,bg390k,combined,390000,391200,PyCL,measured,6907675,137381.7,56273,6851402,6830000,490864,17.514,57098,3,1.0,1.0,75140,362,ONNX model classification
-05_ml_classification,bg390k,combined,390000,391200,CensorLang,measured,3491327,24542.5,83746,3407581,3450000,191416,8.711,114803,3,1.0,1.0,75140,357,ONNX model classification
-05_ml_classification,bg390k,combined,390000,391200,Scapy,measured,193473795,1518047.9,1225068,192248727,1115360000,3264592,491.433,2035,3,1.0,1.0,75140,59259,ONNX model classification (onnxruntime)
+05_ml_classification,bg0,combined,0,1200,PyCL,measured,82880,19144.0,39186,43694,70000,32512,36.412,27464,3,1.0,1.0,0,0,ONNX model classification
+05_ml_classification,bg0,combined,0,1200,CensorLang,measured,74595,1481.0,22671,51924,60000,30916,43.27,23111,3,1.0,1.0,0,0,ONNX model classification
+05_ml_classification,bg0,combined,0,1200,Scapy,measured,1975469,164971.9,1518412,457057,11060000,120908,380.881,2625,3,1.0,1.0,0,0,ONNX model classification (onnxruntime)
+05_ml_classification,bg10k,combined,10000,11200,PyCL,measured,175464,2145.4,34716,140748,160000,49408,12.567,79575,3,1.0,1.0,2559,14,ONNX model classification
+05_ml_classification,bg10k,combined,10000,11200,CensorLang,measured,114099,14651.9,31440,82659,90000,36548,7.38,135496,3,1.0,1.0,2559,14,ONNX model classification
+05_ml_classification,bg10k,combined,10000,11200,Scapy,measured,7395130,267494.2,1300431,6094699,79700000,216640,544.17,1838,3,1.0,1.0,2559,2538,ONNX model classification (onnxruntime)
+05_ml_classification,bg90k,combined,90000,91200,PyCL,measured,1019010,158121.8,35872,983138,990000,198724,10.78,92764,3,1.0,1.0,27009,211,ONNX model classification
+05_ml_classification,bg90k,combined,90000,91200,CensorLang,measured,426287,3538.1,36696,389591,400000,82760,4.272,234092,3,1.0,1.0,27009,211,ONNX model classification
+05_ml_classification,bg90k,combined,90000,91200,Scapy,measured,50290985,1387169.0,1251363,49039622,301880000,716352,537.715,1860,3,1.0,1.0,27009,16608,ONNX model classification (onnxruntime)
+05_ml_classification,bg390k,combined,390000,391200,PyCL,measured,3735882,547767.9,36007,3699875,3670000,428800,9.458,105733,3,1.0,1.0,75140,362,ONNX model classification
+05_ml_classification,bg390k,combined,390000,391200,CensorLang,measured,1366683,27126.3,38645,1328038,1330000,147528,3.395,294570,3,1.0,1.0,75140,358,ONNX model classification
+05_ml_classification,bg390k,combined,390000,391200,Scapy,measured,198662940,2200597.7,1281692,197381248,1130550000,3265088,504.553,1982,3,1.0,1.0,75140,59259,ONNX model classification (onnxruntime)

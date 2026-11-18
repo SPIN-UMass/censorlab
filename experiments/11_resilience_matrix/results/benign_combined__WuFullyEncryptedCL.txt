@@ -1,4 +1,4 @@
-[2m2026-11-17T23:00:42.335848Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:00.618057Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 31852: Ok(Drop)
 31853: Ok(Drop)
 31854: Ok(Drop)
@@ -469,15 +469,15 @@
 32852: Ok(Drop)
 32853: Ok(Drop)
 32855: Ok(Drop)
-[2m2026-11-17T23:00:42.359585Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:00.625027Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 37381: Ok(Drop)
 37437: Ok(Drop)
 37438: Ok(Drop)
 37601: Ok(Drop)
 37681: Ok(Drop)
 37682: Ok(Drop)
-[2m2026-11-17T23:00:42.429216Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:42.430872Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:42.431202Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:42.432611Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-Pcap mode took 309686us to process the file (309752us including I/O)
+[2m2026-11-18T01:38:00.644282Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:00.644766Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:00.644858Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:00.645240Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 102133us to process the file (102182us including I/O)

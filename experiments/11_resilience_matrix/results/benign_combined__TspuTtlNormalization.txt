@@ -1,7 +1,8 @@
-[2m2026-11-17T23:00:46.408368Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:46.458115Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:46.601860Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:46.607090Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:46.608014Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:46.611886Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-Pcap mode took 888388us to process the file (888552us including I/O)
+[2m2026-11-18T01:38:02.334573Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/tspu_ttl_normalization/tspu_ttl.py: module environment cached; connections get a copy instead of running the module body
+[2m2026-11-18T01:38:02.622281Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:02.642329Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:02.698851Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:02.700506Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:02.700768Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:02.701957Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 367225us to process the file (367405us including I/O)

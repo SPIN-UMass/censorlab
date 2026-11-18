@@ -1,7 +1,8 @@
-[2m2026-11-17T23:00:49.362449Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:49.404511Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:49.543956Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:49.549149Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:49.550018Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:49.553799Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-Pcap mode took 846131us to process the file (846298us including I/O)
+[2m2026-11-18T01:38:06.244459Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/quic_blocking/quic.py: module body runs for every connection (not cacheable: line 20: module level calls `new_reassembler`)
+[2m2026-11-18T01:38:06.708492Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:06.729748Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:06.803038Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:06.806493Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:06.807018Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:06.809366Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 564924us to process the file (565088us including I/O)

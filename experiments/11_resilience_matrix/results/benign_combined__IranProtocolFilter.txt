@@ -1,0 +1,8 @@
+[2m2026-11-18T01:38:04.617248Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/iran_protocol_filter/protocol_filter.py: module environment cached; connections get a copy instead of running the module body
+[2m2026-11-18T01:38:05.078385Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:05.105667Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:05.182940Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:05.185169Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:05.185536Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:05.187084Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 569684us to process the file (569903us including I/O)

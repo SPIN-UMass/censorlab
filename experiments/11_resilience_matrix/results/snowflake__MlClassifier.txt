@@ -1,3 +1,4 @@
+[2m2026-11-18T01:37:56.962514Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/experiments/05_ml_classification/censor.py: module environment cached; connections get a copy instead of running the module body
 24: Ok(Drop)
 25: Ok(Drop)
 26: Ok(Drop)
@@ -2026,4 +2027,4 @@
 2272: Ok(Drop)
 2273: Ok(Drop)
 2274: Ok(Drop)
-Pcap mode took 89778us to process the file (90163us including I/O)
+Pcap mode took 30088us to process the file (30230us including I/O)

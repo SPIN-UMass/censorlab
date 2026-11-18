@@ -1,3 +1,4 @@
+[2m2026-11-18T01:38:00.673956Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/experiments/05_ml_classification/censor.py: module environment cached; connections get a copy instead of running the module body
 22872: Ok(Drop)
 22909: Ok(Drop)
 22914: Ok(Drop)
@@ -3065,7 +3066,7 @@
 28001: Ok(Drop)
 28004: Ok(Drop)
 28005: Ok(Drop)
-[2m2026-11-17T23:00:43.378956Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:01.094576Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 28023: Ok(Drop)
 28025: Ok(Drop)
 28026: Ok(Drop)
@@ -7188,7 +7189,7 @@
 32953: Ok(Drop)
 32970: Ok(Drop)
 32978: Ok(Drop)
-[2m2026-11-17T23:00:43.460825Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:01.130798Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 32980: Ok(Drop)
 32981: Ok(Drop)
 32982: Ok(Drop)
@@ -19124,7 +19125,7 @@
 48423: Ok(Drop)
 48427: Ok(Drop)
 48431: Ok(Drop)
-[2m2026-11-17T23:00:43.735092Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:01.251672Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48436: Ok(Drop)
 48437: Ok(Drop)
 48438: Ok(Drop)
@@ -19212,7 +19213,7 @@
 48779: Ok(Drop)
 48786: Ok(Drop)
 48791: Ok(Drop)
-[2m2026-11-17T23:00:43.744737Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:01.256079Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48793: Ok(Drop)
 48794: Ok(Drop)
 48795: Ok(Drop)
@@ -19242,7 +19243,7 @@
 48873: Ok(Drop)
 48874: Ok(Drop)
 48875: Ok(Drop)
-[2m2026-11-17T23:00:43.746340Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:01.256804Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 48877: Ok(Drop)
 48878: Ok(Drop)
 48879: Ok(Drop)
@@ -19359,7 +19360,7 @@
 49181: Ok(Drop)
 49182: Ok(Drop)
 49187: Ok(Drop)
-[2m2026-11-17T23:00:43.754186Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:01.259974Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 49193: Ok(Drop)
 49200: Ok(Drop)
 49201: Ok(Drop)
@@ -19370,4 +19371,4 @@
 49212: Ok(Drop)
 49227: Ok(Drop)
 49228: Ok(Drop)
-Pcap mode took 1251154us to process the file (1251336us including I/O)
+Pcap mode took 586583us to process the file (586678us including I/O)

@@ -1,0 +1,2 @@
+[2m2026-11-18T01:37:32.531293Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/openvpn_fingerprint/openvpn.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 28779us to process the file (28927us including I/O)

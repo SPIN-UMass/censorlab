@@ -1,0 +1,2 @@
+[2m2026-11-18T01:37:07.093015Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/iran_protocol_filter/protocol_filter.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 20358us to process the file (20506us including I/O)

@@ -1,1 +1,2 @@
-Pcap mode took 45983us to process the file (46115us including I/O)
+[2m2026-11-18T01:37:06.290356Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/experiments/01_http_keyword/censor.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 24882us to process the file (25023us including I/O)

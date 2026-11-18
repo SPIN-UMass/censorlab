@@ -1,3 +1,4 @@
+[2m2026-11-18T01:34:14.472581Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /censorlab/experiments/05_ml_classification/censor.py: module environment cached; connections get a copy instead of running the module body
 11: Ok(Drop)
 12: Ok(Drop)
 13: Ok(Drop)
@@ -148,4 +149,4 @@
 1199: Ok(Drop)
 1200: Ok(Drop)
 1201: Ok(Drop)
-Pcap mode took 87069us to process the file (87234us including I/O)
+Pcap mode took 48057us to process the file (48222us including I/O)

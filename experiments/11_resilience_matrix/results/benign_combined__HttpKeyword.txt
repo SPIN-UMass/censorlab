@@ -1,9 +1,10 @@
-[2m2026-11-17T23:00:34.917169Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:37:58.246522Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/experiments/01_http_keyword/censor.py: module environment cached; connections get a copy instead of running the module body
+[2m2026-11-18T01:37:58.551069Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 28956: Ok(Reset { src_mac: [232, 231, 50, 60, 101, 80], dst_mac: [152, 144, 150, 160, 88, 47], ips: V4 { src: 108.175.42.181, dst: 131.202.240.150 }, ipid: Some(36518), src_port: 80, dst_port: 58287, seq: SeqNumber(1536598744), ack: SeqNumber(1885973095), is_ack: true, seg_len: 1338 })
-[2m2026-11-17T23:00:34.974257Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:37:58.585766Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 41728: Ok(Reset { src_mac: [152, 144, 150, 160, 27, 174], dst_mac: [232, 231, 50, 60, 101, 80], ips: V4 { src: 131.202.240.101, dst: 198.54.12.96 }, ipid: Some(42723), src_port: 39499, dst_port: 80, seq: SeqNumber(-1363588232), ack: SeqNumber(1957561406), is_ack: true, seg_len: 2676 })
-[2m2026-11-17T23:00:35.103845Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:35.107145Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:35.107777Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-17T23:00:35.110432Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-Pcap mode took 679529us to process the file (679728us including I/O)
+[2m2026-11-18T01:37:58.644623Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:37:58.646201Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:37:58.646492Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:37:58.647751Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 401278us to process the file (401439us including I/O)

@@ -2026,4 +2026,4 @@
 2272: Ok(Drop)
 2273: Ok(Drop)
 2274: Ok(Drop)
-Pcap mode took 41642us to process the file (41704us including I/O)
+Pcap mode took 13836us to process the file (13925us including I/O)

@@ -1,1 +1,2 @@
-Pcap mode took 33779us to process the file (33962us including I/O)
+[2m2026-11-18T01:37:32.254663Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/tspu_ttl_normalization/tspu_ttl.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 23845us to process the file (24072us including I/O)

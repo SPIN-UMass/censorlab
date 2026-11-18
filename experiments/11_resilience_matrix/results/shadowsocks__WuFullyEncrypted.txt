@@ -1,3 +1,4 @@
+[2m2026-11-18T01:37:06.568263Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/experiments/04_shadowsocks/censor.py: module environment cached; connections get a copy instead of running the module body
 5: Ok(Drop)
 6: Ok(Drop)
 7: Ok(Drop)
@@ -2503,4 +2504,4 @@
 2731: Ok(Drop)
 2732: Ok(Drop)
 2733: Ok(Drop)
-Pcap mode took 63746us to process the file (63884us including I/O)
+Pcap mode took 36722us to process the file (36899us including I/O)
