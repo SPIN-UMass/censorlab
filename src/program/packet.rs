@@ -952,7 +952,7 @@ pub mod rust_packet {
     #[pyattr]
     #[pyclass(module = "rust", name = "Regex")]
     #[derive(Debug, PyPayload)]
-    struct Regex {
+    pub struct Regex {
         inner: RustRegex,
     }
     #[pyclass]
@@ -1052,7 +1052,7 @@ pub mod rust_packet {
     #[pyattr]
     #[pyclass(module = "rust", name = "Subnet")]
     #[derive(Debug, PyPayload)]
-    struct Subnet {
+    pub struct Subnet {
         inner: IpNet,
     }
     #[pyclass]
