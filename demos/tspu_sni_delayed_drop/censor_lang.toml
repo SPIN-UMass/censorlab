@@ -1,0 +1,8 @@
+# TSPU "SNI-II" blocking: CensorLang version.
+# See censor.toml for the source and sni_delayed_drop.py for the description.
+[execution]
+mode = "CensorLang"
+script = "sni_delayed_drop.cl"
+
+[conntrack]
+tcp_idle_timeout = 420

@@ -1,0 +1,15 @@
+# TSPU "SNI-II" blocking: a few more packets pass, then both directions go dark.
+# PyCL version; censor_lang.toml runs the same logic in CensorLang.
+#
+# Source: Xue, Mixon-Baca, ValdikSS, Ablove, Kujath, Crandall, Ensafi. "TSPU:
+# Russia's Decentralized Censorship System." IMC 2022 (Sections 5.2 and 8,
+# Table 2).
+# https://ensa.fi/papers/tspu-imc22.pdf
+[execution]
+mode = "Python"
+script = "sni_delayed_drop.py"
+
+# Table 2: the SNI-II blocking state times out after 420 s without traffic.
+# CensorLab forgets a connection (and the script's state) likewise.
+[conntrack]
+tcp_idle_timeout = 420

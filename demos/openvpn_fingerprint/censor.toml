@@ -1,0 +1,12 @@
+# OpenVPN opcode fingerprinting.
+#
+# Source: Xue, Ramesh, Jain, Kallitsis, Halderman, Crandall, Ensafi. "OpenVPN
+# is Open to VPN Fingerprinting." USENIX Security 2022 (Section 6.1,
+# Algorithm 1; Section 7.2 for the window size).
+# https://www.usenix.org/conference/usenixsecurity22/presentation/xue-diwen
+#
+# This is the passive filter the authors built and ran at an ISP to show what
+# a censor could do cheaply, not a measurement of a deployed censor.
+[execution]
+mode = "Python"
+script = "openvpn.py"

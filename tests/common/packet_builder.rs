@@ -244,7 +244,17 @@ pub fn tls_client_hello_record(sni: &str) -> Vec<u8> {
 /// With ~1500 bytes of padding this is the size of a ClientHello carrying a post-quantum
 /// key share, which no longer fits in a single TCP segment.
 pub fn tls_client_hello_record_padded(sni: &str, padding: usize) -> Vec<u8> {
-    let msg = tls_client_hello_message(sni, padding);
+    tls_client_hello_record_with_extensions(sni, padding, &[])
+}
+
+/// Build a TLS ClientHello record that also carries the given `(type, data)`
+/// extensions after SNI and supported_versions (e.g. ESNI `0xffce`, ECH `0xfe0d`).
+pub fn tls_client_hello_record_with_extensions(
+    sni: &str,
+    padding: usize,
+    extra: &[(u16, &[u8])],
+) -> Vec<u8> {
+    let msg = tls_client_hello_message(sni, padding, extra);
     let mut record = Vec::with_capacity(5 + msg.len());
     record.push(22); // content type: Handshake
     record.extend_from_slice(&[0x03, 0x01]); // TLS 1.0
@@ -255,7 +265,7 @@ pub fn tls_client_hello_record_padded(sni: &str, padding: usize) -> Vec<u8> {
 }
 
 /// Build a TLS ClientHello handshake message (without record header).
-fn tls_client_hello_message(sni: &str, padding: usize) -> Vec<u8> {
+fn tls_client_hello_message(sni: &str, padding: usize, extra: &[(u16, &[u8])]) -> Vec<u8> {
     let mut extensions = Vec::new();
 
     // SNI extension
@@ -282,6 +292,13 @@ fn tls_client_hello_message(sni: &str, padding: usize) -> Vec<u8> {
         extensions.push((sv_data_len & 0xff) as u8);
         extensions.push(versions.len() as u8);
         extensions.extend_from_slice(&versions);
+    }
+
+    // caller-supplied extensions
+    for (ty, data) in extra {
+        extensions.extend_from_slice(&ty.to_be_bytes());
+        extensions.extend_from_slice(&(data.len() as u16).to_be_bytes());
+        extensions.extend_from_slice(data);
     }
 
     // padding extension
@@ -345,7 +362,7 @@ fn sealed_initial(pn: u64, mut frames: Vec<u8>) -> Vec<u8> {
 /// exactly as a real client would.
 pub fn quic_initial_packet(sni: &str) -> Vec<u8> {
     use censorlab::application::quic::crypto_frame;
-    sealed_initial(0, crypto_frame(0, &tls_client_hello_message(sni, 0)))
+    sealed_initial(0, crypto_frame(0, &tls_client_hello_message(sni, 0, &[])))
 }
 
 /// Two protected client Initial datagrams of one connection whose
@@ -353,7 +370,7 @@ pub fn quic_initial_packet(sni: &str) -> Vec<u8> {
 /// post-quantum ClientHellos. Neither datagram alone contains the full SNI.
 pub fn quic_initial_split_datagrams(sni: &str) -> (Vec<u8>, Vec<u8>) {
     use censorlab::application::quic::crypto_frame;
-    let ch = tls_client_hello_message(sni, 0);
+    let ch = tls_client_hello_message(sni, 0, &[]);
     // Split inside the SNI value.
     let sni_pos = ch
         .windows(sni.len())

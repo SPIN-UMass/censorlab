@@ -1,0 +1,12 @@
+# DTLS handshake fingerprinting of Snowflake (Russia, 2021-12 and 2022-07).
+#
+# Source: Bocovich, Breault, Fifield, Serene, Wang. "Snowflake, a censorship
+# circumvention system using temporary WebRTC proxies." USENIX Security 2024
+# (Section 5.1).
+# https://www.usenix.org/conference/usenixsecurity24/presentation/bocovich
+# Field report: ValdikSS, "Snowflake (DTLS) block in Russia",
+# anti-censorship-team mailing list, 2021-12-06.
+# https://lists.torproject.org/pipermail/anti-censorship-team/2021-December/000204.html
+[execution]
+mode = "Python"
+script = "snowflake_dtls.py"

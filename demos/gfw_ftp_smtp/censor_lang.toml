@@ -1,0 +1,5 @@
+# The GFW's keyword censorship of FTP and SMTP: CensorLang version.
+# See censor.toml for the sources and ftp_smtp.py for the description.
+[execution]
+mode = "CensorLang"
+script = "ftp_smtp.cl"

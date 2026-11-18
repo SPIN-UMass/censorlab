@@ -1,0 +1,5 @@
+# Blocking of WireGuard and OpenVPN (UDP) after the handshake: CensorLang
+# version.  See censor.toml for the source and vpn.py for the description.
+[execution]
+mode = "CensorLang"
+script = "vpn.cl"

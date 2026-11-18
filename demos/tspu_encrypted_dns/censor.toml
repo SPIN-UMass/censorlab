@@ -1,0 +1,18 @@
+# Blocking of public DNS, DNS-over-TLS and DNS-over-HTTPS resolvers
+# (Russia, September 2021).
+# PyCL version; censor_lang.toml runs the same logic in CensorLang.
+#
+# Source: net4people/bbs issue #81, "Blocking of DNS, DoH, DoT servers
+# (Google, Cloudflare, OpenDNS) in Russia" (summary of ntc.party reports;
+# community observations, inconsistent across ISPs and over time).
+# https://github.com/net4people/bbs/issues/81
+# https://ntc.party/t/doh-dns-google/1225
+[execution]
+mode = "Python"
+script = "encrypted_dns.py"
+
+# "Blocking of plaintext UDP DNS is evidently by packet dropping, as queries
+# time out."  8.8.8.8 is the resolver the reports found blocked.
+[udp.ip_port_blocklist]
+list = ["8.8.8.8:53"]
+action = "Drop"

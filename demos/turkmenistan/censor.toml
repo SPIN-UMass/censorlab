@@ -1,0 +1,17 @@
+# Turkmenistan's bidirectional DNS / HTTP / HTTPS censorship.
+#
+# Source: Nourin, Tran, Jiang, Bock, Feamster, Hoang, Levin. "Measuring and
+# Evading Turkmenistan's Internet Censorship: A Case Study in Large-Scale
+# Measurements of a Low-Penetration Country." WWW 2023 (Sections 2.2, 3.1).
+# https://arxiv.org/abs/2304.04835
+[execution]
+mode = "Python"
+script = "turkmenistan.py"
+
+# "This residual blocking behavior stops after 30 seconds from the last
+# injected packet."  Every packet on a blocked 4-tuple draws another RST, so
+# this is an idle timeout: CensorLab forgets the connection, and the script's
+# residual flag with it, 30 s after its last packet.
+[conntrack]
+tcp_idle_timeout = 30
+tcp_closed_timeout = 30
