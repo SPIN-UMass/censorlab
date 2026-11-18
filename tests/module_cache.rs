@@ -210,8 +210,9 @@ fn shipped_scripts_behave_identically_with_and_without_the_cache() {
             config.display()
         );
     }
-    // The traffic must make most scripts decide something
-    assert!(silent.len() * 3 < configs.len(), "no decisions from {silent:?}");
+    // The traffic must make a good number of scripts decide something (demos of
+    // narrow fingerprints stay silent on it; tests/demo_corpus.rs drives those)
+    assert!(configs.len() - silent.len() >= 15, "no decisions from {silent:?}");
     // The cache must actually be in use for (nearly) all of them; only the
     // QUIC demo, which builds a reassembler at module level, falls back
     let fallback: Vec<_> = configs.iter().filter(|c| !cached.contains(c)).collect();
