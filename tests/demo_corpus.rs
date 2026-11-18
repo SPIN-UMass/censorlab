@@ -626,7 +626,7 @@ fn udp_flow(cap: &mut Capture, cport: u16, total: usize, first_byte: impl Fn(usi
         .map(|i| {
             let mut payload = vec![0xCD; 64];
             payload[0] = first_byte(i);
-            let frame = if i % 2 == 0 {
+            let frame = if i.is_multiple_of(2) {
                 udp_frame(CLIENT, SERVER, cport, 1194, &payload)
             } else {
                 udp_frame(SERVER, CLIENT, 1194, cport, &payload)
@@ -642,7 +642,7 @@ fn openvpn_session(i: usize) -> u8 {
     let opcode = match i {
         0 => OVPN_RESET_CLIENT,
         1 => OVPN_RESET_SERVER,
-        2..=11 if i % 2 == 0 => OVPN_ACK,
+        2..=11 if i.is_multiple_of(2) => OVPN_ACK,
         2..=11 => OVPN_CONTROL,
         _ => OVPN_DATA_V2,
     };
@@ -676,7 +676,7 @@ fn test_demo_openvpn_fingerprint() {
     for i in 0..102 {
         let mut payload = vec![0x00, 0x40];
         payload.extend(vec![openvpn_session(i); 64]);
-        let frame = if i % 2 == 0 { g.client(&payload) } else { g.server(&payload) };
+        let frame = if i.is_multiple_of(2) { g.client(&payload) } else { g.server(&payload) };
         let index = cap.push(frame);
         if i >= 99 {
             dropped.push(index);
