@@ -1,1 +1,2 @@
-Pcap mode took 722917us to process the file (723015us including I/O)
+[2m2026-11-18T01:36:39.369758Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/throttling/throttle.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 409231us to process the file (409317us including I/O)

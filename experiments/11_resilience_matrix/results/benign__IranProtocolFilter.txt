@@ -1,1 +1,2 @@
-Pcap mode took 1037456us to process the file (1037619us including I/O)
+[2m2026-11-18T01:36:41.334976Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/iran_protocol_filter/protocol_filter.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 668766us to process the file (668873us including I/O)

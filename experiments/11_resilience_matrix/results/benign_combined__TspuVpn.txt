@@ -1,3 +1,4 @@
+[2m2026-11-18T01:38:03.293514Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/tspu_vpn/vpn.py: module environment cached; connections get a copy instead of running the module body
 26794: Ok(Drop)
 26795: Ok(Drop)
 26796: Ok(Drop)
@@ -450,8 +451,8 @@
 27271: Ok(Drop)
 27272: Ok(Drop)
 27273: Ok(Drop)
-[2m2026-11-18T00:39:45.048020Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-18T00:39:45.084438Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:03.806182Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:03.843263Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
 40057: Ok(Drop)
 40058: Ok(Drop)
 40059: Ok(Drop)
@@ -1346,8 +1347,8 @@
 45763: Ok(Drop)
 45783: Ok(Drop)
 45787: Ok(Drop)
-[2m2026-11-18T00:39:45.224010Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-18T00:39:45.228491Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-18T00:39:45.229188Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-[2m2026-11-18T00:39:45.232427Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
-Pcap mode took 705269us to process the file (705488us including I/O)
+[2m2026-11-18T01:38:03.982845Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:03.987376Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:03.988130Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+[2m2026-11-18T01:38:03.991444Z[0m [33m WARN[0m [2mcensorlab::censor[0m[2m:[0m Error parsing IPv4 header, allowing through: Error
+Pcap mode took 698000us to process the file (698170us including I/O)

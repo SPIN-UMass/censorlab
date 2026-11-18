@@ -1,1 +1,2 @@
-Pcap mode took 18829us to process the file (18954us including I/O)
+[2m2026-11-18T01:37:07.048291Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/snowflake_dtls/snowflake_dtls.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 20896us to process the file (21052us including I/O)

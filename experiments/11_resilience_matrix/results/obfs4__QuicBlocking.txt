@@ -1,1 +1,2 @@
-Pcap mode took 18934us to process the file (19082us including I/O)
+[2m2026-11-18T01:37:32.625950Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/quic_blocking/quic.py: module body runs for every connection (not cacheable: line 20: module level calls `new_reassembler`)
+Pcap mode took 15026us to process the file (15154us including I/O)

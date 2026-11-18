@@ -1,1 +1,2 @@
-Pcap mode took 35202us to process the file (35399us including I/O)
+[2m2026-11-18T01:37:57.229557Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/tspu_vpn/vpn.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 37079us to process the file (37232us including I/O)

@@ -12,52 +12,13 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.051,
+      "seconds": 0.053,
       "exit_code": 0
     },
     {
       "traffic": "shadowsocks",
       "program": "HttpKeywordCL",
       "config": "experiments/01_http_keyword/censor_lang.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.042,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "DnsInjection",
-      "config": "experiments/02_dns_injection/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.035,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "DnsInjectionCL",
-      "config": "experiments/02_dns_injection/censor_lang.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.041,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "SniFiltering",
-      "config": "experiments/03_tls_sni/censor.toml",
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
@@ -69,6 +30,45 @@
     },
     {
       "traffic": "shadowsocks",
+      "program": "DnsInjection",
+      "config": "experiments/02_dns_injection/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.056,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "DnsInjectionCL",
+      "config": "experiments/02_dns_injection/censor_lang.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.039,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "SniFiltering",
+      "config": "experiments/03_tls_sni/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.053,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
       "program": "SniFilteringCL",
       "config": "experiments/03_tls_sni/censor_lang.toml",
       "flows": 60,
@@ -77,7 +77,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.021,
+      "seconds": 0.043,
       "exit_code": 0
     },
     {
@@ -90,7 +90,7 @@
       "flagged_tcp": 59,
       "flagged_udp": 0,
       "actions": "drop=59",
-      "seconds": 0.068,
+      "seconds": 0.065,
       "exit_code": 0
     },
     {
@@ -103,7 +103,7 @@
       "flagged_tcp": 59,
       "flagged_udp": 0,
       "actions": "drop=59",
-      "seconds": 0.022,
+      "seconds": 0.043,
       "exit_code": 0
     },
     {
@@ -116,7 +116,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.064,
+      "seconds": 0.075,
       "exit_code": 0
     },
     {
@@ -129,7 +129,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.066,
+      "seconds": 0.034,
       "exit_code": 0
     },
     {
@@ -142,13 +142,52 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.049,
+      "seconds": 0.068,
       "exit_code": 0
     },
     {
       "traffic": "shadowsocks",
       "program": "TspuTtlNormalization",
       "config": "demos/tspu_ttl_normalization/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.035,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "TspuFragments",
+      "config": "demos/tspu_fragments/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.02,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "Throttling",
+      "config": "demos/throttling/censor.toml",
+      "flows": 60,
+      "flagged": 0,
+      "rate": 0.0,
+      "flagged_tcp": 0,
+      "flagged_udp": 0,
+      "actions": "",
+      "seconds": 0.051,
+      "exit_code": 0
+    },
+    {
+      "traffic": "shadowsocks",
+      "program": "TspuVpn",
+      "config": "demos/tspu_vpn/censor.toml",
       "flows": 60,
       "flagged": 0,
       "rate": 0.0,
@@ -160,45 +199,6 @@
     },
     {
       "traffic": "shadowsocks",
-      "program": "TspuFragments",
-      "config": "demos/tspu_fragments/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.028,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "Throttling",
-      "config": "demos/throttling/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.039,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
-      "program": "TspuVpn",
-      "config": "demos/tspu_vpn/censor.toml",
-      "flows": 60,
-      "flagged": 0,
-      "rate": 0.0,
-      "flagged_tcp": 0,
-      "flagged_udp": 0,
-      "actions": "",
-      "seconds": 0.066,
-      "exit_code": 0
-    },
-    {
-      "traffic": "shadowsocks",
       "program": "SnowflakeDtls",
       "config": "demos/snowflake_dtls/censor.toml",
       "flows": 60,
@@ -207,7 +207,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.041,
+      "seconds": 0.049,
       "exit_code": 0
     },
     {
@@ -220,7 +220,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.039,
+      "seconds": 0.043,
       "exit_code": 0
     },
     {
@@ -233,7 +233,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.062,
+      "seconds": 0.061,
       "exit_code": 0
     },
     {
@@ -246,7 +246,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.041,
+      "seconds": 0.045,
       "exit_code": 0
     },
     {
@@ -259,7 +259,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.036,
+      "seconds": 0.047,
       "exit_code": 0
     },
     {
@@ -272,7 +272,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 16.968,
+      "seconds": 16.913,
       "exit_code": 0
     },
     {
@@ -285,7 +285,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 7.282,
+      "seconds": 7.422,
       "exit_code": 0
     },
     {
@@ -311,7 +311,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.04,
+      "seconds": 0.039,
       "exit_code": 0
     },
     {
@@ -337,7 +337,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.041,
+      "seconds": 0.04,
       "exit_code": 0
     },
     {
@@ -350,7 +350,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.044,
+      "seconds": 0.043,
       "exit_code": 0
     },
     {
@@ -363,7 +363,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.03,
+      "seconds": 0.042,
       "exit_code": 0
     },
     {
@@ -376,7 +376,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.076,
+      "seconds": 0.065,
       "exit_code": 0
     },
     {
@@ -389,7 +389,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.039,
+      "seconds": 0.044,
       "exit_code": 0
     },
     {
@@ -402,7 +402,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 0.058,
+      "seconds": 0.081,
       "exit_code": 0
     },
     {
@@ -428,7 +428,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.048,
+      "seconds": 0.041,
       "exit_code": 0
     },
     {
@@ -441,7 +441,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.048,
+      "seconds": 0.056,
       "exit_code": 0
     },
     {
@@ -467,7 +467,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.044,
+      "seconds": 0.039,
       "exit_code": 0
     },
     {
@@ -480,7 +480,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.06,
+      "seconds": 0.057,
       "exit_code": 0
     },
     {
@@ -493,7 +493,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.043,
+      "seconds": 0.045,
       "exit_code": 0
     },
     {
@@ -506,7 +506,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.038,
+      "seconds": 0.048,
       "exit_code": 0
     },
     {
@@ -519,7 +519,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.047,
+      "seconds": 0.056,
       "exit_code": 0
     },
     {
@@ -532,7 +532,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.04,
+      "seconds": 0.042,
       "exit_code": 0
     },
     {
@@ -545,7 +545,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.046,
+      "seconds": 0.038,
       "exit_code": 0
     },
     {
@@ -558,7 +558,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 16.329,
+      "seconds": 16.707,
       "exit_code": 0
     },
     {
@@ -571,7 +571,7 @@
       "flagged_tcp": 60,
       "flagged_udp": 0,
       "actions": "drop=60",
-      "seconds": 7.365,
+      "seconds": 7.286,
       "exit_code": 0
     },
     {
@@ -584,7 +584,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.04,
+      "seconds": 0.021,
       "exit_code": 0
     },
     {
@@ -597,7 +597,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.034,
+      "seconds": 0.036,
       "exit_code": 0
     },
     {
@@ -610,7 +610,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.042,
+      "seconds": 0.023,
       "exit_code": 0
     },
     {
@@ -623,7 +623,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.032,
+      "seconds": 0.033,
       "exit_code": 0
     },
     {
@@ -636,7 +636,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.038,
+      "seconds": 0.04,
       "exit_code": 0
     },
     {
@@ -649,7 +649,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.033,
+      "seconds": 0.036,
       "exit_code": 0
     },
     {
@@ -662,7 +662,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.041,
+      "seconds": 0.036,
       "exit_code": 0
     },
     {
@@ -675,7 +675,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.034,
+      "seconds": 0.028,
       "exit_code": 0
     },
     {
@@ -688,7 +688,7 @@
       "flagged_tcp": 8,
       "flagged_udp": 13,
       "actions": "drop=21",
-      "seconds": 0.053,
+      "seconds": 0.059,
       "exit_code": 0
     },
     {
@@ -701,7 +701,7 @@
       "flagged_tcp": 8,
       "flagged_udp": 13,
       "actions": "drop=21",
-      "seconds": 0.045,
+      "seconds": 0.044,
       "exit_code": 0
     },
     {
@@ -714,7 +714,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.035,
+      "seconds": 0.043,
       "exit_code": 0
     },
     {
@@ -766,7 +766,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.06,
+      "seconds": 0.063,
       "exit_code": 0
     },
     {
@@ -779,7 +779,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 10,
       "actions": "drop=10",
-      "seconds": 0.051,
+      "seconds": 0.031,
       "exit_code": 0
     },
     {
@@ -792,7 +792,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.039,
+      "seconds": 0.042,
       "exit_code": 0
     },
     {
@@ -805,7 +805,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 4,
       "actions": "drop=4",
-      "seconds": 0.038,
+      "seconds": 0.041,
       "exit_code": 0
     },
     {
@@ -818,7 +818,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.037,
+      "seconds": 0.039,
       "exit_code": 0
     },
     {
@@ -831,7 +831,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.041,
+      "seconds": 0.04,
       "exit_code": 0
     },
     {
@@ -844,7 +844,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.039,
+      "seconds": 0.045,
       "exit_code": 0
     },
     {
@@ -857,7 +857,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.082,
+      "seconds": 0.085,
       "exit_code": 0
     },
     {
@@ -870,7 +870,7 @@
       "flagged_tcp": 2,
       "flagged_udp": 0,
       "actions": "reset=2",
-      "seconds": 0.445,
+      "seconds": 0.457,
       "exit_code": 0
     },
     {
@@ -883,7 +883,7 @@
       "flagged_tcp": 1,
       "flagged_udp": 0,
       "actions": "reset=1",
-      "seconds": 0.122,
+      "seconds": 0.155,
       "exit_code": 0
     },
     {
@@ -896,7 +896,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 129,
       "actions": "inject=129",
-      "seconds": 0.762,
+      "seconds": 0.395,
       "exit_code": 0
     },
     {
@@ -909,7 +909,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 143,
       "actions": "drop=143",
-      "seconds": 0.151,
+      "seconds": 0.153,
       "exit_code": 0
     },
     {
@@ -922,7 +922,7 @@
       "flagged_tcp": 13,
       "flagged_udp": 0,
       "actions": "reset=13",
-      "seconds": 0.659,
+      "seconds": 0.463,
       "exit_code": 0
     },
     {
@@ -935,7 +935,7 @@
       "flagged_tcp": 13,
       "flagged_udp": 0,
       "actions": "reset=13",
-      "seconds": 0.163,
+      "seconds": 0.129,
       "exit_code": 0
     },
     {
@@ -948,7 +948,7 @@
       "flagged_tcp": 2,
       "flagged_udp": 0,
       "actions": "drop=2",
-      "seconds": 1.129,
+      "seconds": 0.543,
       "exit_code": 0
     },
     {
@@ -961,7 +961,7 @@
       "flagged_tcp": 2,
       "flagged_udp": 0,
       "actions": "drop=2",
-      "seconds": 0.162,
+      "seconds": 0.127,
       "exit_code": 0
     },
     {
@@ -974,7 +974,7 @@
       "flagged_tcp": 326,
       "flagged_udp": 44,
       "actions": "drop=370",
-      "seconds": 0.805,
+      "seconds": 0.637,
       "exit_code": 0
     },
     {
@@ -987,7 +987,7 @@
       "flagged_tcp": 324,
       "flagged_udp": 44,
       "actions": "drop=368",
-      "seconds": 0.302,
+      "seconds": 0.262,
       "exit_code": 0
     },
     {
@@ -1000,7 +1000,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.566,
+      "seconds": 0.632,
       "exit_code": 0
     },
     {
@@ -1013,7 +1013,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.628,
+      "seconds": 0.423,
       "exit_code": 0
     },
     {
@@ -1026,7 +1026,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.165,
+      "seconds": 0.147,
       "exit_code": 0
     },
     {
@@ -1039,7 +1039,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.753,
+      "seconds": 0.387,
       "exit_code": 0
     },
     {
@@ -1052,7 +1052,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 1,
       "actions": "drop=1",
-      "seconds": 0.77,
+      "seconds": 0.761,
       "exit_code": 0
     },
     {
@@ -1065,7 +1065,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.55,
+      "seconds": 0.554,
       "exit_code": 0
     },
     {
@@ -1078,7 +1078,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.854,
+      "seconds": 0.634,
       "exit_code": 0
     },
     {
@@ -1091,7 +1091,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.551,
+      "seconds": 0.598,
       "exit_code": 0
     },
     {
@@ -1104,7 +1104,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.446,
+      "seconds": 0.394,
       "exit_code": 0
     },
     {
@@ -1117,7 +1117,7 @@
       "flagged_tcp": 0,
       "flagged_udp": 0,
       "actions": "",
-      "seconds": 0.733,
+      "seconds": 0.622,
       "exit_code": 0
     },
     {
@@ -1130,7 +1130,7 @@
       "flagged_tcp": 83,
       "flagged_udp": 0,
       "actions": "drop=83",
-      "seconds": 22.211,
+      "seconds": 22.112,
       "exit_code": 0
     },
     {
@@ -1143,7 +1143,7 @@
       "flagged_tcp": 77,
       "flagged_udp": 0,
       "actions": "drop=76;reset=1",
-      "seconds": 4.941,
+      "seconds": 3.896,
       "exit_code": 0
     }
   ]

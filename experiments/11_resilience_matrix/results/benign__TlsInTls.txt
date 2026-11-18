@@ -1,1 +1,2 @@
-Pcap mode took 642832us to process the file (642935us including I/O)
+[2m2026-11-18T01:36:37.936444Z[0m [32m INFO[0m [2mcensorlab::transport[0m[2m:[0m /home/jade/project/censorlab/demos/tls_in_tls/tls_in_tls.py: module environment cached; connections get a copy instead of running the module body
+Pcap mode took 665629us to process the file (665731us including I/O)
