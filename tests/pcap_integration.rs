@@ -2995,3 +2995,56 @@ fn test_decisions_and_logs_keep_their_order() {
         result.stdout
     );
 }
+
+// ==========================================================================
+// packet.timestamp / field:timestamp follow capture time in PCAP mode
+// ==========================================================================
+
+/// Three UDP datagrams of one flow, captured at 100 s, 103 s and 110 s
+fn timestamped_flow(pcap_path: &std::path::Path) {
+    let client = [10, 0, 0, 1];
+    let server = [93, 184, 216, 34];
+    PcapBuilder::new()
+        .add_frame_at(100, &udp_frame(client, server, 40000, 9999, b"a"))
+        .add_frame_at(103, &udp_frame(client, server, 40000, 9999, b"b"))
+        .add_frame_at(110, &udp_frame(client, server, 40000, 9999, b"c"))
+        .write_to(pcap_path);
+}
+
+#[test]
+fn test_python_packet_timestamp_is_capture_time() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    timestamped_flow(&pcap_path);
+    // A fixed window: drop whatever arrives more than 5 s after the flow's first packet
+    write_temp_script(
+        &tmp,
+        "censor.py",
+        "first = None\n\
+         def process(packet):\n\
+         \x20   global first\n\
+         \x20   if first is None:\n\
+         \x20       first = packet.timestamp\n\
+         \x20   if packet.timestamp - first > 5:\n\
+         \x20       return \"drop\"\n",
+    );
+    let config_path = write_temp_config(&tmp, "[execution]\nmode = \"Python\"\nscript = \"censor.py\"\n");
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 1, "{:?}\n{}", result.action_lines, result.stdout);
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(2));
+    assert!(result.action_lines[0].action.contains("Drop"));
+}
+
+#[test]
+fn test_censorlang_timestamp_field_is_capture_time() {
+    let tmp = TempDir::new().unwrap();
+    let pcap_path = tmp.path().join("test.pcap");
+    timestamped_flow(&pcap_path);
+    write_temp_script(&tmp, "censor.cl", "if field:timestamp > 105.0: RETURN terminate\n");
+    let config_path = write_temp_config(&tmp, "[execution]\nmode = \"CensorLang\"\nscript = \"censor.cl\"\n");
+    let result = run_pcap_with_config(&config_path, &pcap_path, "10.0.0.1");
+    assert_eq!(result.exit_code, 0, "stderr: {}", result.stderr);
+    assert_eq!(result.action_lines.len(), 1, "{:?}\n{}", result.action_lines, result.stdout);
+    assert_eq!(result.action_lines[0].packet_index, frame_idx(2));
+}

@@ -2503,4 +2503,4 @@
 2731: Ok(Drop)
 2732: Ok(Drop)
 2733: Ok(Drop)
-Pcap mode took 63746us to process the file (63884us including I/O)
+Pcap mode took 40196us to process the file (40349us including I/O)

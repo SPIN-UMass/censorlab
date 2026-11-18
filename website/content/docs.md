@@ -422,7 +422,7 @@ The `packet` object is passed to `process()` and provides read-only access to pa
 
 | Attribute               | Type            | Description |
 |-------------------------|-----------------|-------------|
-| `packet.timestamp`      | `float` or `None` | Unix timestamp of the packet capture |
+| `packet.timestamp`      | `float` | Time of the packet in seconds: the capture timestamp in PCAP mode (the latest seen so far, so it never goes backwards; 0.0 if the capture has none), seconds since startup in NFQ and wire modes. Use differences, e.g. for fixed blocking windows |
 | `packet.direction`      | `int`           | `1` = client-to-WAN, `0` = unknown, `-1` = WAN-to-client |
 | `packet.payload`        | `bytes`         | Transport-layer payload bytes |
 | `packet.payload_len`    | `int`           | Length of the payload in bytes |
@@ -1035,7 +1035,7 @@ Fields read packet metadata. Accessing a field from the wrong protocol (e.g. `fi
 
 | Field             | Type  | Description |
 |-------------------|-------|-------------|
-| `field:timestamp` | float | Packet capture timestamp |
+| `field:timestamp` | float | Time of the packet in seconds (capture time in PCAP mode, seconds since startup in live modes) |
 
 ### IP (all versions)
 
