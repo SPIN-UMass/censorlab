@@ -63,6 +63,38 @@ snort_etc_dir() {
 }
 
 # ---------------------------------------------------------------------------
+# censorlab_config <config> <workdir> — the config CensorLab is run with.
+#   Normally <config> itself.  With CENSORLAB_MAX_CONNECTIONS=N set, a copy in
+#   <workdir>/config with `[conntrack] max_connections = N` appended, next to
+#   links to the scenario's other files (config paths are relative to the
+#   config file).  The scenario directory is not written to.
+# ---------------------------------------------------------------------------
+censorlab_config() {
+    local config="$1" workdir="$2" dir f
+    if [ -z "${CENSORLAB_MAX_CONNECTIONS:-}" ]; then
+        echo "$config"
+        return 0
+    fi
+    if [[ ! "$CENSORLAB_MAX_CONNECTIONS" =~ ^[1-9][0-9]*$ ]]; then
+        echo "harness: CENSORLAB_MAX_CONNECTIONS must be a positive integer (got '$CENSORLAB_MAX_CONNECTIONS')" >&2
+        return 1
+    fi
+    if grep -q '^[[:space:]]*\[conntrack\]' "$config"; then
+        echo "harness: $config already has a [conntrack] section; cannot apply CENSORLAB_MAX_CONNECTIONS" >&2
+        return 1
+    fi
+    dir="$workdir/config"
+    mkdir -p "$dir"
+    for f in "$(dirname "$config")"/*; do
+        ln -sfn "$f" "$dir/"
+    done
+    rm -f "$dir/$(basename "$config")"
+    { cat "$config"; printf '\n[conntrack]\nmax_connections = %s\n' "$CENSORLAB_MAX_CONNECTIONS"; } \
+        > "$dir/$(basename "$config")"
+    echo "$dir/$(basename "$config")"
+}
+
+# ---------------------------------------------------------------------------
 # Per-tool command construction.
 #   tool_argv <Tool> <pcap> <workdir>   -> sets global array ARGV
 # The command is executed with cwd=<workdir>; tools that write logs to cwd
@@ -73,9 +105,13 @@ tool_argv() {
     ARGV=()
     case "$tool" in
         PyCL)
-            ARGV=(censorlab -c "$SC_DIR/$(sc_get PYCL_CONFIG)" pcap "$pcap" "$(sc_get CLIENT_IP)") ;;
+            local config
+            config="$(censorlab_config "$SC_DIR/$(sc_get PYCL_CONFIG)" "$workdir")" || return 1
+            ARGV=(censorlab -c "$config" pcap "$pcap" "$(sc_get CLIENT_IP)") ;;
         CensorLang)
-            ARGV=(censorlab -c "$SC_DIR/$(sc_get CL_CONFIG)" pcap "$pcap" "$(sc_get CLIENT_IP)") ;;
+            local config
+            config="$(censorlab_config "$SC_DIR/$(sc_get CL_CONFIG)" "$workdir")" || return 1
+            ARGV=(censorlab -c "$config" pcap "$pcap" "$(sc_get CLIENT_IP)") ;;
         Zeek)
             ARGV=(zeek -C -r "$pcap" "$SC_DIR/$(sc_get ZEEK_SCRIPT)") ;;
         Scapy)

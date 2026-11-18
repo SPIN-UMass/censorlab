@@ -48,4 +48,29 @@ printf 'a\n# c\nb\n' > "$TMP/two.py"
 [ "$(count_loc "$TMP/two.py")" = 2 ] || fail "count_loc on two-line file"
 [ "$(count_loc "$TMP/missing.py")" = 0 ] || fail "count_loc on missing file: '$(count_loc "$TMP/missing.py")'"
 
+# 4. censorlab_config: unchanged without an override; with one, a copy in the
+#    work directory next to links to the scenario's files (config paths are
+#    relative to the config file).
+(
+    unset -f tool_argv
+    source "$HERE/harness.sh"
+    printf '[execution]\nscript = "censor.py"\n' > "$SC_DIR/censor.toml"
+    : > "$SC_DIR/censor.py"
+    W="$TMP/work"; mkdir -p "$W"
+    unset CENSORLAB_MAX_CONNECTIONS
+    [ "$(censorlab_config "$SC_DIR/censor.toml" "$W")" = "$SC_DIR/censor.toml" ] \
+        || fail "censorlab_config changed the config without an override"
+    out="$(CENSORLAB_MAX_CONNECTIONS=1000 censorlab_config "$SC_DIR/censor.toml" "$W")"
+    [ "$out" = "$W/config/censor.toml" ] || fail "censorlab_config override path: $out"
+    [ ! -L "$out" ] || fail "overridden config is a link to the original"
+    [ "$(tail -2 "$out")" = $'[conntrack]\nmax_connections = 1000' ] || fail "override not appended"
+    [ "$W/config/censor.py" -ef "$SC_DIR/censor.py" ] || fail "scenario files not linked next to the config"
+    ! grep -q conntrack "$SC_DIR/censor.toml" || fail "scenario config was modified"
+    ! (CENSORLAB_MAX_CONNECTIONS=10k censorlab_config "$SC_DIR/censor.toml" "$W") 2>/dev/null \
+        || fail "non-numeric CENSORLAB_MAX_CONNECTIONS accepted"
+    printf '[conntrack]\n' >> "$SC_DIR/censor.toml"
+    ! (CENSORLAB_MAX_CONNECTIONS=1000 censorlab_config "$SC_DIR/censor.toml" "$W") 2>/dev/null \
+        || fail "config that already has [conntrack] accepted"
+) || exit 1
+
 echo "test_harness: OK"

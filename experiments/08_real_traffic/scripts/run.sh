@@ -12,6 +12,12 @@
 #   bash experiments/08_real_traffic/scripts/run.sh [ITERATIONS] [WARMUP]
 #   SCENARIOS="03_tls_sni" MIXES="bg0 bg90k" TOOLS="PyCL Zeek" bash …/run.sh 3
 #   BACKGROUND=ustc bash …/run.sh 3      # USTC-TFC2016 only (default: combined)
+#
+# CensorLab's connection table is sized so that no connection is evicted for
+# space: the largest mixes have more flows (bg390k: 117 909 for ustc, 75 240
+# for combined) than the default max_connections of 65 536.  The default here
+# exceeds the packet count of every mix; set CENSORLAB_MAX_CONNECTIONS to
+# change it.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +29,7 @@ WARMUP="${2:-1}"
 # shellcheck source=common.sh
 source "$SCRIPT_DIR/common.sh"
 check_background
+export CENSORLAB_MAX_CONNECTIONS="${CENSORLAB_MAX_CONNECTIONS:-1000000}"
 load_mixes "$EXP_DIR/mixes.conf"
 
 read -r -a SCENARIOS <<< "${SCENARIOS:-${DEFAULT_SCENARIOS[*]}}"
