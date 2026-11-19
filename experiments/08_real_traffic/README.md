@@ -36,6 +36,13 @@ Mixes are declared in `mixes.conf`; scenarios and tools come from the scenario
 directories' `scenario.conf` exactly as in Table 4, so a tool's implementation is
 never changed between the synthetic and the real-traffic study.
 
+One CensorLab setting differs from Table 4: `run.sh` raises `[conntrack]
+max_connections` to 1 000 000 (override with `CENSORLAB_MAX_CONNECTIONS`).  The
+largest mixes have more flows than the default of 65 536 (`bg390k`: 117 909
+flows for `ustc`, 75 240 for `combined`), and with the default CensorLab evicts
+connection state mid-flow, which shows up as a missed labelled flow in the ML
+scenario.  The censor programs themselves are unchanged.
+
 ## Running
 
 ```bash
