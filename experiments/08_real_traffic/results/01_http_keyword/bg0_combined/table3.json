@@ -63,6 +63,34 @@
       "note": ""
     },
     {
+      "tool": "Suricata",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
+      "note": "http.uri buffer; reject = RST in IPS mode"
+    },
+    {
+      "tool": "Snort",
+      "tpr": 1.0,
+      "tnr": 1.0,
+      "tp": 500,
+      "fn": 0,
+      "fp": 0,
+      "tn": 500,
+      "errors": 0,
+      "total": 1000,
+      "background_flows": 0,
+      "background_flagged": 0,
+      "note": "http_uri buffer; reject = RST inline"
+    },
+    {
       "tool": "OpenGFW",
       "tpr": 1.0,
       "tnr": 1.0,

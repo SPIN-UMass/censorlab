@@ -12,7 +12,7 @@ The captures are recorded from the real tools, not synthesized
 
 | set | what is on the wire | how it is produced |
 |-----|--------------------|--------------------|
-| `shadowsocks` | shadowsocks-rust 1.24, `chacha20-ietf-poly1305`, 60 tunnelled HTTP fetches of 1 KB–1 MB objects | `ssserver` ⇄ `sslocal` (SOCKS5) |
+| `shadowsocks` | shadowsocks-rust 1.23.5, `chacha20-ietf-poly1305`, 60 tunnelled HTTP fetches of 1 KB–1 MB objects | `ssserver` ⇄ `sslocal` (SOCKS5) |
 | `obfs4` | lyrebird 0.8.1 obfs4 bridge (`iat-mode=0`), 60 tunnelled fetches | managed-transport server/client, SOCKS5 args per pt-spec |
 | `snowflake` | Snowflake 2.x: broker rendezvous over HTTP, WebRTC/DTLS data channel to a standalone proxy, 10 tunnelled fetches | local broker + server + proxy + client |
 | `benign_combined` | 50k packets of real application traffic, half from USTC-TFC2016 (BitTorrent, Facetime, FTP, Gmail, MySQL, Outlook, Skype, WoW) and half from the ISCXVPN2016 non-VPN captures, as in experiment 08 | `datasets/fetch_ustc_tfc2016.sh`, `datasets/fetch_iscxvpn2016.sh` |

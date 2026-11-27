@@ -3,6 +3,6 @@ PyCL,measured
 CensorLang,measured
 Zeek,measured
 Scapy,measured
-Suricata,not-expressible
-Snort,not-expressible
+Suricata,measured
+Snort,measured
 OpenGFW,measured

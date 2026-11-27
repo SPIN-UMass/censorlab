@@ -36,9 +36,7 @@ if reg:b.1 == True: RETURN allow_all
 # Rule 8 (Ex4): exempt payloads with a long printable run
 REGEX 2 -> reg:b.2
 if reg:b.2 == True: RETURN allow_all
-# Rule 7 (Ex3, printable fraction > 50 %) is not expressible in CensorLang:
-# it needs a per-byte count, i.e. a loop.  This is one of the language's
-# documented expressiveness limits.
+# Rule 7 (Ex3, printable fraction > 50 %) is not applied by this program.
 # Rule 5: Popcount check (avg bits per byte must be in [3.4, 4.6])
 if field:transport.payload.avg_popcount < 3.4: RETURN allow_all
 if field:transport.payload.avg_popcount > 4.6: RETURN allow_all
