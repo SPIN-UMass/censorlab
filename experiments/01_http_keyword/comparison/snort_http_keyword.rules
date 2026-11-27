@@ -1,0 +1,4 @@
+# Snort 3 rule for HTTP keyword filtering (Scenario 01).
+# Matches the GFW keyword list against the request URI buffer of http_inspect.
+# `reject` sends a TCP RST inline; in PCAP (-r) mode it is logged as an alert.
+reject tcp any any -> any 80 (msg:"CensorLab exp01 forbidden HTTP keyword"; flow:to_server,established; http_uri; pcre:"/(falun|falungong|freegate|ultrasurf|dynaweb|tiananmen|dalailama|tianwang|tibetpost|minghui|epochtimes|ntdtv|wujie|zhengjian|edoors|renminbao|xinsheng|aboluowang|bannedbook|boxun|chinadigitaltimes|dongtaiwang|greatfire|huaglad|kanzhongguo|minzhuzhongguo|pincong|rfa|secretchina|soundofhope|voachinese|wangzhuan|weijingsheng|weiquanwang|zhuichaguoji)/i"; sid:1000001; rev:1;)

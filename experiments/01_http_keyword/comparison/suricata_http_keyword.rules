@@ -1,0 +1,5 @@
+# Suricata rule for HTTP keyword filtering (Scenario 01).
+# Matches the GFW keyword list against the parsed request URI (the scenario
+# places the keyword in the URI).  `reject` makes Suricata send a TCP RST in
+# IPS mode; in PCAP (-r) mode it is logged as an alert.
+reject http any any -> any 80 (msg:"CensorLab exp01 forbidden HTTP keyword"; flow:to_server,established; http.uri; pcre:"/(falun|falungong|freegate|ultrasurf|dynaweb|tiananmen|dalailama|tianwang|tibetpost|minghui|epochtimes|ntdtv|wujie|zhengjian|edoors|renminbao|xinsheng|aboluowang|bannedbook|boxun|chinadigitaltimes|dongtaiwang|greatfire|huaglad|kanzhongguo|minzhuzhongguo|pincong|rfa|secretchina|soundofhope|voachinese|wangzhuan|weijingsheng|weiquanwang|zhuichaguoji)/i"; sid:1000001; rev:1;)

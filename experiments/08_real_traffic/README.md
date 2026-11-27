@@ -60,6 +60,11 @@ python3 experiments/08_real_traffic/scripts/analyze.py   # results/real_traffic.
 
 Subsets: `SCENARIOS="03_tls_sni" MIXES="bg0 bg90k" TOOLS="PyCL Zeek" bash …/run.sh`.
 
+The Suricata and Snort rows of `01_http_keyword` were measured in a separate
+session from the other tools of that scenario (same harness, mixes, iteration
+count and host) and merged into the existing result files; a `TOOLS` subset run
+otherwise replaces a result directory rather than adding to it.
+
 The generated mixes in `pcap/` are on the local disk (as before); a full
 `prepare.sh` writes ~0.5 GB per background (measured for USTC: 515 MB).
 
